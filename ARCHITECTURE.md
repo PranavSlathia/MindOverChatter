@@ -1,0 +1,1482 @@
+# MindOverChatter - System Architecture
+
+> Fundamental blueprint for the AI-Powered Hinglish Mental Wellness Companion
+
+---
+
+## Table of Contents
+
+1. [System Overview](#1-system-overview)
+2. [Service Topology](#2-service-topology)
+3. [Data Flow Diagrams](#3-data-flow-diagrams)
+4. [Claude Agent SDK Architecture](#4-claude-agent-sdk-architecture)
+5. [WebSocket Protocol (JSON-RPC)](#5-websocket-protocol-json-rpc)
+6. [Database Architecture](#6-database-architecture)
+7. [Memory Architecture](#7-memory-architecture)
+8. [AI Pipeline Architecture](#8-ai-pipeline-architecture)
+9. [Crisis Detection Pipeline](#9-crisis-detection-pipeline)
+10. [Error Handling](#10-error-handling)
+11. [File Storage](#11-file-storage)
+12. [Security Architecture](#12-security-architecture)
+13. [Electron Migration Path](#13-electron-migration-path)
+
+---
+
+## 1. System Overview
+
+MindOverChatter is a multimodal mental wellness app built as a monorepo web application with Python AI microservices. The core conversation engine is the **Claude Agent SDK**, which wraps the local Claude Code binary to drive therapy sessions programmatically.
+
+### Design Principles
+
+- **Single database** - PostgreSQL + pgvector for everything (relational + vectors)
+- **Browser-side privacy** - Facial emotion detection runs in-browser, zero images leave the device
+- **Typed everything** - End-to-end TypeScript with shared Zod schemas; Python services have typed contracts
+- **No fallbacks** - Primary choices only, no fallback chains
+- **Claude-native** - Agent SDK drives sessions using local Claude binary, MCP for DB access, skills for therapeutic frameworks
+
+### High-Level System Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              USER'S BROWSER                            │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                     React Frontend (apps/web)                    │  │
+│  │                                                                  │  │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │  │
+│  │  │  Chat UI     │  │ Dashboard    │  │ face-api.js            │  │  │
+│  │  │  (streaming) │  │ (mood/PHQ/   │  │ (TensorFlow.js)        │  │  │
+│  │  │             │  │  GAD charts) │  │ 7 emotions → JSON only │  │  │
+│  │  └──────┬──────┘  └──────┬───────┘  └───────────┬────────────┘  │  │
+│  │         │                │                      │               │  │
+│  │         │    WebSocket (JSON-RPC)               │               │  │
+│  │         └────────────────┼──────────────────────┘               │  │
+│  └──────────────────────────┼──────────────────────────────────────┘  │
+│                             │           │                              │
+│              ┌──────────────┘     Audio Upload (HTTP)                  │
+│              │                   to services directly                  │
+│              │              ┌────────┴────────┐                        │
+└──────────────┼──────────────┼────────────────┼────────────────────────┘
+               │              │                │
+               ▼              ▼                ▼
+┌──────────────────┐  ┌─────────────┐  ┌─────────────┐
+│   Hono Server    │  │  whisper-   │  │  emotion-   │
+│   (apps/server)  │  │  service    │  │  service    │
+│                  │  │             │  │             │
+│  ┌────────────┐  │  │ faster-     │  │ SenseVoice  │
+│  │ Claude     │  │  │ whisper     │  │ + librosa   │
+│  │ Agent SDK  │  │  │ large-v3-   │  │             │
+│  │            │  │  │ turbo       │  │ POST        │
+│  │ ┌────────┐ │  │  │             │  │ /analyze    │
+│  │ │ Skills │ │  │  │ POST        │  │             │
+│  │ │ Hooks  │ │  │  │ /transcribe │  └─────────────┘
+│  │ │ MCP    │ │  │  │             │
+│  │ └────────┘ │  │  └─────────────┘  ┌─────────────┐
+│  └─────┬──────┘  │                   │  tts-service │
+│        │         │                   │             │
+│  ┌─────┴──────┐  │                   │ Kokoro TTS  │
+│  │ Drizzle ORM│  │                   │ 82M params  │
+│  └─────┬──────┘  │                   │             │
+│        │         │                   │ POST        │
+└────────┼─────────┘                   │ /synthesize │
+         │                             └─────────────┘
+         ▼
+┌──────────────────┐
+│  PostgreSQL 16   │
+│  + pgvector      │
+│                  │
+│  sessions        │
+│  messages        │
+│  emotion_readings│
+│  mood_logs       │
+│  assessments     │
+│  memories        │
+│  user_profiles   │
+└──────────────────┘
+```
+
+---
+
+## 2. Service Topology
+
+### Docker Compose Services
+
+| Service | Container | Port | Responsibility |
+|---|---|---|---|
+| **web** | `moc-web` | 5173 | React frontend (Vite dev / nginx prod) |
+| **server** | `moc-server` | 3000 | Hono backend + Claude Agent SDK + WebSocket |
+| **db** | `pgvector/pgvector:pg16` | 5432 | PostgreSQL 16 + pgvector extension |
+| **whisper** | `moc-whisper` | 8001 | faster-whisper STT (large-v3-turbo) |
+| **emotion** | `moc-emotion` | 8002 | SenseVoice voice emotion + librosa prosody |
+| **tts** | `moc-tts` | 8003 | Kokoro TTS (82M params) |
+
+### Service Communication Map
+
+```
+web ──WebSocket──► server ──Drizzle──► db
+ │                   │
+ │                   ├──MCP──► db (Claude Agent SDK direct DB access)
+ │                   │
+ │                   └──HTTP──► tts (POST /synthesize)
+ │
+ ├──HTTP──► whisper  (POST /transcribe)
+ │
+ └──HTTP──► emotion  (POST /analyze)
+```
+
+**Key pattern**: Frontend sends audio directly to Python services (parallel). Frontend sends the merged results + text to the Hono server via WebSocket. This avoids double-hop latency for audio processing.
+
+### Network
+
+All services on a shared Docker network (`moc-net`). No service exposed externally except `web` (5173) and `server` (3000) for local development.
+
+---
+
+## 3. Data Flow Diagrams
+
+### 3.1 Text Conversation Flow
+
+```
+User types message
+        │
+        ▼
+[Frontend] ──WebSocket JSON-RPC──► [Hono Server]
+                                        │
+                                        ▼
+                                  [Crisis Detector]
+                                  (PreToolUse hook)
+                                        │
+                                   ┌────┴────┐
+                                   │ Crisis?  │
+                                   └────┬────┘
+                                   NO   │   YES
+                                   │    │    │
+                                   ▼    │    ▼
+                            [Agent SDK] │  [Hard-coded crisis
+                             query()    │   response + resources]
+                                   │    │
+                                   ▼    │
+                            [Claude Sonnet 4]
+                            Context:
+                            - System prompt (~500 tok)
+                            - User profile (~500 tok)
+                            - Last session summary (~300 tok)
+                            - Retrieved memories (~1500 tok)
+                            - Current history (~1200 tok)
+                                   │
+                                   ▼
+                            [Streaming response]
+                                   │
+                                   ▼
+                            [PostToolUse hooks]
+                            - Extract emotions
+                            - Extract key facts
+                            - Update Mem0
+                            - Write to DB via Drizzle
+                                   │
+                                   ▼
+[Frontend] ◄──WebSocket stream──── [Hono Server]
+        │
+        ▼
+  Render AI response
+  (streaming, token by token)
+```
+
+### 3.2 Voice Input Flow (Parallel Processing)
+
+```
+User records audio utterance
+        │
+        ▼
+[Frontend] captures audio blob (WebAudio API)
+        │
+        ├──HTTP POST──► [whisper-service /transcribe]
+        │                       │
+        │                       ▼
+        │                 faster-whisper (large-v3-turbo)
+        │                 CTranslate2 + INT8 quantization
+        │                       │
+        │                       ▼
+        │                 {text, language, timestamps}
+        │
+        └──HTTP POST──► [emotion-service /analyze]
+                                │
+                                ▼
+                          SenseVoice-Small
+                          (ASR + emotion in one pass, 70ms/10s)
+                                │
+                                ▼
+                          {emotion: "happy"|"sad"|"angry"|"neutral",
+                           confidence: 0.85}
+                                │
+                                ▼
+                          librosa prosody extraction
+                          (pitch, MFCCs, energy, spectral)
+                                │
+                                ▼
+                          {prosody: {pitch_mean, pitch_std,
+                           energy_mean, speaking_rate, mfcc_summary}}
+
+[Frontend] receives both responses (Promise.all)
+        │
+        ▼
+  Merge: {text, voice_emotion, prosody}
+        │
+        ▼
+  Send merged payload via WebSocket to [Hono Server]
+        │
+        ▼
+  (continues as Text Conversation Flow with enriched context)
+```
+
+### 3.3 Facial Emotion Flow (Browser-Side)
+
+```
+[Frontend] - face-api.js running in-browser
+        │
+        ▼
+  Webcam frames ──► TinyFaceDetector (15-30 FPS)
+        │
+        ▼
+  FER model (TensorFlow.js, ~7MB cached)
+        │
+        ▼
+  7-emotion JSON scores per frame:
+  {happy: 0.85, neutral: 0.12, sad: 0.01, angry: 0.01,
+   fearful: 0.00, disgusted: 0.00, surprised: 0.01}
+        │
+        ▼
+  Smoothing: rolling average over last N frames
+  (reduce jitter, emit stable readings)
+        │
+        ▼
+  [WebSocket] ──JSON-RPC "emotion.face_update"──► [Hono Server]
+        │
+        ▼
+  Store in emotion_readings table (face channel)
+  Inject into Claude context as supplementary signal
+
+  *** ZERO facial images ever leave the browser ***
+  *** Visual indicator shown when active ***
+  *** User can opt-out at any time ***
+```
+
+### 3.4 TTS Response Flow
+
+```
+[Claude generates text response]
+        │
+        ▼
+[Hono Server] ──HTTP POST──► [tts-service /synthesize]
+                                     │
+                                     ▼
+                               Kokoro TTS (82M params)
+                               2x real-time on CPU
+                               Hindi support
+                                     │
+                                     ▼
+                               Audio buffer (WAV/MP3)
+                                     │
+                                     ▼
+[Hono Server] ◄── audio binary ──────┘
+        │
+        ▼
+  Save to filesystem (Docker volume)
+  Store reference in messages table
+        │
+        ▼
+[Frontend] ◄──WebSocket (audio URL or base64 chunk)
+        │
+        ▼
+  Play audio via Web Audio API
+```
+
+### 3.5 Session Lifecycle Flow
+
+```
+User opens app / starts new session
+        │
+        ▼
+[Frontend] ──WebSocket "session.start"──► [Hono Server]
+        │
+        ▼
+  Create new session record in DB
+  (status: active, started_at: now())
+        │
+        ▼
+  Initialize Claude Agent SDK session:
+  - Load system prompt (~500 tokens) with therapeutic framework
+  - Retrieve user profile from DB (~500 tokens)
+  - Retrieve last session summary (~300 tokens)
+  - Query Mem0 for relevant memories (~1500 tokens)
+  - Total context budget: ~4000 tokens
+        │
+        ▼
+  SDK session ready, awaiting user input
+        │
+        ▼
+  ... conversation turns ...
+        │
+        ▼
+  User ends session OR inactivity timeout
+        │
+        ▼
+[Hono Server]
+  1. Generate session summary via Claude (300-500 words)
+     Themes, insights, cognitive patterns, action items
+  2. Generate embedding for session summary
+  3. Store summary + embedding in DB
+  4. Update Mem0 with extracted facts
+  5. Update session record (status: completed, ended_at: now())
+  6. Check if weekly/monthly rollup needed
+        │
+        ▼
+[Frontend] ◄──WebSocket "session.ended"──── [Hono Server]
+        │
+        ▼
+  Show session summary card
+```
+
+---
+
+## 4. Claude Agent SDK Architecture
+
+### SDK Integration Layer
+
+```
+apps/server/src/sdk/
+├── session-manager.ts      # Create, resume, end SDK sessions
+├── message-transformer.ts  # SDK streaming → JSON-RPC WebSocket events
+├── skill-loader.ts         # Load .claude/skills/*.md as system context
+├── hook-registry.ts        # Register PreToolUse, PostToolUse hooks
+├── mcp-config.ts           # MCP server configurations
+└── types.ts                # SDK-related TypeScript types
+```
+
+### Session Manager
+
+```typescript
+// Conceptual architecture (not implementation)
+
+interface TherapySession {
+  id: string;                    // UUID
+  sdkSessionId: string;          // Claude SDK session ID for resume
+  userId: string;                // User identifier
+  status: 'active' | 'completed' | 'crisis_escalated';
+  contextBudget: {
+    systemPrompt: number;        // ~500 tokens
+    userProfile: number;         // ~500 tokens
+    lastSummary: number;         // ~300 tokens
+    retrievedMemories: number;   // ~1500 tokens
+    conversationHistory: number; // ~1200 tokens
+  };
+}
+
+// Session lifecycle:
+// 1. createSession() → new SDK query with full context
+// 2. sendMessage()   → stream via SDK async generator
+// 3. endSession()    → generate summary, update Mem0, close SDK session
+```
+
+### SDK Query Configuration
+
+```typescript
+// Conceptual configuration shape
+{
+  prompt: userMessage,
+  options: {
+    systemPrompt: buildTherapeuticPrompt(userProfile, memories, lastSummary),
+    model: "sonnet",                    // Claude Sonnet 4
+    allowedTools: [
+      "mcp__postgres__query",           // DB read/write via MCP
+    ],
+    mcpServers: {
+      postgres: {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-postgres", DATABASE_URL]
+      }
+    },
+    hooks: {
+      PreToolUse: [crisisDetectionHook],
+      PostToolUse: [auditLogHook, memoryExtractionHook]
+    },
+    resume: previousSdkSessionId,       // Cross-session continuity
+  }
+}
+```
+
+### Hook Architecture
+
+```
+                    User message arrives
+                           │
+                           ▼
+                 ┌─────────────────────┐
+                 │   PreToolUse Hooks  │
+                 │                     │
+                 │  1. Crisis detector │──── YES ──► Hard-coded crisis response
+                 │     (keyword +      │              + helpline numbers
+                 │      classifier)    │              + session flagged
+                 │                     │
+                 │  2. Input validator │──── INVALID ──► Reject with typed error
+                 │     (Zod schema)    │
+                 │                     │
+                 └─────────┬───────────┘
+                           │ PASS
+                           ▼
+                 ┌─────────────────────┐
+                 │  Claude SDK query() │
+                 │  (streaming)        │
+                 └─────────┬───────────┘
+                           │
+                           ▼
+                 ┌─────────────────────┐
+                 │  PostToolUse Hooks  │
+                 │                     │
+                 │  1. Emotion extract │──► Store in emotion_readings
+                 │  2. Fact extraction │──► Update Mem0
+                 │  3. Audit logger    │──► Log to DB
+                 │  4. Mood inference  │──► Update mood_logs
+                 │                     │
+                 └─────────────────────┘
+```
+
+### Skills (Therapeutic Frameworks)
+
+```
+.claude/skills/
+├── cbt-thought-record.md       # CBT cycle: Situation → Thought → Emotion
+│                                 #   → Evidence → Balanced Thought → Outcome
+├── mi-oars.md                  # Motivational Interviewing:
+│                                 #   Open questions, Affirmations,
+│                                 #   Reflections (2:1 ratio), Summaries
+├── darn-cat.md                 # Change talk detection:
+│                                 #   Desire, Ability, Reason, Need,
+│                                 #   Commitment, Activation, Taking steps
+├── cognitive-distortions.md    # Detection + gentle labeling:
+│                                 #   All-or-nothing, catastrophizing,
+│                                 #   mind reading, should-statements,
+│                                 #   emotional reasoning
+├── crisis-protocol.md          # Crisis detection rules, escalation paths,
+│                                 #   helpline numbers, hard-coded responses
+└── hinglish-conversation.md    # Hinglish tone, cultural framing,
+                                  #   stigma-free language guidelines
+```
+
+---
+
+## 5. WebSocket Protocol (JSON-RPC)
+
+### Connection
+
+```
+ws://localhost:3000/ws
+```
+
+Single WebSocket connection per client session. All real-time communication flows through this channel.
+
+### Message Format (JSON-RPC 2.0)
+
+```typescript
+// Request (client → server)
+interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  id: string;              // UUID for request correlation
+  method: string;          // Namespaced method name
+  params: Record<string, unknown>;
+}
+
+// Response (server → client)
+interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: string;              // Matches request ID
+  result?: unknown;        // Success payload
+  error?: {                // Error payload (mutually exclusive with result)
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+// Notification (server → client, no ID = no response expected)
+interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params: Record<string, unknown>;
+}
+```
+
+### Method Registry
+
+#### Client → Server (Requests)
+
+| Method | Params | Description |
+|---|---|---|
+| `session.start` | `{}` | Start new therapy session |
+| `session.end` | `{sessionId}` | End current session |
+| `message.send` | `{sessionId, text, voiceEmotion?, facialEmotion?, prosody?}` | Send message with optional multimodal context |
+| `emotion.face_update` | `{sessionId, scores: EmotionScores}` | Periodic facial emotion update from face-api.js |
+| `assessment.submit` | `{sessionId, type: "phq9"|"gad7", answers: number[]}` | Submit clinical assessment |
+| `mood.log` | `{sessionId, valence: number, arousal: number}` | Manual mood log (circumplex model) |
+| `memory.query` | `{query: string}` | Search user's memory (for dashboard) |
+| `session.history` | `{limit, offset}` | Fetch past sessions list |
+
+#### Server → Client (Notifications)
+
+| Method | Params | Description |
+|---|---|---|
+| `ai.chunk` | `{sessionId, text, done: boolean}` | Streaming AI response token |
+| `ai.thinking` | `{sessionId}` | AI is processing (show typing indicator) |
+| `ai.response_complete` | `{sessionId, messageId, fullText}` | Full response assembled |
+| `ai.audio_ready` | `{sessionId, audioUrl}` | TTS audio available for playback |
+| `session.started` | `{sessionId, resumedFrom?}` | Session successfully initialized |
+| `session.ended` | `{sessionId, summary}` | Session ended with summary |
+| `session.crisis` | `{resources: CrisisResource[]}` | Crisis detected, resources surfaced |
+| `emotion.ai_detected` | `{sessionId, emotion, source: "text"|"context"}` | AI detected emotion in conversation |
+| `assessment.due` | `{type: "phq9"|"gad7"}` | Time for periodic assessment |
+| `error` | `{code, message, data?}` | Typed error notification |
+
+### Example Message Exchange
+
+```json
+// Client sends message with multimodal context
+→ {
+    "jsonrpc": "2.0",
+    "id": "msg-001",
+    "method": "message.send",
+    "params": {
+      "sessionId": "sess-abc123",
+      "text": "Aaj bahut anxious feel ho raha hai",
+      "voiceEmotion": {"emotion": "sad", "confidence": 0.72},
+      "prosody": {"pitch_mean": 180, "energy_mean": 0.3, "speaking_rate": 3.2},
+      "facialEmotion": {"sad": 0.45, "neutral": 0.35, "anxious": 0.15}
+    }
+  }
+
+// Server streams response
+← {"jsonrpc": "2.0", "method": "ai.thinking", "params": {"sessionId": "sess-abc123"}}
+← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "Main ", "done": false}}
+← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "samajh ", "done": false}}
+← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "sakta ", "done": false}}
+← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "hoon...", "done": false}}
+← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "", "done": true}}
+← {"jsonrpc": "2.0", "method": "ai.response_complete", "params": {"sessionId": "sess-abc123", "messageId": "msg-resp-001", "fullText": "Main samajh sakta hoon..."}}
+← {"jsonrpc": "2.0", "method": "ai.audio_ready", "params": {"sessionId": "sess-abc123", "audioUrl": "/audio/msg-resp-001.wav"}}
+
+// Server confirms original request
+← {"jsonrpc": "2.0", "id": "msg-001", "result": {"messageId": "msg-req-001", "received": true}}
+```
+
+---
+
+## 6. Database Architecture
+
+### PostgreSQL 16 + pgvector
+
+Single database, single source of truth. pgvector extension enables vector similarity search alongside relational queries.
+
+### Schema Overview
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│ user_profiles │────►│    sessions      │────►│    messages       │
+│              │     │                  │     │                  │
+│ id (PK)      │     │ id (PK)          │     │ id (PK)          │
+│ display_name │     │ user_id (FK)     │     │ session_id (FK)  │
+│ core_traits  │     │ status           │     │ role             │
+│ patterns     │     │ started_at       │     │ content          │
+│ goals        │     │ ended_at         │     │ audio_file_path  │
+│ profile_emb  │     │ summary          │     │ created_at       │
+│ created_at   │     │ summary_embedding│     └────────┬─────────┘
+│ updated_at   │     │ themes           │              │
+└──────────────┘     │ created_at       │              │
+                     └──────────────────┘     ┌────────▼─────────┐
+                                              │ emotion_readings │
+┌──────────────────┐                          │                  │
+│  mood_logs       │                          │ id (PK)          │
+│                  │                          │ message_id (FK)  │
+│ id (PK)          │                          │ session_id (FK)  │
+│ session_id (FK)  │                          │ channel          │
+│ user_id (FK)     │                          │ (text|voice|face)│
+│ valence          │                          │ emotion_label    │
+│ arousal          │                          │ confidence       │
+│ source           │                          │ raw_scores       │
+│ created_at       │                          │ prosody_data     │
+└──────────────────┘                          │ created_at       │
+                                              └──────────────────┘
+┌──────────────────┐     ┌──────────────────┐
+│  assessments     │     │   memories       │
+│                  │     │                  │
+│ id (PK)          │     │ id (PK)          │
+│ session_id (FK)  │     │ user_id (FK)     │
+│ user_id (FK)     │     │ content          │
+│ type (phq9|gad7) │     │ category         │
+│ answers (jsonb)  │     │ importance       │
+│ total_score      │     │ embedding        │
+│ severity         │     │ source_session   │
+│ created_at       │     │ created_at       │
+└──────────────────┘     │ updated_at       │
+                         └──────────────────┘
+
+┌──────────────────────────┐
+│  session_summaries       │
+│                          │
+│ id (PK)                  │
+│ session_id (FK)          │
+│ user_id (FK)             │
+│ level                    │
+│ (turn|session|weekly|    │
+│  monthly|profile)        │
+│ content                  │
+│ embedding (vector)       │
+│ themes (text[])          │
+│ cognitive_patterns       │
+│ (text[])                 │
+│ action_items (text[])    │
+│ period_start             │
+│ period_end               │
+│ created_at               │
+└──────────────────────────┘
+```
+
+### Drizzle Schema (Key Tables)
+
+```typescript
+// Conceptual schema definition
+
+// user_profiles
+{
+  id: uuid().primaryKey(),
+  displayName: text(),
+  coreTraits: jsonb(),          // Persistent personality traits
+  patterns: jsonb(),            // Long-term behavioral patterns
+  goals: jsonb(),               // Long-term therapeutic goals
+  profileEmbedding: vector(1024), // For semantic matching
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+}
+
+// sessions
+{
+  id: uuid().primaryKey(),
+  userId: uuid().references(userProfiles.id),
+  sdkSessionId: text(),         // Claude Agent SDK session ID
+  status: text(),               // 'active' | 'completed' | 'crisis_escalated'
+  summary: text(),              // 300-500 word session summary
+  summaryEmbedding: vector(1024),
+  themes: text().array(),
+  startedAt: timestamp(),
+  endedAt: timestamp(),
+  createdAt: timestamp(),
+}
+
+// messages
+{
+  id: uuid().primaryKey(),
+  sessionId: uuid().references(sessions.id),
+  role: text(),                 // 'user' | 'assistant'
+  content: text(),              // Message text
+  audioFilePath: text(),        // Path to audio file if voice
+  createdAt: timestamp(),
+}
+
+// emotion_readings
+{
+  id: uuid().primaryKey(),
+  messageId: uuid().references(messages.id),
+  sessionId: uuid().references(sessions.id),
+  channel: text(),              // 'text' | 'voice' | 'face'
+  emotionLabel: text(),         // Primary emotion detected
+  confidence: real(),           // 0-1 confidence score
+  rawScores: jsonb(),           // Full emotion distribution
+  prosodyData: jsonb(),         // Pitch, energy, MFCCs (voice only)
+  createdAt: timestamp(),
+}
+
+// mood_logs
+{
+  id: uuid().primaryKey(),
+  sessionId: uuid().references(sessions.id),
+  userId: uuid().references(userProfiles.id),
+  valence: real(),              // -1 to +1 (pleasant <-> unpleasant)
+  arousal: real(),              // 0 to 1 (deactivated <-> activated)
+  source: text(),               // 'user_input' | 'ai_inferred' | 'assessment'
+  createdAt: timestamp(),
+}
+
+// assessments
+{
+  id: uuid().primaryKey(),
+  sessionId: uuid().references(sessions.id),
+  userId: uuid().references(userProfiles.id),
+  type: text(),                 // 'phq9' | 'gad7'
+  answers: jsonb(),             // Array of 0-3 per question
+  totalScore: integer(),        // PHQ-9: 0-27, GAD-7: 0-21
+  severity: text(),             // 'minimal' | 'mild' | 'moderate' | 'moderately_severe' | 'severe'
+  createdAt: timestamp(),
+}
+
+// memories (Mem0 managed, queryable via Drizzle)
+{
+  id: uuid().primaryKey(),
+  userId: uuid().references(userProfiles.id),
+  content: text(),              // Extracted fact/memory
+  category: text(),             // 'personal' | 'emotional' | 'behavioral' | 'goal' | 'relationship'
+  importance: real(),           // 0-1 importance score
+  embedding: vector(1024),      // For semantic retrieval
+  sourceSessionId: uuid(),      // Which session this was extracted from
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+}
+
+// session_summaries (hierarchical memory)
+{
+  id: uuid().primaryKey(),
+  sessionId: uuid().references(sessions.id),
+  userId: uuid().references(userProfiles.id),
+  level: text(),                // 'turn' | 'session' | 'weekly' | 'monthly' | 'profile'
+  content: text(),
+  embedding: vector(1024),
+  themes: text().array(),
+  cognitivePatterns: text().array(),
+  actionItems: text().array(),
+  periodStart: timestamp(),
+  periodEnd: timestamp(),
+  createdAt: timestamp(),
+}
+```
+
+### Key Indexes
+
+```sql
+-- Vector similarity searches
+CREATE INDEX idx_memories_embedding ON memories USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_session_summaries_embedding ON session_summaries USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_user_profiles_embedding ON user_profiles USING ivfflat (profile_embedding vector_cosine_ops);
+
+-- Temporal queries
+CREATE INDEX idx_sessions_user_started ON sessions (user_id, started_at DESC);
+CREATE INDEX idx_messages_session_created ON messages (session_id, created_at);
+CREATE INDEX idx_emotion_readings_session ON emotion_readings (session_id, created_at);
+CREATE INDEX idx_mood_logs_user_created ON mood_logs (user_id, created_at DESC);
+CREATE INDEX idx_assessments_user_type ON assessments (user_id, type, created_at DESC);
+
+-- Combined temporal + vector (the killer query pattern)
+CREATE INDEX idx_memories_user_created ON memories (user_id, created_at DESC);
+-- Then: WHERE user_id = $1 AND created_at >= interval ORDER BY embedding <=> query LIMIT 5
+```
+
+### Temporal + Vector Query Pattern
+
+```sql
+-- "What was I feeling last month?" type queries
+SELECT content, emotion_label, created_at
+FROM session_summaries
+WHERE user_id = $1
+  AND created_at >= NOW() - INTERVAL '30 days'
+ORDER BY embedding <=> $2  -- cosine similarity to query embedding
+LIMIT 5;
+```
+
+---
+
+## 7. Memory Architecture
+
+### Overview
+
+Three-layer memory system: **Mem0** (automatic fact extraction), **Hierarchical Summaries** (temporal compression), and **pgvector** (unified storage).
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     MEMORY ARCHITECTURE                        │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Layer 1: Per-Turn Extraction                            │  │
+│  │  PostToolUse hook after each Claude response             │  │
+│  │  → Extract emotional state                               │  │
+│  │  → Extract key facts → Mem0                              │  │
+│  │  → Store emotion_reading in DB                           │  │
+│  └──────────────────────────────┬───────────────────────────┘  │
+│                                 │                              │
+│  ┌──────────────────────────────▼───────────────────────────┐  │
+│  │  Layer 2: Session Summary (on session end)               │  │
+│  │  Claude generates 300-500 word summary:                  │  │
+│  │  → Themes, insights, cognitive patterns, action items    │  │
+│  │  → Embed with BAAI/bge-m3                               │  │
+│  │  → Store in session_summaries (level: 'session')         │  │
+│  └──────────────────────────────┬───────────────────────────┘  │
+│                                 │                              │
+│  ┌──────────────────────────────▼───────────────────────────┐  │
+│  │  Layer 3: Weekly Rollup (every 7 days)                   │  │
+│  │  Aggregate session summaries from past week:             │  │
+│  │  → Patterns across sessions                              │  │
+│  │  → Progress on goals                                     │  │
+│  │  → Store in session_summaries (level: 'weekly')          │  │
+│  └──────────────────────────────┬───────────────────────────┘  │
+│                                 │                              │
+│  ┌──────────────────────────────▼───────────────────────────┐  │
+│  │  Layer 4: Monthly Synthesis (every 30 days)              │  │
+│  │  Aggregate weekly rollups:                               │  │
+│  │  → Long-term patterns, growth areas, recurring concerns  │  │
+│  │  → Store in session_summaries (level: 'monthly')         │  │
+│  └──────────────────────────────┬───────────────────────────┘  │
+│                                 │                              │
+│  ┌──────────────────────────────▼───────────────────────────┐  │
+│  │  Layer 5: User Profile (~2K tokens, always in context)   │  │
+│  │  Core traits, persistent patterns, long-term goals       │  │
+│  │  Updated after each monthly synthesis                    │  │
+│  │  → Store in user_profiles table                          │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Mem0 Integration                                        │  │
+│  │  Backend: pgvector (same PostgreSQL instance)            │  │
+│  │  → Automatic fact extraction from conversations          │  │
+│  │  → Stores across vector + key-value stores               │  │
+│  │  → Retrieves by relevance, importance, recency           │  │
+│  │  → 26% higher accuracy than OpenAI memory                │  │
+│  │  → 90% token savings vs full-context                     │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Context Assembly (per new session)                      │  │
+│  │  Total budget: ~4,000 tokens                             │  │
+│  │                                                          │  │
+│  │  System prompt (therapeutic framework)    ~500 tokens    │  │
+│  │  User profile / core memory              ~500 tokens    │  │
+│  │  Most recent session summary             ~300 tokens    │  │
+│  │  Retrieved relevant memories (3-5)       ~1,500 tokens  │  │
+│  │  Current conversation history            ~1,200 tokens  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Memory Retrieval for New Sessions
+
+```
+New session starts
+        │
+        ▼
+  1. Load user profile (always, ~500 tokens)
+        │
+        ▼
+  2. Load most recent session summary (~300 tokens)
+        │
+        ▼
+  3. Query Mem0 with session context:
+     - "What do I know about this user?"
+     - Score by relevance × importance × recency
+     - Select top 3-5 memories (~1,500 tokens)
+        │
+        ▼
+  4. Assemble into system prompt
+        │
+        ▼
+  Context ready for Claude Agent SDK query
+```
+
+---
+
+## 8. AI Pipeline Architecture
+
+### Model Deployment Map
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    AI MODEL DEPLOYMENT                           │
+│                                                                 │
+│  BROWSER (client-side)                                         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  face-api.js (@vladmandic/face-api)                      │  │
+│  │  TensorFlow.js runtime                                   │  │
+│  │  TinyFaceDetector + FER model                            │  │
+│  │  ~7MB cached, 15-30 FPS                                  │  │
+│  │  7 emotions: happy, sad, angry, fearful,                 │  │
+│  │              disgusted, surprised, neutral                │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  HONO SERVER (Node.js)                                         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Claude Agent SDK                                        │  │
+│  │  → Claude Sonnet 4 (primary conversation)                │  │
+│  │  → Claude Haiku (lightweight classification)             │  │
+│  │  → Prompt caching: 1hr cache, min 1024 tokens            │  │
+│  │                                                          │  │
+│  │  Mem0 (Node.js SDK)                                      │  │
+│  │  → Memory extraction and retrieval                       │  │
+│  │  → pgvector backend                                      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  PYTHON MICROSERVICES (Docker)                                 │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐  │
+│  │ whisper-service  │ │ emotion-service │ │ tts-service     │  │
+│  │                  │ │                 │ │                 │  │
+│  │ faster-whisper   │ │ SenseVoice-    │ │ Kokoro TTS      │  │
+│  │ large-v3-turbo   │ │ Small          │ │ 82M params      │  │
+│  │ CTranslate2     │ │ (ASR+emotion   │ │                 │  │
+│  │ INT8 quant      │ │  in one pass)  │ │ POST            │  │
+│  │                  │ │                 │ │ /synthesize     │  │
+│  │ POST             │ │ librosa        │ │                 │  │
+│  │ /transcribe      │ │ (prosody)      │ │ Input: text,    │  │
+│  │                  │ │                 │ │        lang     │  │
+│  │ Input: audio     │ │ POST           │ │ Output: audio   │  │
+│  │ Output: text,    │ │ /analyze       │ │         buffer  │  │
+│  │  lang, timestamps│ │                 │ │                 │  │
+│  │                  │ │ Input: audio    │ └─────────────────┘  │
+│  │                  │ │ Output:emotion, │                      │
+│  │                  │ │  confidence,    │                      │
+│  │                  │ │  prosody scores │                      │
+│  └─────────────────┘ └─────────────────┘                      │
+│                                                                 │
+│  HINGLISH NLP (loaded in emotion-service or standalone)        │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  HingRoBERTa (l3cube-pune/hing-roberta)                  │  │
+│  │  → Text emotion/sentiment classification                 │  │
+│  │                                                          │  │
+│  │  MuRIL (google/muril-base-cased)                         │  │
+│  │  → Romanized Hindi embeddings                            │  │
+│  │                                                          │  │
+│  │  BAAI/bge-m3                                             │  │
+│  │  → General embeddings (100+ languages)                   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Embedding Pipeline
+
+```
+Text input (Hinglish)
+        │
+        ▼
+  BAAI/bge-m3 (self-hosted)
+  Dense + sparse + multi-vector
+  1024-dimensional output
+        │
+        ▼
+  Store in pgvector column
+  (memories.embedding, session_summaries.embedding, etc.)
+        │
+        ▼
+  Queryable via cosine similarity:
+  ORDER BY embedding <=> query_embedding
+```
+
+---
+
+## 9. Crisis Detection Pipeline
+
+**This is MANDATORY and non-negotiable.** Every user message must pass through crisis detection before any other processing.
+
+```
+                    User message arrives
+                           │
+                           ▼
+              ┌────────────────────────────┐
+              │   STAGE 1: Keyword Match   │
+              │   (deterministic, instant)  │
+              │                            │
+              │   Hard-coded keyword list:  │
+              │   - suicide/suicidal        │
+              │   - kill myself             │
+              │   - want to die             │
+              │   - self-harm / cut myself  │
+              │   - end my life             │
+              │   - Hinglish equivalents:   │
+              │     - marna chahta/chahti   │
+              │     - zindagi khatam        │
+              │     - khudkushi             │
+              │                            │
+              └─────────────┬──────────────┘
+                            │
+                     ┌──────┴──────┐
+                     │  MATCHED?   │
+                     └──────┬──────┘
+                       YES  │  NO
+                       │    │   │
+                       ▼    │   ▼
+              ┌─────────┐  │  ┌────────────────────────────┐
+              │ CRISIS!  │  │  │  STAGE 2: Claude Haiku     │
+              │ ESCALATE │  │  │  Classification             │
+              └─────────┘  │  │  (lightweight, fast)         │
+                       │   │  │                              │
+                       │   │  │  Classify message as:        │
+                       │   │  │  - safe                      │
+                       │   │  │  - concerning                │
+                       │   │  │  - crisis                    │
+                       │   │  └──────────────┬───────────────┘
+                       │   │                 │
+                       │   │          ┌──────┴──────┐
+                       │   │          │  CRISIS?    │
+                       │   │          └──────┬──────┘
+                       │   │          YES    │    NO
+                       │   │           │     │     │
+                       ▼   │           ▼     │     ▼
+              ┌────────────────────────┐│  ┌──────────────────┐
+              │  CRISIS RESPONSE       ││  │  CONTINUE NORMAL │
+              │                        ││  │  CONVERSATION    │
+              │  1. Immediately stop   ││  │  FLOW            │
+              │     AI conversation    ││  └──────────────────┘
+              │                        ││
+              │  2. Surface resources:  ││
+              │     - 988 Suicide &    ││
+              │       Crisis Lifeline  ││
+              │     - iCall India:     ││
+              │       9152987821       ││
+              │     - Vandrevala:      ││
+              │       1860-2662-345    ││
+              │                        ││
+              │  3. Flag session as    ││
+              │     crisis_escalated   ││
+              │                        ││
+              │  4. Log to DB for      ││
+              │     safety audit       ││
+              └────────────────────────┘│
+                                        │
+                                        ▼
+                                 (normal flow)
+```
+
+### Critical Rules
+
+- Crisis detection is a **PreToolUse hook** - runs before Claude generates ANY response
+- Keyword matching is **deterministic** - no AI judgment for obvious crisis signals
+- Claude Haiku classification is the **second layer** for subtler signals
+- Crisis response is **hard-coded** - not generated by AI
+- The app **NEVER claims to be a therapist** - always "wellness companion" / "journaling assistant"
+- Session is flagged `crisis_escalated` and logged for safety audit
+
+---
+
+## 10. Error Handling
+
+### Result Pattern (Typed Error Codes)
+
+Every service boundary returns a typed `Result` - no thrown exceptions crossing service boundaries.
+
+```typescript
+// Shared error code enum (packages/shared/src/constants/errors.ts)
+enum ErrorCode {
+  // General
+  INTERNAL_ERROR = "INTERNAL_ERROR",
+  VALIDATION_ERROR = "VALIDATION_ERROR",
+  NOT_FOUND = "NOT_FOUND",
+
+  // Session
+  SESSION_NOT_FOUND = "SESSION_NOT_FOUND",
+  SESSION_ALREADY_ACTIVE = "SESSION_ALREADY_ACTIVE",
+  SESSION_ENDED = "SESSION_ENDED",
+
+  // AI
+  SDK_CONNECTION_FAILED = "SDK_CONNECTION_FAILED",
+  SDK_SESSION_ERROR = "SDK_SESSION_ERROR",
+  MODEL_TIMEOUT = "MODEL_TIMEOUT",
+  CONTEXT_BUDGET_EXCEEDED = "CONTEXT_BUDGET_EXCEEDED",
+
+  // Microservices
+  WHISPER_UNAVAILABLE = "WHISPER_UNAVAILABLE",
+  WHISPER_TRANSCRIPTION_FAILED = "WHISPER_TRANSCRIPTION_FAILED",
+  EMOTION_SERVICE_UNAVAILABLE = "EMOTION_SERVICE_UNAVAILABLE",
+  EMOTION_ANALYSIS_FAILED = "EMOTION_ANALYSIS_FAILED",
+  TTS_UNAVAILABLE = "TTS_UNAVAILABLE",
+  TTS_SYNTHESIS_FAILED = "TTS_SYNTHESIS_FAILED",
+
+  // Database
+  DB_CONNECTION_FAILED = "DB_CONNECTION_FAILED",
+  DB_QUERY_FAILED = "DB_QUERY_FAILED",
+  MEMORY_RETRIEVAL_FAILED = "MEMORY_RETRIEVAL_FAILED",
+
+  // Crisis
+  CRISIS_DETECTED = "CRISIS_DETECTED",  // Not really an "error" but uses same flow
+}
+
+// Result type
+type Result<T> =
+  | { success: true; data: T }
+  | { success: false; error: { code: ErrorCode; message: string; details?: unknown } };
+```
+
+### Error Flow
+
+```
+Service call fails
+        │
+        ▼
+  Return Result<T> with success: false
+  (never throw across service boundaries)
+        │
+        ▼
+  Calling code pattern-matches on error.code
+        │
+        ├── Recoverable? → Retry or degrade gracefully
+        │
+        └── Fatal? → Log to DB + notify frontend via WebSocket error notification
+                     {jsonrpc: "2.0", method: "error", params: {code, message}}
+```
+
+### Python Microservice Error Format
+
+```json
+// HTTP 200 with Result pattern (not HTTP error codes for business logic)
+{"success": false, "error": {"code": "WHISPER_TRANSCRIPTION_FAILED", "message": "Audio too short (<0.5s)", "details": {"duration": 0.3}}}
+
+// HTTP 5xx only for actual infrastructure failures
+```
+
+---
+
+## 11. File Storage
+
+### Local Filesystem (Docker Volume)
+
+```
+volumes/
+├── audio/
+│   ├── recordings/          # User voice recordings
+│   │   └── {session_id}/
+│   │       └── {message_id}.webm
+│   └── tts/                 # AI voice responses
+│       └── {session_id}/
+│           └── {message_id}.wav
+└── models/                  # Cached AI models
+    ├── whisper/             # faster-whisper large-v3-turbo
+    ├── sensevoice/          # SenseVoice-Small
+    ├── kokoro/              # Kokoro TTS 82M
+    ├── hingroberta/         # HingRoBERTa
+    ├── muril/               # MuRIL
+    └── bge-m3/              # BAAI/bge-m3 embeddings
+```
+
+### Docker Volume Mount
+
+```yaml
+volumes:
+  audio-data:
+    driver: local
+  model-cache:
+    driver: local
+
+services:
+  server:
+    volumes:
+      - audio-data:/app/volumes/audio
+  whisper:
+    volumes:
+      - audio-data:/app/volumes/audio:ro   # Read-only access to recordings
+      - model-cache:/app/models
+  emotion:
+    volumes:
+      - audio-data:/app/volumes/audio:ro
+      - model-cache:/app/models
+  tts:
+    volumes:
+      - audio-data:/app/volumes/audio
+      - model-cache:/app/models
+```
+
+### File Naming Convention
+
+```
+recordings:  {session_id}/{message_id}.webm
+tts output:  {session_id}/{message_id}.wav
+```
+
+Database `messages.audio_file_path` stores relative path from `volumes/audio/`.
+
+---
+
+## 12. Security Architecture
+
+### v1 Scope (Personal, Single-User, Local)
+
+Since v1 is personal use running locally via Docker Compose:
+
+| Concern | Approach |
+|---|---|
+| **Auth** | None (single user) |
+| **Network** | All services on internal Docker network, only web + server exposed to localhost |
+| **Facial data** | Never leaves browser - face-api.js processes locally, sends JSON scores only |
+| **Audio data** | Stored in local Docker volume, never transmitted externally |
+| **API keys** | Claude uses local binary auth (existing Claude Code login) |
+| **Database** | Local PostgreSQL, no external access |
+| **Crisis data** | Logged locally for self-review |
+
+### Data Privacy Guarantees
+
+1. **Zero facial images** transmitted to any server - face-api.js runs in-browser
+2. **Audio stays local** - stored in Docker volume, processed by local microservices
+3. **No external API calls** for sensitive data - Claude runs via local binary
+4. **Single PostgreSQL instance** - all data in one place, easy to audit/delete
+5. **Mem0 backend is pgvector** (same DB) - no external memory service calls
+
+### Framing & Liability
+
+- App NEVER claims to be a therapist
+- Framed as "wellness companion" / "journaling assistant"
+- Crisis resources always available
+- Clear disclaimer in UI
+
+---
+
+## 13. Electron Migration Path
+
+When ready to package as a desktop app:
+
+### What Changes
+
+| Component | Web App (v1) | Electron (future) |
+|---|---|---|
+| **React frontend** | Browser at localhost:5173 | Electron renderer (BrowserWindow) |
+| **Hono server** | Node.js process at localhost:3000 | Electron main process |
+| **WebSocket** | ws:// over network | Electron IPC bridge (or local ws://) |
+| **Claude SDK** | Server spawns local binary | Main process has direct binary access |
+| **Docker services** | Docker Compose | Can keep Docker OR bundle Python with app |
+| **File storage** | Docker volume | App data directory (`userData`) |
+| **Database** | Docker PostgreSQL | Embedded SQLite (switch) OR keep Docker PG |
+
+### What Stays The Same
+
+- React component tree (entire UI)
+- Zustand stores
+- WebSocket message protocol (JSON-RPC)
+- All shared types and validators
+- face-api.js in-browser processing
+- Python microservice APIs (if kept in Docker)
+- Claude Agent SDK integration code
+- Drizzle schema definitions (if staying on PG)
+
+### Migration Steps
+
+1. Add Electron shell (`electron-builder` or `electron-forge`)
+2. Move Hono server into Electron main process
+3. Replace WebSocket with Electron IPC (or keep local WebSocket)
+4. Update Claude SDK binary resolution (use 1code's `env.ts` pattern)
+5. Configure auto-updater
+6. Package Python services (or keep Docker requirement)
+
+---
+
+## Appendix A: Service API Contracts
+
+### whisper-service (port 8001)
+
+```
+POST /transcribe
+Content-Type: multipart/form-data
+
+Body: audio file (webm/wav/mp3)
+
+Response:
+{
+  "success": true,
+  "data": {
+    "text": "Aaj bahut anxious feel ho raha hai",
+    "language": "hi",
+    "segments": [
+      {"start": 0.0, "end": 2.5, "text": "Aaj bahut anxious"},
+      {"start": 2.5, "end": 4.1, "text": "feel ho raha hai"}
+    ],
+    "duration": 4.1
+  }
+}
+
+GET /health
+Response: {"status": "ok", "model": "large-v3-turbo"}
+```
+
+### emotion-service (port 8002)
+
+```
+POST /analyze
+Content-Type: multipart/form-data
+
+Body: audio file (webm/wav/mp3)
+
+Response:
+{
+  "success": true,
+  "data": {
+    "emotion": {
+      "label": "sad",
+      "confidence": 0.72,
+      "scores": {
+        "happy": 0.08,
+        "sad": 0.72,
+        "angry": 0.05,
+        "neutral": 0.15
+      }
+    },
+    "prosody": {
+      "pitch_mean": 180.5,
+      "pitch_std": 22.3,
+      "energy_mean": 0.31,
+      "energy_std": 0.08,
+      "speaking_rate": 3.2,
+      "mfcc_summary": [/* 13 coefficients */]
+    }
+  }
+}
+
+GET /health
+Response: {"status": "ok", "models": ["sensevoice-small", "librosa"]}
+```
+
+### tts-service (port 8003)
+
+```
+POST /synthesize
+Content-Type: application/json
+
+Body:
+{
+  "text": "Main samajh sakta hoon ki aap anxious feel kar rahe hain",
+  "language": "hi",
+  "speed": 1.0
+}
+
+Response:
+Content-Type: audio/wav
+Body: audio binary
+
+GET /health
+Response: {"status": "ok", "model": "kokoro-82m", "languages": ["en", "hi"]}
+```
+
+---
+
+## Appendix B: Environment Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://moc:password@db:5432/moc
+
+# Service URLs (internal Docker network)
+WHISPER_SERVICE_URL=http://whisper:8001
+EMOTION_SERVICE_URL=http://emotion:8002
+TTS_SERVICE_URL=http://tts:8003
+
+# Claude (uses local binary auth, no API key needed)
+CLAUDE_MODEL=sonnet
+CLAUDE_HAIKU_MODEL=haiku
+
+# Mem0
+MEM0_BACKEND=pgvector
+MEM0_DATABASE_URL=postgresql://moc:password@db:5432/moc
+
+# Embedding
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSION=1024
+
+# Server
+PORT=3000
+WS_PORT=3000
+NODE_ENV=development
+
+# File storage
+AUDIO_STORAGE_PATH=/app/volumes/audio
+MODEL_CACHE_PATH=/app/models
+```
+
+---
+
+## Appendix C: Docker Compose Structure
+
+```yaml
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+    networks:
+      - moc-net
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://moc:password@db:5432/moc
+      - WHISPER_SERVICE_URL=http://whisper:8001
+      - EMOTION_SERVICE_URL=http://emotion:8002
+      - TTS_SERVICE_URL=http://tts:8003
+    volumes:
+      - audio-data:/app/volumes/audio
+      - ~/.claude:/root/.claude:ro          # Claude binary + auth
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - moc-net
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: moc
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: moc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - moc-net
+
+  whisper:
+    build:
+      context: services/whisper
+    ports:
+      - "8001:8001"
+    volumes:
+      - audio-data:/app/volumes/audio:ro
+      - model-cache:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]    # GPU if available
+    networks:
+      - moc-net
+
+  emotion:
+    build:
+      context: services/emotion
+    ports:
+      - "8002:8002"
+    volumes:
+      - audio-data:/app/volumes/audio:ro
+      - model-cache:/app/models
+    networks:
+      - moc-net
+
+  tts:
+    build:
+      context: services/tts
+    ports:
+      - "8003:8003"
+    volumes:
+      - audio-data:/app/volumes/audio
+      - model-cache:/app/models
+    networks:
+      - moc-net
+
+volumes:
+  pgdata:
+  audio-data:
+  model-cache:
+
+networks:
+  moc-net:
+    driver: bridge
+```

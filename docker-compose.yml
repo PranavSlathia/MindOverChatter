@@ -1,0 +1,96 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+    networks:
+      - moc-net
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://moc:password@db:5432/moc
+      - WHISPER_SERVICE_URL=http://whisper:8001
+      - EMOTION_SERVICE_URL=http://emotion:8002
+      - TTS_SERVICE_URL=http://tts:8003
+    volumes:
+      - audio-data:/app/volumes/audio
+      - ~/.claude:/root/.claude:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - moc-net
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: moc
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: moc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - moc-net
+
+  whisper:
+    build:
+      context: services/whisper
+    ports:
+      - "8001:8001"
+    volumes:
+      - audio-data:/app/volumes/audio:ro
+      - model-cache:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    networks:
+      - moc-net
+
+  emotion:
+    build:
+      context: services/emotion
+    ports:
+      - "8002:8002"
+    volumes:
+      - audio-data:/app/volumes/audio:ro
+      - model-cache:/app/models
+    networks:
+      - moc-net
+
+  tts:
+    build:
+      context: services/tts
+    ports:
+      - "8003:8003"
+    volumes:
+      - audio-data:/app/volumes/audio
+      - model-cache:/app/models
+    networks:
+      - moc-net
+
+volumes:
+  pgdata:
+  audio-data:
+  model-cache:
+
+networks:
+  moc-net:
+    driver: bridge

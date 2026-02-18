@@ -1,0 +1,28 @@
+{
+  "name": "@moc/server",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "hono": "latest",
+    "@hono/node-server": "latest",
+    "@hono/zod-validator": "latest",
+    "drizzle-orm": "latest",
+    "postgres": "latest",
+    "zod": "latest",
+    "ws": "latest",
+    "@moc/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "tsx": "latest",
+    "drizzle-kit": "latest",
+    "vitest": "latest",
+    "@types/ws": "latest"
+  }
+}

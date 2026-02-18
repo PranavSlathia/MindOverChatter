@@ -1,0 +1,36 @@
+{
+  "name": "moc",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+
+    "gen": "hygen",
+
+    "db:generate": "pnpm --filter @moc/server drizzle-kit generate",
+    "db:migrate": "pnpm --filter @moc/server drizzle-kit migrate",
+    "db:push": "pnpm --filter @moc/server drizzle-kit push",
+    "db:studio": "pnpm --filter @moc/server drizzle-kit studio",
+
+    "ui:add": "pnpm --filter @moc/web dlx shadcn@latest add",
+
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose build",
+    "docker:logs": "docker compose logs -f",
+
+    "test:unit": "turbo test:unit",
+    "test:e2e": "pnpm --filter @moc/web exec playwright test",
+    "test:e2e:ui": "pnpm --filter @moc/web exec playwright test --ui"
+  },
+  "devDependencies": {
+    "turbo": "latest",
+    "hygen": "latest",
+    "@biomejs/biome": "latest"
+  }
+}

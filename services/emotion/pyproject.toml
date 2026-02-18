@@ -1,0 +1,17 @@
+[project]
+name = "moc-emotion"
+version = "0.1.0"
+description = "Voice emotion detection using SenseVoice + librosa prosody"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "python-multipart>=0.0.18",
+    "librosa>=0.10.0",
+    "numpy>=1.24.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+]
