@@ -18,6 +18,25 @@ export const assessmentTypeEnum = pgEnum("assessment_type", [
   "functioning",
   "substance_use",
   "relationship",
+  // Wave 1: High-value, low-risk instruments
+  "dass21",
+  "rosenberg_se",
+  "who5",
+  "phq4",
+  "pc_ptsd5",
+  // Wave 2: Personality, loneliness, burnout, adversity, insomnia
+  "ipip_big5",
+  "ucla_loneliness",
+  "copenhagen_burnout",
+  "ace_score",
+  "isi",
+  "harrower_inkblot",
+  // Wave 3: Stress, social support, attachment, trauma, expanded ACE
+  "pss",
+  "mspss",
+  "ecr",
+  "pcl5",
+  "ace_iq",
 ]);
 
 export const assessmentSeverityEnum = pgEnum("assessment_severity", [

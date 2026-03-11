@@ -74,6 +74,22 @@ export function WellbeingMap({ formulation }: WellbeingMapProps) {
                 />
               </div>
               <p className="text-[11px] leading-relaxed text-foreground/50">{signal.evidence}</p>
+              {signal.contributions && signal.contributions.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {signal.contributions.map((c, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] text-foreground/40"
+                    >
+                      {c.assessmentType.toUpperCase()}
+                      {c.subscale ? `.${c.subscale}` : ""}
+                      <span className="ml-0.5 font-mono">
+                        {(c.normalizedScore * 100).toFixed(0)}%
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

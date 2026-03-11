@@ -11,6 +11,9 @@ import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
 import { assessments, memories, messages, moodLogs, sessionSummaries, sessions } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
+import { computeDomainSignals, computeDomainTrends, detectCorrelations } from "./assessment-domain-mapping.js";
+import type { AssessmentInput } from "./assessment-domain-mapping.js";
+import { computeActionRecommendations } from "./assessment-actions.js";
 
 // ── Formulation Cache ───────────────────────────────────────────
 // In-memory cache with 1-hour TTL. Invalidated on new session end.
@@ -302,10 +305,11 @@ const app = new Hono()
         .orderBy(desc(memories.confidence))
         .limit(100),
 
-      // ALL assessments with scores + timestamps
+      // ALL assessments with scores + timestamps + answers (for domain mapping)
       db
         .select({
           type: assessments.type,
+          answers: assessments.answers,
           totalScore: assessments.totalScore,
           severity: assessments.severity,
           createdAt: assessments.createdAt,
@@ -446,6 +450,28 @@ const app = new Hono()
       )
       .join("\n");
 
+    // ── Algorithmic domain signals ──────────────────────────────────
+    // Convert DB rows to AssessmentInput format for domain mapping
+    const assessmentInputs: AssessmentInput[] = assessmentRows
+      .filter((a) => a.answers && Array.isArray(a.answers))
+      .map((a) => ({
+        type: a.type as AssessmentInput["type"],
+        answers: a.answers as number[],
+        totalScore: a.totalScore,
+        severity: a.severity as AssessmentInput["severity"],
+        createdAt: a.createdAt,
+      }));
+
+    const algorithmicDomainSignals = computeDomainSignals(assessmentInputs);
+    const correlations = detectCorrelations(assessmentInputs);
+    const domainTrends = computeDomainTrends(assessmentInputs);
+    const actionRecommendations = computeActionRecommendations(
+      algorithmicDomainSignals,
+      correlations,
+      domainTrends,
+      assessmentInputs,
+    );
+
     const memoryContext = Object.entries(memoryGroups)
       .filter(([, items]) => items.length > 0)
       .map(
@@ -502,7 +528,8 @@ MAPPING RULES:
 - unresolved_thread + maladaptive coping_strategy → formulation.perpetuatingCycles
 - win + goal + supportive relationship → formulation.protectiveStrengths
 - Infer activeStates from ALL data (sessions, memories, assessments, moods)
-- Infer domainSignals across 6 domains: connection, momentum, groundedness, meaning, self_regard, vitality
+- Use the pre-computed Structured Domain Signals as the PRIMARY source for domainSignals output. Enrich with qualitative evidence from sessions and memories, but NEVER contradict algorithmic signals without explicit evidence.
+- Use Action Recommendations to guide questionsWorthExploring.
 - themeOfToday: one sentence capturing the most salient current thread (not a mood label)
 
 QUESTION DEPTH: ${questionDepth}
@@ -523,6 +550,18 @@ ${relationshipContext || "None identified yet."}
 
 === Assessment Results (${assessmentRows.length}) ===
 ${assessmentContext || "None yet."}
+
+=== Structured Domain Signals (algorithmically computed) ===
+${algorithmicDomainSignals.length > 0 ? algorithmicDomainSignals.map((s) => `${s.domain}: level=${s.level}, score=${s.score.toFixed(2)}, confidence=${s.confidence}, contributors: ${s.contributions.map((c) => `${c.source.assessmentType}${c.source.subscale ? '.' + c.source.subscale : ''}(${c.normalizedScore.toFixed(2)}×${c.weight})`).join(', ')}`).join('\n') : "No assessments yet."}
+
+=== Cross-Instrument Correlations ===
+${correlations.length > 0 ? correlations.map((c) => `${c.constructName}: ${c.convergence}${c.divergenceDetail ? ' — ' + c.divergenceDetail : ''}`).join('\n') : "Insufficient data."}
+
+=== Domain Trends (longitudinal) ===
+${domainTrends.length > 0 ? domainTrends.map((t) => `${t.domain}: ${t.previousLevel ?? 'n/a'} → ${t.currentLevel} (${t.trend}, ${t.dataPoints} data points, ${t.periodDays} days)`).join('\n') : "Insufficient data."}
+
+=== Action Recommendations ===
+${actionRecommendations.length > 0 ? actionRecommendations.map((a) => `[${a.priority}] ${a.domain}: ${a.conversationHint} (${a.evidenceSummary})`).join('\n') : "No specific recommendations."}
 
 === Mood Trend ===
 Direction: ${moodTrend.direction}, Period: ${moodTrend.period}
@@ -549,6 +588,25 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
 
         const parsed = JSON.parse(jsonStr);
 
+        // Fallback: patch algorithmic domain signals if Claude didn't provide them
+        let mergedDomainSignals = parsed.domainSignals ?? {};
+        if (Object.keys(mergedDomainSignals).length === 0 && algorithmicDomainSignals.length > 0) {
+          mergedDomainSignals = {};
+          for (const sig of algorithmicDomainSignals) {
+            const trend = domainTrends.find((t) => t.domain === sig.domain);
+            mergedDomainSignals[sig.domain] = {
+              level: sig.level,
+              trend: trend?.trend ?? "stable",
+              evidence: `Algorithmically computed from ${sig.contributions.length} instrument(s).`,
+              contributions: sig.contributions.map((c) => ({
+                assessmentType: c.source.assessmentType,
+                subscale: c.source.subscale,
+                normalizedScore: c.normalizedScore,
+              })),
+            };
+          }
+        }
+
         // Build the formulation response, with safe defaults for missing fields
         formulation = {
           formulation: {
@@ -569,7 +627,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
             encouragement: parsed.userReflection?.encouragement ?? "",
           },
           activeStates: Array.isArray(parsed.activeStates) ? parsed.activeStates : [],
-          domainSignals: parsed.domainSignals ?? {},
+          domainSignals: mergedDomainSignals,
           questionsWorthExploring: Array.isArray(parsed.questionsWorthExploring)
             ? parsed.questionsWorthExploring
             : [],

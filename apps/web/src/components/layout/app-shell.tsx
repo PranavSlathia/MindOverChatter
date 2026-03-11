@@ -8,6 +8,7 @@ interface AppShellProps {
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "MindOverChatter", subtitle: "Your Wellness Companion" },
+  "/assessments": { title: "Assessments", subtitle: "Self-reflection tools and check-ins" },
   "/journey": { title: "Your Journey", subtitle: "Reflections, patterns, and progress" },
   "/history": { title: "Session History", subtitle: "Review past conversations" },
   "/mood": { title: "Mood Tracker", subtitle: "Track how you feel over time" },
@@ -15,7 +16,12 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
 };
 
 function getPageInfo(pathname: string): { title: string; subtitle: string } {
-  return PAGE_TITLES[pathname] ?? { title: "MindOverChatter", subtitle: "" };
+  if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
+  // Assessment flow pages: /assessments/:type
+  if (pathname.startsWith("/assessments/")) {
+    return { title: "Assessment", subtitle: "Take your time with each question" };
+  }
+  return { title: "MindOverChatter", subtitle: "" };
 }
 
 export function AppShell({ children }: AppShellProps) {

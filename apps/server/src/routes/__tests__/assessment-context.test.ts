@@ -51,18 +51,7 @@ describe("buildAssessmentContextBlock", () => {
   });
 
   it("uses human-readable labels for all assessment types", () => {
-    const types: AssessmentType[] = [
-      "phq9",
-      "gad7",
-      "iss_sleep",
-      "panic_screener",
-      "trauma_gating",
-      "functioning",
-      "substance_use",
-      "relationship",
-    ];
-
-    const expectedLabels: Record<AssessmentType, string> = {
+    const expectedLabels: Partial<Record<AssessmentType, string>> = {
       phq9: "PHQ-9 mood check-in",
       gad7: "GAD-7 anxiety check-in",
       iss_sleep: "sleep quality screening",
@@ -71,11 +60,28 @@ describe("buildAssessmentContextBlock", () => {
       functioning: "daily functioning screening",
       substance_use: "substance use screening",
       relationship: "relationship wellbeing screening",
+      dass21: "DASS-21 emotional health check-in",
+      rosenberg_se: "self-esteem check-in",
+      who5: "WHO-5 wellbeing check-in",
+      phq4: "PHQ-4 brief mood and anxiety check-in",
+      pc_ptsd5: "stress response screening",
+      ipip_big5: "personality traits exploration",
+      ucla_loneliness: "social connectedness check-in",
+      copenhagen_burnout: "burnout and energy check-in",
+      ace_score: "early life experiences reflection",
+      isi: "sleep and insomnia check-in",
+      harrower_inkblot: "perceptual style exploration",
+      // Wave 3
+      pss: "perceived stress check-in",
+      mspss: "social support check-in",
+      ecr: "relationship patterns exploration",
+      pcl5: "trauma response check-in",
+      ace_iq: "expanded early life experiences reflection",
     };
 
-    for (const t of types) {
-      const block = buildAssessmentContextBlock(t, "moderate", null);
-      expect(block).toContain(expectedLabels[t]);
+    for (const [t, label] of Object.entries(expectedLabels)) {
+      const block = buildAssessmentContextBlock(t as AssessmentType, "moderate", null);
+      expect(block).toContain(label);
     }
   });
 
@@ -106,6 +112,38 @@ describe("buildAssessmentContextBlock", () => {
     const block = buildAssessmentContextBlock("phq9", "moderate", null);
     expect(block).toContain("gently and naturally");
     expect(block).toContain("without repeating specific scores");
+  });
+
+  it("ECR uses personality framing (no severity)", () => {
+    const block = buildAssessmentContextBlock("ecr", "minimal", null);
+    expect(block).toContain("relationship patterns exploration");
+    expect(block).toContain("self-understanding");
+    expect(block).not.toContain("level of difficulty");
+  });
+
+  it("ace_iq uses sensitive ACE framing", () => {
+    const block = buildAssessmentContextBlock("ace_iq", "moderate", null);
+    expect(block).toContain("expanded early life experiences reflection");
+    expect(block).toContain("childhood experiences");
+    expect(block).not.toContain("level of difficulty");
+  });
+
+  it("PSS uses normal severity framing", () => {
+    const block = buildAssessmentContextBlock("pss", "moderate", null);
+    expect(block).toContain("perceived stress check-in");
+    expect(block).toContain("a moderate level of difficulty");
+  });
+
+  it("MSPSS uses normal severity framing", () => {
+    const block = buildAssessmentContextBlock("mspss", "severe", null);
+    expect(block).toContain("social support check-in");
+    expect(block).toContain("a significant level of difficulty");
+  });
+
+  it("PCL-5 uses normal severity framing", () => {
+    const block = buildAssessmentContextBlock("pcl5", "mild", null);
+    expect(block).toContain("trauma response check-in");
+    expect(block).toContain("a mild level of difficulty");
   });
 });
 

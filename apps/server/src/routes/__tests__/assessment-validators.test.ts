@@ -23,6 +23,12 @@ describe("AssessmentTypeSchema", () => {
   it("rejects unknown type", () => {
     expect(AssessmentTypeSchema.safeParse("unknown").success).toBe(false);
   });
+
+  it("accepts Wave 3 types", () => {
+    for (const t of ["pss", "mspss", "ecr", "pcl5", "ace_iq"]) {
+      expect(AssessmentTypeSchema.safeParse(t).success).toBe(true);
+    }
+  });
 });
 
 describe("AssessmentSeveritySchema", () => {
@@ -59,10 +65,10 @@ describe("SubmitAssessmentSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects missing sessionId", () => {
+  it("accepts missing sessionId (standalone assessments)", () => {
     const { sessionId, ...rest } = validPayload;
     const result = SubmitAssessmentSchema.safeParse(rest);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects non-uuid sessionId", () => {
@@ -195,5 +201,87 @@ describe("SubmitAssessmentSchema", () => {
       parentAssessmentId: "550e8400-e29b-41d4-a716-446655440001",
     });
     expect(result.success).toBe(true);
+  });
+
+  // ── Wave 3 Validators ──────────────────────────────────────────
+
+  it("accepts PSS with 10 answers (0-4 range)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "pss",
+      answers: [0, 1, 2, 3, 4, 0, 1, 2, 3, 4],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects PSS with wrong answer count", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "pss",
+      answers: [0, 1, 2],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts MSPSS with 12 answers (1-7 range)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "mspss",
+      answers: [1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects MSPSS with value 0 (min is 1)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "mspss",
+      answers: [0, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts ECR with 36 answers (1-7 range)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "ecr",
+      answers: Array(36).fill(4),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects ECR with wrong answer count", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "ecr",
+      answers: Array(10).fill(4),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts PCL-5 with 20 answers (0-4 range)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "pcl5",
+      answers: Array(20).fill(2),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects PCL-5 with value 5 (max is 4)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "pcl5",
+      answers: [5, ...Array(19).fill(0)],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts ACE-IQ with 13 answers (0-1 range)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "ace_iq",
+      answers: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects ACE-IQ with value 2 (max is 1)", () => {
+    const result = SubmitAssessmentSchema.safeParse({
+      type: "ace_iq",
+      answers: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -1,9 +1,10 @@
 // ── Assessment Routes ────────────────────────────────────────────
-// POST /  — Submit a completed assessment
+// POST /  — Submit a completed assessment (session-based or standalone)
+// GET /library — Get available assessment instrument metadata
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { SubmitAssessmentSchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
@@ -19,29 +20,85 @@ import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
 
 const app = new Hono()
 
+  // ── GET /library — Available Assessment Instruments ─────────────
+  .get("/library", async (c) => {
+    const user = await getOrCreateUser();
+
+    // Get the user's most recent assessment of each type
+    const recentAssessments = await db
+      .select({
+        type: assessments.type,
+        severity: assessments.severity,
+        createdAt: assessments.createdAt,
+      })
+      .from(assessments)
+      .where(eq(assessments.userId, user.id))
+      .orderBy(desc(assessments.createdAt));
+
+    // Build a map of latest result per type
+    const latestByType: Record<string, { severity: string; createdAt: Date }> = {};
+    for (const row of recentAssessments) {
+      if (!latestByType[row.type]) {
+        latestByType[row.type] = { severity: row.severity, createdAt: row.createdAt };
+      }
+    }
+
+    return c.json({ latestByType });
+  })
+
+  // ── GET /history — Assessment history for a specific type ───────
+  .get("/history/:type", async (c) => {
+    const type = c.req.param("type");
+    const user = await getOrCreateUser();
+
+    const results = await db
+      .select({
+        id: assessments.id,
+        type: assessments.type,
+        totalScore: assessments.totalScore,
+        severity: assessments.severity,
+        createdAt: assessments.createdAt,
+      })
+      .from(assessments)
+      .where(and(eq(assessments.userId, user.id), eq(assessments.type, type as typeof assessments.type.enumValues[number])))
+      .orderBy(desc(assessments.createdAt))
+      .limit(20);
+
+    return c.json({ assessments: results });
+  })
+
   // ── POST / — Submit Assessment ──────────────────────────────────
   .post("/", zValidator("json", SubmitAssessmentSchema), async (c) => {
     const { sessionId, type, answers, parentAssessmentId } = c.req.valid("json");
 
-    // Validate session exists and is active
-    const [session] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
+    // If sessionId provided, validate session exists and is active
+    let session: { id: string; status: string; sdkSessionId: string | null } | null = null;
+    if (sessionId) {
+      const [found] = await db
+        .select({
+          id: sessions.id,
+          status: sessions.status,
+          sdkSessionId: sessions.sdkSessionId,
+        })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .limit(1);
 
-    if (!session) {
-      return c.json(
-        { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
-        404,
-      );
-    }
+      if (!found) {
+        return c.json(
+          { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
+          404,
+        );
+      }
 
-    if (session.status !== "active") {
-      return c.json(
-        { error: ERROR_CODES.SESSION_ENDED, message: "Session is not active" },
-        409,
-      );
+      if (found.status !== "active") {
+        return c.json(
+          { error: ERROR_CODES.SESSION_ENDED, message: "Session is not active" },
+          409,
+        );
+      }
+
+      session = found;
     }
 
     const user = await getOrCreateUser();
@@ -96,7 +153,7 @@ const app = new Hono()
     const [assessment] = await db
       .insert(assessments)
       .values({
-        sessionId,
+        sessionId: sessionId ?? null,
         userId: user.id,
         type,
         answers,
@@ -109,32 +166,32 @@ const app = new Hono()
     // New assessment data invalidates journey insights cache
     invalidateInsightsCache();
 
-    // Emit SSE event for assessment completion (human-readable severity for frontend)
-    sessionEmitter.emit(sessionId, {
-      event: "assessment.complete",
-      data: {
-        assessmentId: assessment!.id,
-        severity: SEVERITY_DESCRIPTIONS[severity],
-        nextScreener,
-      },
-    });
+    // Session-specific integrations (only when submitted from a chat session)
+    if (session && sessionId) {
+      // Emit SSE event for assessment completion
+      sessionEmitter.emit(sessionId, {
+        event: "assessment.complete",
+        data: {
+          assessmentId: assessment!.id,
+          severity: SEVERITY_DESCRIPTIONS[severity],
+          nextScreener,
+        },
+      });
 
-    // ── Post-Assessment Context Injection ────────────────────────
-    // Inject assessment results into the SDK session so Claude can
-    // naturally reference them in subsequent messages.
-    if (session.sdkSessionId) {
-      const contextBlock = buildAssessmentContextBlock(type, severity, nextScreener);
-      injectSessionContext(session.sdkSessionId, contextBlock);
+      // Inject assessment results into the SDK session
+      if (session.sdkSessionId) {
+        const contextBlock = buildAssessmentContextBlock(type, severity, nextScreener);
+        injectSessionContext(session.sdkSessionId, contextBlock);
+      }
     }
 
     // ── Formulation Storage as symptom_episode Memory ────────────
     // Fire-and-forget: store a structured formulation for longitudinal tracking.
-    // The formulation is INTERNAL ONLY — never returned in any API response.
     const formulationText = buildFormulationText(type, severity, nextScreener);
     addMemoriesAsync(
       user.id,
-      sessionId,
-      assessment!.id, // Use assessment ID as the source message ID for provenance
+      sessionId ?? "standalone",
+      assessment!.id,
       [{ role: "assistant", content: formulationText }],
       { memory_type: "symptom_episode" },
     );

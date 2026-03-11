@@ -29,6 +29,20 @@
       "when": 1773233526379,
       "tag": "0003_same_the_captain",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773255220150,
+      "tag": "0004_slow_thaddeus_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773258747784,
+      "tag": "0005_nappy_yellow_claw",
+      "breakpoints": true
     }
   ]
 }

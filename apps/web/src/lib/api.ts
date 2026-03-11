@@ -96,6 +96,11 @@ type GetJourneyAssessmentsSuccess = InferResponseType<
 >;
 type GetHomeSummarySuccess = InferResponseType<typeof client.api.home.summary.$get, 200>;
 type GetServiceHealthSuccess = InferResponseType<typeof client.api.home.health.services.$get, 200>;
+type GetAssessmentLibrarySuccess = InferResponseType<typeof client.api.assessments.library.$get, 200>;
+type GetAssessmentHistorySuccess = InferResponseType<
+  (typeof client.api.assessments.history)[":type"]["$get"],
+  200
+>;
 
 // ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
@@ -268,5 +273,19 @@ export const api = {
     const res = await client.api.home.health.services.$get();
     await throwIfError(res);
     return (await res.json()) as GetServiceHealthSuccess;
+  },
+
+  getAssessmentLibrary: async (): Promise<GetAssessmentLibrarySuccess> => {
+    const res = await client.api.assessments.library.$get();
+    await throwIfError(res);
+    return (await res.json()) as GetAssessmentLibrarySuccess;
+  },
+
+  getAssessmentHistory: async (type: string): Promise<GetAssessmentHistorySuccess> => {
+    const res = await client.api.assessments.history[":type"].$get({
+      param: { type },
+    });
+    await throwIfError(res);
+    return (await res.json()) as GetAssessmentHistorySuccess;
   },
 };

@@ -77,6 +77,11 @@ const DomainSignalSchema = z.object({
   level: z.enum(["low", "medium", "high"]),
   trend: z.enum(["improving", "stable", "declining"]),
   evidence: z.string(),
+  contributions: z.array(z.object({
+    assessmentType: z.string(),
+    subscale: z.string().optional(),
+    normalizedScore: z.number(),
+  })).optional(),
 });
 
 export const JourneyFormulationSchema = z.object({

@@ -209,6 +209,119 @@ describe("getScreenerChain — GAD-7", () => {
   });
 });
 
+// ── Wave 3: PSS Severity ──────────────────────────────────────────
+
+describe("computeSeverity — PSS", () => {
+  it("all zeros => moderate after reverse-scoring positive items", () => {
+    // Standard PSS-10 reverse items are 4,5,7,8 (0-indexed: 3,4,6,7).
+    // With all zeros: reverse = 4 each across 4 items, forward = 0, total = 16.
+    const r = computeSeverity("pss", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.severity).toBe("moderate"); // pssScore = 16
+  });
+
+  it("all max (4) => moderate (reverse cancels out)", () => {
+    // All 4s: forward = 6*4 = 24, reversed = 0. Severity remains moderate.
+    const r = computeSeverity("pss", [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]);
+    expect(r.severity).toBe("moderate");
+  });
+
+  it("high stress pattern => severe", () => {
+    // Forward items (0,1,2,5,8,9) at 4, reverse items (3,4,6,7) at 0.
+    const r = computeSeverity("pss", [4, 4, 4, 0, 0, 4, 0, 0, 4, 4]);
+    expect(r.severity).toBe("severe");
+  });
+
+  it("low stress pattern => minimal", () => {
+    // Forward items at 0, reverse items at 4 (high coping).
+    const r = computeSeverity("pss", [0, 0, 0, 4, 4, 0, 4, 4, 0, 0]);
+    expect(r.severity).toBe("minimal");
+  });
+});
+
+// ── Wave 3: MSPSS Severity ───────────────────────────────────────
+
+describe("computeSeverity — MSPSS", () => {
+  it("all 7s (max support) => minimal", () => {
+    const r = computeSeverity("mspss", [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
+    expect(r.severity).toBe("minimal");
+  });
+
+  it("all 1s (min support) => severe", () => {
+    const r = computeSeverity("mspss", [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    expect(r.severity).toBe("severe");
+  });
+
+  it("moderate support (all 4s) => moderate", () => {
+    const r = computeSeverity("mspss", [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]);
+    expect(r.severity).toBe("moderate");
+  });
+});
+
+// ── Wave 3: ECR (personality, always minimal) ────────────────────
+
+describe("computeSeverity — ECR", () => {
+  it("always returns minimal (personality instrument)", () => {
+    const answers = Array(36).fill(4);
+    const r = computeSeverity("ecr", answers);
+    expect(r.severity).toBe("minimal");
+  });
+});
+
+// ── Wave 3: PCL-5 Severity ──────────────────────────────────────
+
+describe("computeSeverity — PCL-5", () => {
+  it("score 0 => minimal", () => {
+    const r = computeSeverity("pcl5", Array(20).fill(0));
+    expect(r).toEqual({ totalScore: 0, severity: "minimal" });
+  });
+
+  it("score 10 (boundary) => minimal", () => {
+    const answers = Array(20).fill(0);
+    answers[0] = 4; answers[1] = 4; answers[2] = 2; // total 10
+    const r = computeSeverity("pcl5", answers);
+    expect(r.severity).toBe("minimal");
+  });
+
+  it("score 11 => mild", () => {
+    const answers = Array(20).fill(0);
+    answers[0] = 4; answers[1] = 4; answers[2] = 3; // total 11
+    const r = computeSeverity("pcl5", answers);
+    expect(r.severity).toBe("mild");
+  });
+
+  it("score 31 => severe", () => {
+    const answers = Array(20).fill(0);
+    // 8 items at 4 = 32
+    for (let i = 0; i < 8; i++) answers[i] = 4;
+    const r = computeSeverity("pcl5", answers);
+    expect(r.severity).toBe("severe");
+  });
+});
+
+// ── Wave 3: ACE-IQ Severity ─────────────────────────────────────
+
+describe("computeSeverity — ACE-IQ", () => {
+  it("score 0 => minimal", () => {
+    const r = computeSeverity("ace_iq", Array(13).fill(0));
+    expect(r).toEqual({ totalScore: 0, severity: "minimal" });
+  });
+
+  it("score 3 (boundary) => mild", () => {
+    const r = computeSeverity("ace_iq", [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.severity).toBe("mild");
+  });
+
+  it("score 4 => moderate", () => {
+    const r = computeSeverity("ace_iq", [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.severity).toBe("moderate");
+  });
+
+  it("score 8 => severe", () => {
+    const r = computeSeverity("ace_iq", [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]);
+    expect(r.severity).toBe("severe");
+  });
+});
+
 // ── Screener Types Return Empty Chain ────────────────────────────
 
 describe("getScreenerChain — screener types", () => {

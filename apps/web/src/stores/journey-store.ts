@@ -71,6 +71,11 @@ export interface JourneyFormulation {
         level: "low" | "medium" | "high";
         trend: "improving" | "stable" | "declining";
         evidence: string;
+        contributions?: Array<{
+          assessmentType: string;
+          subscale?: string;
+          normalizedScore: number;
+        }>;
       }
     >
   >;
