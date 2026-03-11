@@ -2,8 +2,10 @@
 // Static question data for PHQ-9 and GAD-7 validated screening tools.
 // These are standardized instruments — question text must not be altered.
 
+import type { AssessmentType } from "@moc/shared";
+
 export interface AssessmentDefinition {
-  type: string;
+  type: AssessmentType;
   name: string;
   description: string;
   preamble: string;

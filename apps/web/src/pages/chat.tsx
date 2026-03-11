@@ -188,6 +188,13 @@ export function ChatPage() {
             severity: data.severity,
             nextScreener: data.nextScreener,
           });
+          // Auto-trigger next screener in the assessment chain
+          if (data.nextScreener) {
+            startAssessment({
+              assessmentType: data.nextScreener,
+              parentAssessmentId: data.assessmentId,
+            });
+          }
         } catch {
           // Ignore parse errors
         }

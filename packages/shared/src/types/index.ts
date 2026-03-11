@@ -36,16 +36,11 @@ export type CrisisLevel = "safe" | "elevated_risk" | "crisis";
 /** Server -> Client SSE event types */
 export type SSEEventType =
   | "ai.chunk"
-  | "ai.thinking"
   | "ai.response_complete"
-  | "ai.tool_use"
-  | "ai.audio_ready"
   | "ai.error"
-  | "session.started"
   | "session.ended"
   | "session.crisis"
   | "emotion.ai_detected"
-  | "assessment.due"
   | "assessment.start"
   | "assessment.complete";
 

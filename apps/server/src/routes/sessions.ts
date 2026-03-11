@@ -147,7 +147,7 @@ const app = new Hono()
       );
     }
 
-    // Cap at 500 messages to prevent unbounded response sizes
+    // Over-fetch by 1 to detect truncation without a separate count query
     const MESSAGE_LIMIT = 500;
 
     const rows = await db
@@ -160,17 +160,20 @@ const app = new Hono()
       .from(messages)
       .where(eq(messages.sessionId, sessionId))
       .orderBy(asc(messages.createdAt), asc(messages.id))
-      .limit(MESSAGE_LIMIT);
+      .limit(MESSAGE_LIMIT + 1);
+
+    const truncated = rows.length > MESSAGE_LIMIT;
+    const returnedRows = truncated ? rows.slice(0, MESSAGE_LIMIT) : rows;
 
     return c.json({
-      messages: rows.map((m) => ({
+      messages: returnedRows.map((m) => ({
         id: m.id,
         role: m.role,
         content: m.content,
         createdAt: m.createdAt.toISOString(),
       })),
       limit: MESSAGE_LIMIT,
-      truncated: rows.length === MESSAGE_LIMIT,
+      truncated,
     });
   })
 

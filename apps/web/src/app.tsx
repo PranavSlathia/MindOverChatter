@@ -3,6 +3,7 @@ import { ChatPage } from "./pages/chat.js";
 import { HistoryPage } from "./pages/history.js";
 import { HomePage } from "./pages/home.js";
 import { MoodPage } from "./pages/mood.js";
+import { ProfilePage } from "./pages/profile.js";
 
 export function App() {
   return (
@@ -13,6 +14,7 @@ export function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/mood" element={<MoodPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Routes>
       </div>
     </BrowserRouter>

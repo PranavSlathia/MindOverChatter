@@ -30,6 +30,7 @@ export const MEMORY_TYPES = [
   "unresolved_thread",
   "safety_critical",
   "win",
+  "session_summary",
 ] as const;
 
 // ── Session Constants ──────────────────────────────────────────

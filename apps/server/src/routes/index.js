@@ -1,6 +1,18 @@
 import { Hono } from "hono";
+import assessments from "./assessments.js";
+import emotions from "./emotions.js";
 import health from "./health.js";
-
-const app = new Hono().route("/", health);
+import moodLogs from "./mood-logs.js";
+import sessions from "./sessions.js";
+import userProfile from "./user-profile.js";
+import voice from "./voice.js";
+const app = new Hono()
+    .route("/", health)
+    .route("/api/sessions", sessions)
+    .route("/api/assessments", assessments)
+    .route("/api/emotions", emotions)
+    .route("/api/mood-logs", moodLogs)
+    .route("/api/user", userProfile)
+    .route("/api", voice);
 export { app };
 //# sourceMappingURL=index.js.map

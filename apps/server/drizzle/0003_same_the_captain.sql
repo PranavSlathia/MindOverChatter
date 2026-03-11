@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" DROP COLUMN "screener_results";

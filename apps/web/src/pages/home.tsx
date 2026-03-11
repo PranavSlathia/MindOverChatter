@@ -28,6 +28,13 @@ export function HomePage() {
           >
             Mood Tracker
           </Link>
+          <Link
+            to="/profile"
+            className="text-sm font-medium text-foreground/50 transition-colors hover:text-primary"
+            aria-label="View your profile"
+          >
+            Profile
+          </Link>
         </div>
       </div>
     </div>

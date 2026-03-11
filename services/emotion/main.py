@@ -177,19 +177,44 @@ RATE_LOW = 2.0          # Below this → slow speech
 RATE_HIGH = 6.0         # Above this → fast speech
 
 
+## Canonical emotion labels (must match shared EMOTION_LABELS)
+CANONICAL_LABELS = {"happy", "sad", "angry", "neutral", "fearful", "disgusted", "surprised"}
+
+## Map non-canonical prosody labels → canonical labels at the boundary
+_LABEL_NORMALIZATION: dict[str, str] = {
+    "excited": "happy",
+    "calm": "neutral",
+    "anxious": "fearful",
+}
+
+
+def normalize_emotion_label(label: str) -> str:
+    """Normalize a prosody-derived label to a canonical emotion label.
+
+    Non-canonical labels (excited, calm, anxious) are mapped to the closest
+    canonical label. Already-canonical labels pass through unchanged.
+    Unknown labels fall back to "neutral".
+    """
+    if label in CANONICAL_LABELS:
+        return label
+    return _LABEL_NORMALIZATION.get(label, "neutral")
+
+
 def classify_emotion(prosody: ProsodyFeatures) -> tuple[str, float]:
     """Map prosody features to an emotion label and confidence score.
 
-    Returns a tuple of (emotion_label, confidence). Confidence is
-    deliberately conservative (0.3-0.7) because rule-based heuristics
-    are inherently limited compared to trained models.
+    Returns a tuple of (emotion_label, confidence). The label is always
+    one of the 7 canonical emotions (happy, sad, angry, neutral, fearful,
+    disgusted, surprised). Confidence is deliberately conservative (0.3-0.7)
+    because rule-based heuristics are inherently limited compared to
+    trained models.
 
     The mapping logic:
-    - High energy + high pitch → "excited" or "angry" (check variability)
+    - High energy + high pitch → "happy" or "angry" (check variability)
     - Low energy + low pitch → "sad"
     - Medium energy + medium pitch + low variability → "neutral"
-    - High pitch variability + high energy → "anxious"
-    - Low energy + moderate pitch → "calm"
+    - High pitch variability + high energy → "fearful"
+    - Low energy + moderate pitch → "neutral"
     """
     pitch = prosody.pitch_mean
     pitch_var = prosody.pitch_std
@@ -206,15 +231,15 @@ def classify_emotion(prosody: ProsodyFeatures) -> tuple[str, float]:
             # High variability + high energy + high pitch → angry
             return "angry", 0.55
         else:
-            # Stable high pitch + high energy → excited
-            return "excited", 0.55
+            # Stable high pitch + high energy → happy (normalized from excited)
+            return "happy", 0.55
 
-    # --- High pitch variability + elevated energy → anxious ---
+    # --- High pitch variability + elevated energy → fearful (normalized from anxious) ---
     if pitch_var > PITCH_VAR_HIGH and energy > ENERGY_LOW:
         if rate > RATE_HIGH:
-            # Fast speech + variable pitch + energy → more likely anxious
-            return "anxious", 0.6
-        return "anxious", 0.5
+            # Fast speech + variable pitch + energy → more likely fearful
+            return "fearful", 0.6
+        return "fearful", 0.5
 
     # --- Low energy + low pitch → sad ---
     if energy < ENERGY_LOW and pitch < PITCH_LOW:
@@ -223,12 +248,12 @@ def classify_emotion(prosody: ProsodyFeatures) -> tuple[str, float]:
             return "sad", 0.6
         return "sad", 0.5
 
-    # --- Low energy + moderate pitch → calm ---
+    # --- Low energy + moderate pitch → neutral (normalized from calm) ---
     if energy < ENERGY_LOW and PITCH_LOW <= pitch <= PITCH_HIGH:
         if pitch_var < PITCH_VAR_LOW:
-            # Monotone + quiet → calm with higher confidence
-            return "calm", 0.6
-        return "calm", 0.5
+            # Monotone + quiet → neutral with higher confidence
+            return "neutral", 0.6
+        return "neutral", 0.5
 
     # --- Medium energy + medium pitch + low variability → neutral ---
     if (ENERGY_LOW <= energy <= ENERGY_HIGH
@@ -238,7 +263,7 @@ def classify_emotion(prosody: ProsodyFeatures) -> tuple[str, float]:
 
     # --- Fast speech with high energy (but not high pitch) ---
     if rate > RATE_HIGH and energy > ENERGY_HIGH:
-        return "excited", 0.45
+        return "happy", 0.45
 
     # --- Default fallback ---
     return "neutral", 0.35
@@ -342,8 +367,10 @@ async def analyze(file: UploadFile = File(...)):
             detail=f"Prosody extraction failed: {exc}",
         ) from exc
 
-    # --- Classify emotion ---
+    # --- Classify emotion (always returns canonical labels) ---
     emotion, confidence = classify_emotion(prosody)
+    # Safety net: normalize at the boundary in case classify_emotion evolves
+    emotion = normalize_emotion_label(emotion)
 
     # --- Sanitize any NaN/Inf values before JSON serialization ---
     def sanitize(v: float) -> float:

@@ -23,7 +23,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgresql://moc:password@db:5432/moc
+      - DATABASE_URL=postgresql://moc:${DB_PASSWORD:-password}@db:5432/moc
       - WHISPER_SERVICE_URL=http://whisper:8001
       - EMOTION_SERVICE_URL=http://emotion:8002
       - TTS_SERVICE_URL=http://tts:8003
@@ -48,7 +48,7 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: moc
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
       POSTGRES_DB: moc
     ports:
       - "5433:5432"

@@ -55,6 +55,17 @@
 - Theme colors used directly as hex strings in chart config (not CSS variables -- Recharts needs hex)
 - `ResponsiveContainer` wraps all charts
 
+## Voice Pipeline (Phase 6A)
+
+- `useAudioRecorder` hook: MediaRecorder API, webm/opus preferred, 60s auto-stop safety limit
+- Transcription: multipart/form-data POST to `/api/transcribe`, result fills textarea (user can edit before sending)
+- TTS: JSON POST to `/api/tts`, returns audio blob, played via `new Audio(objectURL)`
+- Both `transcribe` and `synthesize` use plain fetch (not Hono RPC) since they deal with binary data
+- Mic button: subtle (foreground/10 bg), turns red+pulsing when recording, spinner when transcribing
+- TTS button: small speaker icon on assistant messages only, hides on error, auto-resets after 2s
+- Voice errors auto-dismiss after 5 seconds
+- `biome-ignore lint/correctness/useExhaustiveDependencies` needed for audioBlob-triggered transcription effect
+
 ## Performance Notes
 
 - Zustand store actions are stable references (safe in useEffect deps)

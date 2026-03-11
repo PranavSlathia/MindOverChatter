@@ -2,7 +2,6 @@ import {
   pgTable,
   pgEnum,
   uuid,
-  text,
   timestamp,
   integer,
   jsonb,
@@ -41,7 +40,6 @@ export const assessments = pgTable("assessments", {
   answers: jsonb("answers").notNull(), // Array of 0-3 per question
   totalScore: integer("total_score").notNull(), // PHQ-9: 0-27, GAD-7: 0-21
   severity: assessmentSeverityEnum("severity").notNull(),
-  screenerResults: jsonb("screener_results"), // Phase 4-B: populated by formulation engine with sub-screener synthesis
   // Drizzle requires a lazy thunk with `any` for self-referential FKs
   parentAssessmentId: uuid("parent_assessment_id").references(
     (): any => assessments.id,

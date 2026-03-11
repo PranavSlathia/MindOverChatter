@@ -6,7 +6,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@moc/shared": ["../../packages/shared/src"],
-      "@moc/shared/*": ["../../packages/shared/src/*"]
+      "@moc/shared/*": ["../../packages/shared/src/*"],
+      "@moc/server/*": ["../../apps/server/dist/*"]
     }
   },
   "include": ["src"],

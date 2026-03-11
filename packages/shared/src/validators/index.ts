@@ -4,4 +4,5 @@ export * from "./memory.js";
 export * from "./message.js";
 export * from "./mood-log.js";
 export * from "./session.js";
+export * from "./user-profile.js";
 export * from "./voice.js";

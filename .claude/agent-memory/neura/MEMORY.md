@@ -42,6 +42,33 @@
 - Min duration: 0.5s for meaningful analysis
 - NaN/Inf sanitization needed before JSON serialization (numpy edge cases)
 
+## Whisper Service
+
+- Uses `faster-whisper` with `base` model, CTranslate2 backend, `int8` compute
+- Lazy model loading (singleton) on first request
+- `vad_filter=True` for non-speech filtering, `language=None` for auto-detect
+- Dockerfile needs `libsndfile1` + `ffmpeg` system packages
+- Model downloads to `/app/models` (mapped to `model-cache` Docker volume)
+- 60s `start_period` appropriate for model download on first boot
+
+## TTS Service
+
+- Primary: `kokoro-onnx` (ONNX-based, CPU-friendly)
+- Fallback: `pyttsx3` (uses espeak-ng on Linux)
+- Last-resort: returns silent WAV (service stays functional)
+- Dockerfile needs `libsndfile1` + `espeak-ng` system packages
+- `pyttsx3` pulls in `pyobjc` on macOS (230 packages in lockfile) but slim in Docker
+- Output format: 16-bit PCM WAV, streaming response
+- Text limit: 5000 chars
+
+## Voice Route Patterns
+
+- Routes mounted at `/api` prefix (so `/api/transcribe`, `/api/tts`)
+- Transcribe: proxies multipart file upload to whisper service
+- TTS: validates with `SynthesizeRequestSchema`, proxies JSON to tts service, returns `audio/wav`
+- Service unavailability returns 503 with `*_UNAVAILABLE` error code
+- Service URLs from `env.ts`: `WHISPER_SERVICE_URL`, `TTS_SERVICE_URL`
+
 ## Therapeutic Notes
 
 <!-- Therapeutic framework refinements -->

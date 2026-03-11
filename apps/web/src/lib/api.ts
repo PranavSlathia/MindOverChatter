@@ -1,105 +1,87 @@
+import type { AppType } from "@moc/server/routes/index.js";
+import type { InferRequestType, InferResponseType } from "hono/client";
+import { hc } from "hono/client";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
-export interface CreateSessionResponse {
-  sessionId: string;
-  status: "active";
-  startedAt: string;
-}
+// ── Hono RPC Client ────────────────────────────────────────────────
+// Type-safe client inferred from server route definitions.
+// No manually-maintained interfaces — types flow from Drizzle -> Zod -> Hono -> here.
+const client = hc<AppType>(API_BASE);
 
-export interface SendMessageResponse {
-  userMessageId: string;
-  crisis: boolean;
-  assistantMessageId?: string;
-  response?: string;
-}
+// ── Error Handling ─────────────────────────────────────────────────
 
-export interface EndSessionResponse {
-  sessionId: string;
-  status: "completed";
-  endedAt: string;
-}
-
-export interface SubmitAssessmentResponse {
-  assessmentId: string;
-  totalScore: number;
-  severity: string;
-  nextScreener: string | null;
-}
-
-export interface SubmitEmotionBody {
-  sessionId: string;
-  channel: string;
-  emotionLabel: string;
-  confidence: number;
-  signalWeight: number;
-  rawScores?: Record<string, number>;
-}
-
-export interface SubmitEmotionResponse {
-  id: string;
-  createdAt: string;
-}
-
-export interface CreateMoodLogBody {
-  sessionId?: string;
-  valence: number;
-  arousal: number;
-  source: string;
-}
-
-export interface CreateMoodLogResponse {
-  id: string;
-  valence: number;
-  arousal: number;
-  source: string;
-  createdAt: string;
-}
-
-export interface MoodLogEntry {
-  id: string;
-  valence: number;
-  arousal: number;
-  source: string;
-  sessionId: string | null;
-  createdAt: string;
-}
-
-export interface GetMoodLogsResponse {
-  entries: MoodLogEntry[];
-}
-
-export interface SessionSummary {
-  id: string;
-  status: string;
-  startedAt: string;
-  endedAt: string | null;
-  summary: string | null;
-}
-
-export interface GetSessionsResponse {
-  sessions: SessionSummary[];
-  limit: number;
-  offset: number;
-}
-
-export interface SessionMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-}
-
-export interface GetSessionMessagesResponse {
-  messages: SessionMessage[];
-}
-
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error((body as { error?: string }).error || `HTTP ${response.status}`);
+/**
+ * Throw if the response is not ok (non-2xx).
+ * After this guard, the caller can safely assume the response is a success variant.
+ */
+async function throwIfError(res: Response): Promise<void> {
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
   }
+}
+
+/** Handle raw fetch response and parse JSON. */
+async function handleResponse<T>(response: Response): Promise<T> {
+  await throwIfError(response);
   return response.json() as Promise<T>;
 }
+
+// ── Inferred Response Types ────────────────────────────────────────
+// Exported for consumers that need to reference response shapes in
+// component state (e.g., `useState<SessionSummary[]>`).
+
+type GetSessionsSuccess = InferResponseType<typeof client.api.sessions.$get, 200>;
+export type SessionSummary = GetSessionsSuccess["sessions"][number];
+
+type GetSessionMessagesSuccess = InferResponseType<
+  (typeof client.api.sessions)[":id"]["messages"]["$get"],
+  200
+>;
+export type SessionMessage = GetSessionMessagesSuccess["messages"][number];
+
+// UserProfile: the server returns jsonb fields (coreTraits, patterns, goals)
+// which Hono infers as JSONValue. We refine these to string[] since the Zod
+// validators guarantee the shape. This avoids casting in every consumer.
+type RawUserProfile = InferResponseType<typeof client.api.user.$get, 200>;
+export type UserProfile = Omit<RawUserProfile, "coreTraits" | "patterns" | "goals"> & {
+  coreTraits: string[] | null;
+  patterns: string[] | null;
+  goals: string[] | null;
+};
+
+export type MoodLogEntry = InferResponseType<
+  (typeof client.api)["mood-logs"]["$get"],
+  200
+>["entries"][number];
+
+// ── Inferred Request Types ─────────────────────────────────────────
+// Derived from the hc client so parameter types stay in sync with the
+// server's Zod validators. No manual duplication.
+
+type SubmitAssessmentInput = InferRequestType<typeof client.api.assessments.$post>["json"];
+type SubmitEmotionInput = InferRequestType<typeof client.api.emotions.$post>["json"];
+type CreateMoodLogInput = InferRequestType<(typeof client.api)["mood-logs"]["$post"]>["json"];
+
+// ── Success Response Types (for union-returning routes) ────────────
+// Routes that return different shapes for different status codes produce
+// union types from hc. These narrow to the success variant only.
+
+type CreateSessionSuccess = InferResponseType<typeof client.api.sessions.$post, 201>;
+type SendMessageSuccess = InferResponseType<
+  (typeof client.api.sessions)[":id"]["messages"]["$post"],
+  200
+>;
+type EndSessionSuccess = InferResponseType<
+  (typeof client.api.sessions)[":id"]["end"]["$post"],
+  200
+>;
+type SubmitAssessmentSuccess = InferResponseType<typeof client.api.assessments.$post, 201>;
+type SubmitEmotionSuccess = InferResponseType<typeof client.api.emotions.$post, 201>;
+type CreateMoodLogSuccess = InferResponseType<(typeof client.api)["mood-logs"]["$post"], 201>;
+
+// ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
 export interface TranscribeResponse {
   text: string;
@@ -107,70 +89,78 @@ export interface TranscribeResponse {
   duration: number;
 }
 
+// ── API Object ─────────────────────────────────────────────────────
+
 export const api = {
-  createSession: (): Promise<CreateSessionResponse> =>
-    fetch(`${API_BASE}/api/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    }).then((r) => handleResponse<CreateSessionResponse>(r)),
+  createSession: async (): Promise<CreateSessionSuccess> => {
+    const res = await client.api.sessions.$post();
+    await throwIfError(res);
+    return (await res.json()) as CreateSessionSuccess;
+  },
 
-  sendMessage: (sessionId: string, text: string): Promise<SendMessageResponse> =>
-    fetch(`${API_BASE}/api/sessions/${sessionId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }).then((r) => handleResponse<SendMessageResponse>(r)),
+  sendMessage: async (sessionId: string, text: string): Promise<SendMessageSuccess> => {
+    const res = await client.api.sessions[":id"].messages.$post({
+      param: { id: sessionId },
+      json: { text },
+    });
+    await throwIfError(res);
+    return (await res.json()) as SendMessageSuccess;
+  },
 
-  endSession: (sessionId: string, reason?: string): Promise<EndSessionResponse> =>
-    fetch(`${API_BASE}/api/sessions/${sessionId}/end`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason }),
-    }).then((r) => handleResponse<EndSessionResponse>(r)),
+  endSession: async (sessionId: string, reason?: string): Promise<EndSessionSuccess> => {
+    const res = await client.api.sessions[":id"].end.$post({
+      param: { id: sessionId },
+      json: { reason },
+    });
+    await throwIfError(res);
+    return (await res.json()) as EndSessionSuccess;
+  },
 
+  /** SSE subscription — cannot use hc (EventSource, not JSON). */
   subscribeToEvents: (sessionId: string): EventSource =>
     new EventSource(`${API_BASE}/api/sessions/${sessionId}/events`),
 
-  submitAssessment: (body: {
-    sessionId: string;
-    type: string;
-    answers: number[];
-    parentAssessmentId?: string;
-  }): Promise<SubmitAssessmentResponse> =>
-    fetch(`${API_BASE}/api/assessments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => handleResponse<SubmitAssessmentResponse>(r)),
+  submitAssessment: async (body: SubmitAssessmentInput): Promise<SubmitAssessmentSuccess> => {
+    const res = await client.api.assessments.$post({ json: body });
+    await throwIfError(res);
+    return (await res.json()) as SubmitAssessmentSuccess;
+  },
 
-  submitEmotion: (body: SubmitEmotionBody): Promise<SubmitEmotionResponse> =>
-    fetch(`${API_BASE}/api/emotions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => handleResponse<SubmitEmotionResponse>(r)),
+  submitEmotion: async (body: SubmitEmotionInput): Promise<SubmitEmotionSuccess> => {
+    const res = await client.api.emotions.$post({ json: body });
+    await throwIfError(res);
+    return (await res.json()) as SubmitEmotionSuccess;
+  },
 
-  createMoodLog: (body: CreateMoodLogBody): Promise<CreateMoodLogResponse> =>
-    fetch(`${API_BASE}/api/mood-logs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => handleResponse<CreateMoodLogResponse>(r)),
+  createMoodLog: async (body: CreateMoodLogInput): Promise<CreateMoodLogSuccess> => {
+    const res = await client.api["mood-logs"].$post({ json: body });
+    await throwIfError(res);
+    return (await res.json()) as CreateMoodLogSuccess;
+  },
 
-  getMoodLogs: (): Promise<GetMoodLogsResponse> =>
-    fetch(`${API_BASE}/api/mood-logs`).then((r) => handleResponse<GetMoodLogsResponse>(r)),
+  getMoodLogs: async () => {
+    const res = await client.api["mood-logs"].$get();
+    await throwIfError(res);
+    return await res.json();
+  },
 
-  getSessions: (limit = 20, offset = 0): Promise<GetSessionsResponse> =>
-    fetch(`${API_BASE}/api/sessions?limit=${limit}&offset=${offset}`).then((r) =>
-      handleResponse<GetSessionsResponse>(r),
-    ),
+  getSessions: async (limit = 20, offset = 0) => {
+    const res = await client.api.sessions.$get({
+      query: { limit: String(limit), offset: String(offset) },
+    });
+    await throwIfError(res);
+    return await res.json();
+  },
 
-  getSessionMessages: (sessionId: string): Promise<GetSessionMessagesResponse> =>
-    fetch(`${API_BASE}/api/sessions/${sessionId}/messages`).then((r) =>
-      handleResponse<GetSessionMessagesResponse>(r),
-    ),
+  getSessionMessages: async (sessionId: string): Promise<GetSessionMessagesSuccess> => {
+    const res = await client.api.sessions[":id"].messages.$get({
+      param: { id: sessionId },
+    });
+    await throwIfError(res);
+    return (await res.json()) as GetSessionMessagesSuccess;
+  },
 
-  /** Send audio blob to whisper service for transcription. Uses multipart/form-data. */
+  /** Send audio blob to whisper service for transcription. Uses multipart/form-data — cannot use hc. */
   transcribe: async (audioBlob: Blob): Promise<TranscribeResponse> => {
     const formData = new FormData();
     formData.append("file", audioBlob, "recording.webm");
@@ -181,7 +171,7 @@ export const api = {
     return handleResponse<TranscribeResponse>(response);
   },
 
-  /** Send text to TTS service and return audio blob for playback. */
+  /** Send text to TTS service and return audio blob for playback — cannot use hc (Blob response). */
   synthesize: async (text: string, voice?: string): Promise<Blob> => {
     const response = await fetch(`${API_BASE}/api/tts`, {
       method: "POST",
@@ -193,5 +183,24 @@ export const api = {
       throw new Error((body as { error?: string }).error || `HTTP ${response.status}`);
     }
     return response.blob();
+  },
+
+  getUserProfile: async (): Promise<UserProfile> => {
+    const res = await client.api.user.$get();
+    await throwIfError(res);
+    // Cast jsonb fields from JSONValue to string[] — safe because the server
+    // route always returns arrays (Zod-validated on write, explicit map on read).
+    return (await res.json()) as UserProfile;
+  },
+
+  updateUserProfile: async (body: {
+    displayName?: string | null;
+    coreTraits?: string[];
+    patterns?: string[];
+    goals?: string[];
+  }): Promise<UserProfile> => {
+    const res = await client.api.user.$patch({ json: body });
+    await throwIfError(res);
+    return (await res.json()) as UserProfile;
   },
 };
