@@ -37,15 +37,50 @@ export type TimelineItem =
   | { type: "assessment"; data: TimelineAssessment }
   | { type: "mood"; data: TimelineMood };
 
-export interface JourneyInsights {
-  clinicalUnderstanding: string;
-  userReflection: string;
-  actionItems: string[];
-  patterns: {
-    recurring_triggers: Array<{ id: string; content: string }>;
-    unresolved_threads: Array<{ id: string; content: string }>;
-    wins: Array<{ id: string; content: string }>;
+// Formulation types match the backend JourneyFormulation schema
+export type DomainKey =
+  | "connection"
+  | "momentum"
+  | "groundedness"
+  | "meaning"
+  | "self_regard"
+  | "vitality";
+
+export interface JourneyFormulation {
+  formulation: {
+    presentingTheme: string;
+    roots: Array<{ content: string; sourceType: string; confidence: number; evidenceRefs?: Array<{ sourceType: string; sourceId?: string }> }>;
+    recentActivators: Array<{ content: string; confidence: number; evidenceRefs?: Array<{ sourceType: string; sourceId?: string }> }>;
+    perpetuatingCycles: Array<{ pattern: string; mechanism: string; evidenceRefs?: Array<{ sourceType: string; sourceId?: string }> }>;
+    protectiveStrengths: Array<{ content: string; sourceType: string; evidenceRefs?: Array<{ sourceType: string; sourceId?: string }> }>;
   };
+  userReflection: {
+    summary: string;
+    encouragement: string;
+  };
+  activeStates: Array<{
+    label: string;
+    confidence: number;
+    signal: string;
+    domain: DomainKey;
+  }>;
+  domainSignals: Partial<
+    Record<
+      DomainKey,
+      {
+        level: "low" | "medium" | "high";
+        trend: "improving" | "stable" | "declining";
+        evidence: string;
+      }
+    >
+  >;
+  questionsWorthExploring: Array<{
+    question: string;
+    rationale: string;
+    linkedTo: string;
+  }>;
+  themeOfToday: string;
+  dataConfidence: "sparse" | "emerging" | "established";
   moodTrend: {
     direction: "improving" | "stable" | "declining";
     period: string;
@@ -55,13 +90,13 @@ export interface JourneyInsights {
 
 interface JourneyState {
   timeline: TimelineItem[];
-  insights: JourneyInsights | null;
+  insights: JourneyFormulation | null;
   isLoadingTimeline: boolean;
   isLoadingInsights: boolean;
   error: string | null;
 
   setTimeline: (items: TimelineItem[]) => void;
-  setInsights: (insights: JourneyInsights) => void;
+  setInsights: (insights: JourneyFormulation) => void;
   setLoadingTimeline: (loading: boolean) => void;
   setLoadingInsights: (loading: boolean) => void;
   setError: (error: string | null) => void;

@@ -38,7 +38,7 @@ export function SessionTimeline({ sessions, assessments }: SessionTimelineProps)
   return (
     <div className="space-y-4">
       {/* Assessment Progression */}
-      {assessments.length >= 2 && (
+      {assessments.length >= 1 && (
         <div className="rounded-2xl border border-foreground/10 bg-white p-6 shadow-sm">
           <h3 className="mb-3 text-sm font-semibold text-foreground">Assessment Progression</h3>
           <div className="flex flex-wrap items-center gap-2">

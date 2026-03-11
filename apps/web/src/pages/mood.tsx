@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { Link } from "react-router";
 import { MoodChart } from "@/components/mood/mood-chart.js";
 import { MoodEntryWidget } from "@/components/mood/mood-entry-widget.js";
 import { api } from "@/lib/api.js";
@@ -38,43 +37,16 @@ export function MoodPage() {
   }, [setEntries, setLoading]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-foreground/10 bg-background px-4 py-3 shadow-sm">
-        <div>
-          <h1 className="text-lg font-semibold leading-tight text-primary">Mood Tracker</h1>
-          <p className="text-xs text-foreground/60">Track how you feel over time</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/history"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Session history"
-          >
-            History
-          </Link>
-          <Link
-            to="/chat"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Back to chat"
-          >
-            Back to Chat
-          </Link>
-        </div>
-      </header>
+    <div className="mx-auto max-w-2xl space-y-6 px-4 py-6">
+      <MoodEntryWidget />
 
-      {/* Content */}
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-6">
-        <MoodEntryWidget />
-
-        {isLoading ? (
-          <div className="flex h-64 items-center justify-center">
-            <p className="text-sm text-foreground/50">Loading mood history...</p>
-          </div>
-        ) : (
-          <MoodChart entries={entries} />
-        )}
-      </main>
+      {isLoading ? (
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-foreground/50">Loading mood history...</p>
+        </div>
+      ) : (
+        <MoodChart entries={entries} />
+      )}
     </div>
   );
 }

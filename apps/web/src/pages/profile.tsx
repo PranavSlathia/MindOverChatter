@@ -1,5 +1,4 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
 import type { UserProfile } from "@/lib/api.js";
 import { api } from "@/lib/api.js";
 import { cn } from "@/lib/utils.js";
@@ -183,33 +182,8 @@ export function ProfilePage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-foreground/10 bg-background px-4 py-3 shadow-sm">
-        <div>
-          <h1 className="text-lg font-semibold leading-tight text-primary">Profile</h1>
-          <p className="text-xs text-foreground/60">Manage your preferences</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Back to home"
-          >
-            Home
-          </Link>
-          <Link
-            to="/chat"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Back to chat"
-          >
-            Chat
-          </Link>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="mx-auto max-w-2xl px-4 py-6">
+    <div>
+      <div className="mx-auto max-w-2xl px-4 py-6">
         {/* Loading state */}
         {isLoading && (
           <div className="flex h-64 items-center justify-center">
@@ -334,7 +308,7 @@ export function ProfilePage() {
             </p>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { HELPLINES } from "@moc/shared";
 import { useCallback, useEffect, useRef } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
 import {
@@ -10,6 +10,7 @@ import {
   ThinkingBubble,
 } from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
+import { useServiceHealth } from "@/hooks/use-service-health.js";
 import { api } from "@/lib/api.js";
 import { useEmotionStore } from "@/stores/emotion-store.js";
 import { useSessionStore } from "@/stores/session-store.js";
@@ -44,6 +45,9 @@ export function ChatPage() {
   } = useSessionStore();
 
   const setEmotionFromSSE = useEmotionStore((s) => s.setEmotion);
+
+  // Poll service health (whisper, TTS) every 60s so buttons reflect availability
+  useServiceHealth();
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -416,7 +420,7 @@ export function ChatPage() {
   const inputDisabled = isStreaming || status === "completed";
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
       <ChatHeader status={status} onEndSession={handleEndSession} />
 
       {/* Messages area */}
@@ -459,6 +463,20 @@ export function ChatPage() {
               >
                 Start New Session
               </button>
+              <div className="mt-3 flex items-center justify-center gap-4">
+                <Link
+                  to="/journey"
+                  className="text-xs font-medium text-foreground/50 transition-colors hover:text-primary"
+                >
+                  View Your Journey
+                </Link>
+                <Link
+                  to="/history"
+                  className="text-xs font-medium text-foreground/50 transition-colors hover:text-primary"
+                >
+                  Session History
+                </Link>
+              </div>
             </div>
           )}
 

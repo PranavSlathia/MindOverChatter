@@ -56,6 +56,9 @@ export type MoodLogEntry = InferResponseType<
   200
 >["entries"][number];
 
+export type HomeSummary = GetHomeSummarySuccess;
+export type ServiceHealth = GetServiceHealthSuccess;
+
 // ── Inferred Request Types ─────────────────────────────────────────
 // Derived from the hc client so parameter types stay in sync with the
 // server's Zod validators. No manual duplication.
@@ -80,26 +83,19 @@ type EndSessionSuccess = InferResponseType<
 type SubmitAssessmentSuccess = InferResponseType<typeof client.api.assessments.$post, 201>;
 type SubmitEmotionSuccess = InferResponseType<typeof client.api.emotions.$post, 201>;
 type CreateMoodLogSuccess = InferResponseType<(typeof client.api)["mood-logs"]["$post"], 201>;
-type DeleteSessionSuccess = InferResponseType<
-  (typeof client.api.sessions)[":id"]["$delete"],
-  200
->;
+type DeleteSessionSuccess = InferResponseType<(typeof client.api.sessions)[":id"]["$delete"], 200>;
 type ResumeSessionSuccess = InferResponseType<
   (typeof client.api.sessions)[":id"]["resume"]["$post"],
   200
 >;
-type GetJourneyTimelineSuccess = InferResponseType<
-  typeof client.api.journey.timeline.$get,
-  200
->;
-type GetJourneyInsightsSuccess = InferResponseType<
-  typeof client.api.journey.insights.$get,
-  200
->;
+type GetJourneyTimelineSuccess = InferResponseType<typeof client.api.journey.timeline.$get, 200>;
+type GetJourneyInsightsSuccess = InferResponseType<typeof client.api.journey.insights.$get, 200>;
 type GetJourneyAssessmentsSuccess = InferResponseType<
   typeof client.api.journey.assessments.$get,
   200
 >;
+type GetHomeSummarySuccess = InferResponseType<typeof client.api.home.summary.$get, 200>;
+type GetServiceHealthSuccess = InferResponseType<typeof client.api.home.health.services.$get, 200>;
 
 // ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
@@ -260,5 +256,17 @@ export const api = {
     });
     await throwIfError(res);
     return (await res.json()) as GetJourneyAssessmentsSuccess;
+  },
+
+  getHomeSummary: async (): Promise<GetHomeSummarySuccess> => {
+    const res = await client.api.home.summary.$get();
+    await throwIfError(res);
+    return (await res.json()) as GetHomeSummarySuccess;
+  },
+
+  getServiceHealth: async (): Promise<GetServiceHealthSuccess> => {
+    const res = await client.api.home.health.services.$get();
+    await throwIfError(res);
+    return (await res.json()) as GetServiceHealthSuccess;
   },
 };

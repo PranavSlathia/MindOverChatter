@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api.js";
 import { cn } from "@/lib/utils.js";
+import { useServiceHealthStore } from "@/stores/service-health-store.js";
 import type { CrisisResponse, Message } from "@/stores/session-store.js";
 
 interface MessageBubbleProps {
@@ -21,6 +22,7 @@ function TTSButton({ text }: { text: string }) {
   const [state, setState] = useState<"idle" | "loading" | "playing" | "error">("idle");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const ttsAvailable = useServiceHealthStore((s) => s.tts.available);
 
   // Clean up object URL and audio on unmount
   useEffect(() => {
@@ -76,6 +78,11 @@ function TTSButton({ text }: { text: string }) {
     }
   }, [text, state]);
 
+  // Hide entirely when TTS service is unavailable
+  if (!ttsAvailable) {
+    return null;
+  }
+
   if (state === "error") {
     return null;
   }
@@ -87,6 +94,7 @@ function TTSButton({ text }: { text: string }) {
       disabled={state === "loading"}
       className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-foreground/40 transition-colors hover:bg-foreground/10 hover:text-foreground/60 disabled:cursor-not-allowed disabled:opacity-50"
       aria-label={state === "playing" ? "Stop reading aloud" : "Read aloud"}
+      title={state === "playing" ? "Stop reading aloud" : "Read aloud"}
     >
       {state === "loading" ? (
         <svg

@@ -321,33 +321,8 @@ export function HistoryPage() {
   }, [offset]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-foreground/10 bg-background px-4 py-3 shadow-sm">
-        <div>
-          <h1 className="text-lg font-semibold leading-tight text-primary">Session History</h1>
-          <p className="text-xs text-foreground/60">Review past conversations</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/mood"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Mood tracker"
-          >
-            Mood
-          </Link>
-          <Link
-            to="/chat"
-            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Back to chat"
-          >
-            Back to Chat
-          </Link>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="mx-auto max-w-2xl px-4 py-6">
+    <div>
+      <div className="mx-auto max-w-2xl px-4 py-6">
         {/* Loading state */}
         {isLoading && (
           <div className="flex h-64 items-center justify-center">
@@ -411,7 +386,7 @@ export function HistoryPage() {
             )}
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

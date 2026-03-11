@@ -57,17 +57,95 @@ export const JourneyTimelineResponseSchema = z.object({
   offset: z.number(),
 });
 
-// ── Journey Insights ─────────────────────────────────────────────
+// ── Journey Formulation ──────────────────────────────────────────
 
-export const JourneyInsightsResponseSchema = z.object({
-  clinicalUnderstanding: z.string(),
-  userReflection: z.string(),
-  actionItems: z.array(z.string()),
-  patterns: z.object({
-    recurring_triggers: z.array(z.object({ id: z.string(), content: z.string() })),
-    unresolved_threads: z.array(z.object({ id: z.string(), content: z.string() })),
-    wins: z.array(z.object({ id: z.string(), content: z.string() })),
+export const DomainKeySchema = z.enum([
+  "connection",
+  "momentum",
+  "groundedness",
+  "meaning",
+  "self_regard",
+  "vitality",
+]);
+
+const EvidenceRefSchema = z.object({
+  sourceType: z.string(),
+  sourceId: z.string().optional(),
+});
+
+const DomainSignalSchema = z.object({
+  level: z.enum(["low", "medium", "high"]),
+  trend: z.enum(["improving", "stable", "declining"]),
+  evidence: z.string(),
+});
+
+export const JourneyFormulationSchema = z.object({
+  // Internal structured formulation (clinical-grade, not shown raw)
+  formulation: z.object({
+    presentingTheme: z.string(),
+    roots: z.array(
+      z.object({
+        content: z.string(),
+        sourceType: z.string(),
+        confidence: z.number(),
+        evidenceRefs: z.array(EvidenceRefSchema).optional(),
+      }),
+    ),
+    recentActivators: z.array(
+      z.object({
+        content: z.string(),
+        confidence: z.number(),
+        evidenceRefs: z.array(EvidenceRefSchema).optional(),
+      }),
+    ),
+    perpetuatingCycles: z.array(
+      z.object({
+        pattern: z.string(),
+        mechanism: z.string(),
+        evidenceRefs: z.array(EvidenceRefSchema).optional(),
+      }),
+    ),
+    protectiveStrengths: z.array(
+      z.object({
+        content: z.string(),
+        sourceType: z.string(),
+        evidenceRefs: z.array(EvidenceRefSchema).optional(),
+      }),
+    ),
   }),
+  // User-facing reflection layer — how we communicate the formulation warmly
+  userReflection: z.object({
+    summary: z.string(),
+    encouragement: z.string(),
+  }),
+  activeStates: z.array(
+    z.object({
+      label: z.string(),
+      confidence: z.number(),
+      signal: z.string(),
+      domain: DomainKeySchema,
+      evidenceRefs: z.array(EvidenceRefSchema).optional(),
+    }),
+  ),
+  domainSignals: z
+    .object({
+      connection: DomainSignalSchema,
+      momentum: DomainSignalSchema,
+      groundedness: DomainSignalSchema,
+      meaning: DomainSignalSchema,
+      self_regard: DomainSignalSchema,
+      vitality: DomainSignalSchema,
+    })
+    .partial(),
+  questionsWorthExploring: z.array(
+    z.object({
+      question: z.string(),
+      rationale: z.string(),
+      linkedTo: z.string(),
+    }),
+  ),
+  themeOfToday: z.string(),
+  dataConfidence: z.enum(["sparse", "emerging", "established"]),
   moodTrend: z.object({
     direction: z.enum(["improving", "stable", "declining"]),
     period: z.string(),
@@ -87,5 +165,6 @@ export const AssessmentHistoryQuerySchema = z.object({
 export type JourneyTimelineQuery = z.infer<typeof JourneyTimelineQuerySchema>;
 export type JourneyTimelineItem = z.infer<typeof JourneyTimelineItemSchema>;
 export type JourneyTimelineResponse = z.infer<typeof JourneyTimelineResponseSchema>;
-export type JourneyInsightsResponse = z.infer<typeof JourneyInsightsResponseSchema>;
+export type JourneyFormulation = z.infer<typeof JourneyFormulationSchema>;
+export type DomainKey = z.infer<typeof DomainKeySchema>;
 export type AssessmentHistoryQuery = z.infer<typeof AssessmentHistoryQuerySchema>;

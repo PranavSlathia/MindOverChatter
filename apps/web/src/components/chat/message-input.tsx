@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder.js";
 import { api } from "@/lib/api.js";
+import { useServiceHealthStore } from "@/stores/service-health-store.js";
 
 interface MessageInputProps {
   onSend: (text: string) => void;
@@ -24,6 +25,8 @@ export function MessageInput({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const whisperAvailable = useServiceHealthStore((s) => s.whisper.available);
 
   const {
     isRecording,
@@ -129,7 +132,13 @@ export function MessageInput({
     return () => clearTimeout(timer);
   }, [voiceError]);
 
-  const micDisabled = disabled || isTranscribing;
+  const micDisabled = disabled || isTranscribing || !whisperAvailable;
+
+  const micTitle = !whisperAvailable
+    ? "Voice input unavailable — service is offline"
+    : isRecording
+      ? "Stop recording"
+      : "Start voice recording";
 
   return (
     <div className="border-t border-foreground/10 bg-background">
@@ -166,7 +175,8 @@ export function MessageInput({
               ? "animate-pulse bg-destructive text-white"
               : "bg-foreground/10 text-foreground/60 hover:bg-foreground/15 hover:text-foreground/80"
           }`}
-          aria-label={isRecording ? "Stop recording" : "Start voice recording"}
+          aria-label={micTitle}
+          title={micTitle}
         >
           {isTranscribing ? (
             <svg

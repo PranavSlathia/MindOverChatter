@@ -34,17 +34,22 @@ export function EmotionToggle() {
         onClick={handleToggle}
         disabled={isLoading}
         className={cn(
-          "relative flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+          "relative flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs",
+          "font-medium transition-colors",
           isActive
             ? "border-primary/30 bg-primary/10 text-primary"
             : "border-foreground/15 text-foreground/60 hover:bg-foreground/5 hover:text-foreground",
           isLoading && "cursor-wait opacity-60",
         )}
-        aria-label={isActive ? "Disable emotion detection" : "Enable emotion detection"}
+        aria-label={
+          isActive
+            ? "Disable facial emotion detection"
+            : "Enable facial emotion detection — camera stays local"
+        }
         aria-pressed={isActive}
-        title="Your camera stays local — only emotion scores are sent"
+        title="Face Emotion — your camera stays local, only emotion scores are sent"
       >
-        {/* Camera icon (simple SVG) */}
+        {/* Face/smile icon — clearly communicates emotion detection, not photo capture */}
         <svg
           width="14"
           height="14"
@@ -56,12 +61,14 @@ export function EmotionToggle() {
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-          <circle cx="12" cy="13" r="4" />
+          <circle cx="12" cy="12" r="10" />
+          <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+          <line x1="9" y1="9" x2="9.01" y2="9" />
+          <line x1="15" y1="9" x2="15.01" y2="9" />
         </svg>
-        {isLoading ? "Starting..." : isActive ? "On" : "Off"}
+        {isLoading ? "Starting..." : isActive ? "Emotion On" : "Emotion"}
         {isActive && (
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" aria-hidden="true" />
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
         )}
       </button>
 
