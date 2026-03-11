@@ -9,6 +9,7 @@ import { CreateMoodLogSchema } from "@moc/shared";
 import { db } from "../db/index.js";
 import { moodLogs } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
+import { invalidateInsightsCache } from "./journey.js";
 
 const app = new Hono()
 
@@ -29,6 +30,9 @@ const app = new Hono()
         source: body.source,
       })
       .returning();
+
+    // New mood data invalidates journey insights cache
+    invalidateInsightsCache();
 
     return c.json(
       {

@@ -5,7 +5,7 @@
 
 import { zValidator } from "@hono/zod-validator";
 import { AssessmentHistoryQuerySchema, JourneyTimelineQuerySchema } from "@moc/shared";
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { Hono } from "hono";
 import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
@@ -49,6 +49,10 @@ const app = new Hono()
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
 
+    // Over-fetch from each source so the merged result has enough rows
+    // for correct offset + limit slicing across all types.
+    const fetchLimit = limit + offset;
+
     // Fetch all four data types in parallel
     const [sessionRows, memoryRows, assessmentRows, moodRows] = await Promise.all([
       // Sessions with summaries
@@ -74,9 +78,9 @@ const app = new Hono()
           ),
         )
         .orderBy(desc(sessions.startedAt))
-        .limit(limit),
+        .limit(fetchLimit),
 
-      // Memories (non-superseded, high confidence)
+      // Memories (non-superseded, high confidence only)
       db
         .select({
           id: memories.id,
@@ -89,12 +93,14 @@ const app = new Hono()
         .where(
           and(
             eq(memories.userId, user.id),
+            isNull(memories.supersededBy),
+            gte(memories.confidence, 0.5),
             fromDate ? gte(memories.createdAt, fromDate) : undefined,
             toDate ? lte(memories.createdAt, toDate) : undefined,
           ),
         )
         .orderBy(desc(memories.createdAt))
-        .limit(limit),
+        .limit(fetchLimit),
 
       // Assessments
       db
@@ -114,7 +120,7 @@ const app = new Hono()
           ),
         )
         .orderBy(desc(assessments.createdAt))
-        .limit(limit),
+        .limit(fetchLimit),
 
       // Mood logs
       db
@@ -133,7 +139,7 @@ const app = new Hono()
           ),
         )
         .orderBy(desc(moodLogs.createdAt))
-        .limit(limit),
+        .limit(fetchLimit),
     ]);
 
     // Merge into a unified timeline sorted by date (descending)

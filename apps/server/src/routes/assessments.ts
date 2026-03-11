@@ -12,6 +12,7 @@ import { getOrCreateUser } from "../db/helpers.js";
 import { sessionEmitter } from "../sse/emitter.js";
 import { computeSeverity, getNextScreener } from "./assessment-scoring.js";
 import { buildAssessmentContextBlock, buildFormulationText, SEVERITY_DESCRIPTIONS } from "./assessment-context.js";
+import { invalidateInsightsCache } from "./journey.js";
 import { injectSessionContext } from "../sdk/session-manager.js";
 import { addMemoriesAsync } from "../services/memory-client.js";
 import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
@@ -104,6 +105,9 @@ const app = new Hono()
         parentAssessmentId: parentAssessmentId ?? null,
       })
       .returning();
+
+    // New assessment data invalidates journey insights cache
+    invalidateInsightsCache();
 
     // Emit SSE event for assessment completion (human-readable severity for frontend)
     sessionEmitter.emit(sessionId, {

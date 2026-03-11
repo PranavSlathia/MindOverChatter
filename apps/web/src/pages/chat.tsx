@@ -114,6 +114,7 @@ export function ChatPage() {
         }
         // Clean up streaming state
         streamingMessageIdRef.current = null;
+        setThinking(false);
         setStreaming(false);
         clearStreamingContent();
       });
