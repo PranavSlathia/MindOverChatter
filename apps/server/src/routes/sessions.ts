@@ -666,7 +666,7 @@ async function streamAiResponse(
 
 // ── Assessment Signal Detection ──────────────────────────────────
 
-interface AssessmentSignals {
+export interface AssessmentSignals {
   phq9Score: number;
   gad7Score: number;
   evidenceMessages: number;
@@ -676,7 +676,7 @@ interface AssessmentSignals {
  * Deterministic signal detector for assessment candidacy.
  * Scans recent messages for clinical indicators.
  */
-function detectAssessmentSignals(
+export function detectAssessmentSignals(
   recentMessages: Array<{ role: string; content: string }>,
 ): AssessmentSignals {
   const userMessages = recentMessages.filter((m) => m.role === "user");
