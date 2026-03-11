@@ -1,5 +1,6 @@
 import { HELPLINES } from "@moc/shared";
 import { useCallback, useEffect, useRef } from "react";
+import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
 import { CrisisBanner, MessageBubble, StreamingBubble } from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
@@ -16,6 +17,7 @@ export function ChatPage() {
     isCrisis,
     crisisResponse,
     sessionSummary,
+    activeAssessment,
     setSessionId,
     setStatus,
     addMessage,
@@ -25,6 +27,8 @@ export function ChatPage() {
     clearStreamingContent,
     setCrisis,
     setSessionSummary,
+    startAssessment,
+    completeAssessment,
     reset,
   } = useSessionStore();
 
@@ -36,7 +40,7 @@ export function ChatPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional scroll triggers
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent, isCrisis]);
+  }, [messages, streamingContent, isCrisis, activeAssessment]);
 
   // Connect SSE for a given session
   const connectSSE = useCallback(
@@ -158,6 +162,34 @@ export function ChatPage() {
         setStatus("completed");
       });
 
+      es.addEventListener("assessment.start", (event) => {
+        try {
+          const data = JSON.parse(event.data) as { assessmentType: string };
+          if (data.assessmentType) {
+            startAssessment({ assessmentType: data.assessmentType });
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      });
+
+      es.addEventListener("assessment.complete", (event) => {
+        try {
+          const data = JSON.parse(event.data) as {
+            assessmentId: string;
+            severity: string;
+            nextScreener: string | null;
+          };
+          completeAssessment({
+            assessmentId: data.assessmentId,
+            severity: data.severity,
+            nextScreener: data.nextScreener,
+          });
+        } catch {
+          // Ignore parse errors
+        }
+      });
+
       es.onerror = () => {
         setConnected(false);
       };
@@ -173,6 +205,8 @@ export function ChatPage() {
       setCrisis,
       setStatus,
       setSessionSummary,
+      startAssessment,
+      completeAssessment,
     ],
   );
 
@@ -217,7 +251,7 @@ export function ChatPage() {
         const url = `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/sessions/${sid}/end`;
         navigator.sendBeacon(
           url,
-          new Blob([JSON.stringify({ reason: "page_unload" })], {
+          new Blob([JSON.stringify({ reason: "beforeunload" })], {
             type: "application/json",
           }),
         );
@@ -265,7 +299,7 @@ export function ChatPage() {
       console.error("Failed to end session:", err);
     }
     eventSourceRef.current?.close();
-  }, [sessionId, setStatus, setSessionSummary]);
+  }, [sessionId, setStatus]);
 
   const handleNewSession = useCallback(() => {
     eventSourceRef.current?.close();
@@ -312,6 +346,13 @@ export function ChatPage() {
           ))}
 
           {isStreaming && <StreamingBubble content={streamingContent} />}
+
+          {activeAssessment && (
+            <AssessmentWidget
+              assessmentType={activeAssessment.assessmentType}
+              parentAssessmentId={activeAssessment.parentAssessmentId}
+            />
+          )}
 
           {isCrisis && crisisResponse && <CrisisBanner crisisResponse={crisisResponse} />}
 

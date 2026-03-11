@@ -12,6 +12,18 @@ export interface CrisisResponse {
   helplines: Array<{ name: string; number: string; country: string }>;
 }
 
+export interface ActiveAssessment {
+  assessmentType: string;
+  /** Parent assessment ID for screener chaining (set after first submission). */
+  parentAssessmentId?: string;
+}
+
+export interface AssessmentResult {
+  assessmentId: string;
+  severity: string;
+  nextScreener: string | null;
+}
+
 interface SessionState {
   sessionId: string | null;
   status: "idle" | "active" | "completed" | "crisis_escalated";
@@ -22,6 +34,10 @@ interface SessionState {
   isCrisis: boolean;
   crisisResponse: CrisisResponse | null;
   sessionSummary: string | null;
+
+  // Assessment state
+  activeAssessment: ActiveAssessment | null;
+  assessmentResult: AssessmentResult | null;
 
   setSessionId: (id: string | null) => void;
   setStatus: (status: SessionState["status"]) => void;
@@ -34,6 +50,9 @@ interface SessionState {
   setCrisis: (response: CrisisResponse) => void;
   clearCrisis: () => void;
   setSessionSummary: (summary: string | null) => void;
+  startAssessment: (assessment: ActiveAssessment) => void;
+  completeAssessment: (result: AssessmentResult) => void;
+  dismissAssessment: () => void;
   reset: () => void;
 }
 
@@ -47,6 +66,8 @@ export const useSessionStore = create<SessionState>((set) => ({
   isCrisis: false,
   crisisResponse: null,
   sessionSummary: null,
+  activeAssessment: null,
+  assessmentResult: null,
 
   setSessionId: (id) => set({ sessionId: id }),
   setStatus: (status) => set({ status }),
@@ -64,6 +85,9 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ isCrisis: true, crisisResponse: response, status: "crisis_escalated" }),
   clearCrisis: () => set({ isCrisis: false, crisisResponse: null }),
   setSessionSummary: (summary) => set({ sessionSummary: summary }),
+  startAssessment: (assessment) => set({ activeAssessment: assessment, assessmentResult: null }),
+  completeAssessment: (result) => set({ assessmentResult: result }),
+  dismissAssessment: () => set({ activeAssessment: null, assessmentResult: null }),
   reset: () =>
     set({
       sessionId: null,
@@ -75,5 +99,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       isCrisis: false,
       crisisResponse: null,
       sessionSummary: null,
+      activeAssessment: null,
+      assessmentResult: null,
     }),
 }));

@@ -11,6 +11,9 @@ import { assessments, sessions } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { sessionEmitter } from "../sse/emitter.js";
 import { computeSeverity, getNextScreener } from "./assessment-scoring.js";
+import { buildAssessmentContextBlock, buildFormulationText } from "./assessment-context.js";
+import { injectSessionContext } from "../sdk/session-manager.js";
+import { addMemoriesAsync } from "../services/memory-client.js";
 import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
 
 const app = new Hono()
@@ -111,6 +114,26 @@ const app = new Hono()
         nextScreener,
       },
     });
+
+    // ── Post-Assessment Context Injection ────────────────────────
+    // Inject assessment results into the SDK session so Claude can
+    // naturally reference them in subsequent messages.
+    if (session.sdkSessionId) {
+      const contextBlock = buildAssessmentContextBlock(type, severity, nextScreener);
+      injectSessionContext(session.sdkSessionId, contextBlock);
+    }
+
+    // ── Formulation Storage as symptom_episode Memory ────────────
+    // Fire-and-forget: store a structured formulation for longitudinal tracking.
+    // The formulation is INTERNAL ONLY — never returned in any API response.
+    const formulationText = buildFormulationText(type, severity, nextScreener);
+    addMemoriesAsync(
+      user.id,
+      sessionId,
+      assessment!.id, // Use assessment ID as the source message ID for provenance
+      [{ role: "assistant", content: formulationText }],
+      { memoryType: "symptom_episode" },
+    );
 
     return c.json(
       {

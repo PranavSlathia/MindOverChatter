@@ -19,6 +19,13 @@ export interface EndSessionResponse {
   endedAt: string;
 }
 
+export interface SubmitAssessmentResponse {
+  assessmentId: string;
+  totalScore: number;
+  severity: string;
+  nextScreener: string | null;
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -50,4 +57,16 @@ export const api = {
 
   subscribeToEvents: (sessionId: string): EventSource =>
     new EventSource(`${API_BASE}/api/sessions/${sessionId}/events`),
+
+  submitAssessment: (body: {
+    sessionId: string;
+    type: string;
+    answers: number[];
+    parentAssessmentId?: string;
+  }): Promise<SubmitAssessmentResponse> =>
+    fetch(`${API_BASE}/api/assessments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => handleResponse<SubmitAssessmentResponse>(r)),
 };
