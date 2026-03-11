@@ -45,13 +45,22 @@ export function MoodPage() {
           <h1 className="text-lg font-semibold leading-tight text-primary">Mood Tracker</h1>
           <p className="text-xs text-foreground/60">Track how you feel over time</p>
         </div>
-        <Link
-          to="/chat"
-          className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-          aria-label="Back to chat"
-        >
-          Back to Chat
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/history"
+            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            aria-label="Session history"
+          >
+            History
+          </Link>
+          <Link
+            to="/chat"
+            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            aria-label="Back to chat"
+          >
+            Back to Chat
+          </Link>
+        </div>
       </header>
 
       {/* Content */}

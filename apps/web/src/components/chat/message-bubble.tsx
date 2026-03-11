@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api.js";
 import { cn } from "@/lib/utils.js";
 import type { CrisisResponse, Message } from "@/stores/session-store.js";
 
@@ -14,6 +16,137 @@ function formatTime(dateStr: string): string {
   }
 }
 
+/** Small speaker button for TTS playback on assistant messages. */
+function TTSButton({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "playing" | "error">("idle");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  // Clean up object URL and audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleClick = useCallback(async () => {
+    // If currently playing, stop it
+    if (state === "playing" && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setState("idle");
+      return;
+    }
+
+    setState("loading");
+    try {
+      const blob = await api.synthesize(text);
+      // Clean up previous object URL if any
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+      }
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setState("idle");
+      };
+      audio.onerror = () => {
+        setState("error");
+        // Auto-reset to idle after a moment
+        setTimeout(() => setState("idle"), 2000);
+      };
+
+      await audio.play();
+      setState("playing");
+    } catch {
+      setState("error");
+      // Auto-reset to idle after a moment so the user can retry
+      setTimeout(() => setState("idle"), 2000);
+    }
+  }, [text, state]);
+
+  if (state === "error") {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={state === "loading"}
+      className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-foreground/40 transition-colors hover:bg-foreground/10 hover:text-foreground/60 disabled:cursor-not-allowed disabled:opacity-50"
+      aria-label={state === "playing" ? "Stop reading aloud" : "Read aloud"}
+    >
+      {state === "loading" ? (
+        <svg
+          className="h-3 w-3 animate-spin"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+          />
+        </svg>
+      ) : state === "playing" ? (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-3 w-3"
+          aria-hidden="true"
+        >
+          {/* Square/stop icon */}
+          <rect x="6" y="6" width="12" height="12" rx="1" />
+        </svg>
+      ) : (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-3 w-3"
+          aria-hidden="true"
+        >
+          {/* Speaker/volume icon */}
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
@@ -26,11 +159,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         )}
       >
         <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
-        <time
-          className={cn("mt-1 block text-[11px]", isUser ? "text-white/70" : "text-foreground/50")}
+        <div
+          className={cn("mt-1 flex items-center gap-1", isUser ? "justify-end" : "justify-between")}
         >
-          {formatTime(message.createdAt)}
-        </time>
+          <time className={cn("text-[11px]", isUser ? "text-white/70" : "text-foreground/50")}>
+            {formatTime(message.createdAt)}
+          </time>
+          {!isUser && <TTSButton text={message.content} />}
+        </div>
       </div>
     </div>
   );

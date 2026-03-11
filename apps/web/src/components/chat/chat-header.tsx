@@ -31,6 +31,14 @@ export function ChatHeader({ status, onEndSession }: ChatHeaderProps) {
         {status === "active" && <EmotionToggle />}
 
         <Link
+          to="/history"
+          className="rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
+          aria-label="Session history"
+        >
+          History
+        </Link>
+
+        <Link
           to="/mood"
           className="rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
           aria-label="Mood tracker"

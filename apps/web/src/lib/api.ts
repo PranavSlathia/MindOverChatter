@@ -68,12 +68,43 @@ export interface GetMoodLogsResponse {
   entries: MoodLogEntry[];
 }
 
+export interface SessionSummary {
+  id: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  summary: string | null;
+}
+
+export interface GetSessionsResponse {
+  sessions: SessionSummary[];
+  limit: number;
+  offset: number;
+}
+
+export interface SessionMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export interface GetSessionMessagesResponse {
+  messages: SessionMessage[];
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: "Unknown error" }));
     throw new Error((body as { error?: string }).error || `HTTP ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+export interface TranscribeResponse {
+  text: string;
+  language: string;
+  duration: number;
 }
 
 export const api = {
@@ -128,4 +159,39 @@ export const api = {
 
   getMoodLogs: (): Promise<GetMoodLogsResponse> =>
     fetch(`${API_BASE}/api/mood-logs`).then((r) => handleResponse<GetMoodLogsResponse>(r)),
+
+  getSessions: (limit = 20, offset = 0): Promise<GetSessionsResponse> =>
+    fetch(`${API_BASE}/api/sessions?limit=${limit}&offset=${offset}`).then((r) =>
+      handleResponse<GetSessionsResponse>(r),
+    ),
+
+  getSessionMessages: (sessionId: string): Promise<GetSessionMessagesResponse> =>
+    fetch(`${API_BASE}/api/sessions/${sessionId}/messages`).then((r) =>
+      handleResponse<GetSessionMessagesResponse>(r),
+    ),
+
+  /** Send audio blob to whisper service for transcription. Uses multipart/form-data. */
+  transcribe: async (audioBlob: Blob): Promise<TranscribeResponse> => {
+    const formData = new FormData();
+    formData.append("file", audioBlob, "recording.webm");
+    const response = await fetch(`${API_BASE}/api/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+    return handleResponse<TranscribeResponse>(response);
+  },
+
+  /** Send text to TTS service and return audio blob for playback. */
+  synthesize: async (text: string, voice?: string): Promise<Blob> => {
+    const response = await fetch(`${API_BASE}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error((body as { error?: string }).error || `HTTP ${response.status}`);
+    }
+    return response.blob();
+  },
 };

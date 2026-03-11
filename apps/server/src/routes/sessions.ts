@@ -1,5 +1,7 @@
 // ── Session Routes ──────────────────────────────────────────────
+// GET  /              — List all sessions (paginated)
 // POST /              — Create a new session
+// GET  /:id/messages  — Get all messages for a session
 // POST /:id/messages  — Send a user message (crisis check + AI response)
 // GET  /:id/events    — SSE stream for real-time AI chunks
 // POST /:id/end       — End a session
@@ -7,11 +9,11 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
-import { SendMessageSchema, EndSessionSchema } from "@moc/shared";
+import { eq, and, desc, asc } from "drizzle-orm";
+import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
-import { sessions, messages } from "../db/schema/index";
+import { sessions, messages, sessionSummaries } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
@@ -31,6 +33,47 @@ import {
 // ── Route Definitions ────────────────────────────────────────────
 
 const app = new Hono()
+
+  // ── GET / — List Sessions ──────────────────────────────────
+  .get("/", zValidator("query", SessionHistoryQuerySchema), async (c) => {
+    const { limit, offset } = c.req.valid("query");
+    const user = await getOrCreateUser();
+
+    // Fetch sessions for the user, ordered by most recent first
+    const rows = await db
+      .select({
+        id: sessions.id,
+        status: sessions.status,
+        startedAt: sessions.startedAt,
+        endedAt: sessions.endedAt,
+        // Left-join the session-level summary (if one exists)
+        summaryContent: sessionSummaries.content,
+      })
+      .from(sessions)
+      .leftJoin(
+        sessionSummaries,
+        and(
+          eq(sessions.id, sessionSummaries.sessionId),
+          eq(sessionSummaries.level, "session"),
+        ),
+      )
+      .where(eq(sessions.userId, user.id))
+      .orderBy(desc(sessions.startedAt), desc(sessions.id))
+      .limit(limit)
+      .offset(offset);
+
+    return c.json({
+      sessions: rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        startedAt: r.startedAt.toISOString(),
+        endedAt: r.endedAt?.toISOString() ?? null,
+        summary: r.summaryContent ?? null,
+      })),
+      limit,
+      offset,
+    });
+  })
 
   // ── POST / — Create Session ──────────────────────────────────
   .post("/", async (c) => {
@@ -83,6 +126,52 @@ const app = new Hono()
       },
       201,
     );
+  })
+
+  // ── GET /:id/messages — List Session Messages ────────────────
+  .get("/:id/messages", async (c) => {
+    const sessionId = c.req.param("id");
+    const user = await getOrCreateUser();
+
+    // Validate session exists AND belongs to the current user
+    const [session] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+      .limit(1);
+
+    if (!session) {
+      return c.json(
+        { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
+        404,
+      );
+    }
+
+    // Cap at 500 messages to prevent unbounded response sizes
+    const MESSAGE_LIMIT = 500;
+
+    const rows = await db
+      .select({
+        id: messages.id,
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt), asc(messages.id))
+      .limit(MESSAGE_LIMIT);
+
+    return c.json({
+      messages: rows.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt.toISOString(),
+      })),
+      limit: MESSAGE_LIMIT,
+      truncated: rows.length === MESSAGE_LIMIT,
+    });
   })
 
   // ── POST /:id/messages — Send Message ────────────────────────
