@@ -15,6 +15,7 @@ interface UseEmotionDetectionReturn {
   isActive: boolean;
   isSupported: boolean;
   isLoading: boolean;
+  startError: string | null;
   dominantEmotion: string | null;
   rawScores: EmotionScores | null;
   startDetection: () => Promise<void>;
@@ -28,6 +29,7 @@ function checkSupported(): boolean {
 
 export function useEmotionDetection(): UseEmotionDetectionReturn {
   const [isLoading, setIsLoading] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const isSupported = checkSupported();
 
   const { isDetectionActive, dominantEmotion, rawScores, setActive, setEmotion, reset } =
@@ -100,6 +102,7 @@ export function useEmotionDetection(): UseEmotionDetectionReturn {
 
   const startDetection = useCallback(async () => {
     if (isDetectionActive || !isSupported) return;
+    setStartError(null);
     setIsLoading(true);
 
     try {
@@ -152,8 +155,17 @@ export function useEmotionDetection(): UseEmotionDetectionReturn {
       // Run first detection immediately
       detectOnce();
     } catch (err) {
-      // Camera permission denied or Human.js load failure
-      console.error("Emotion detection failed to start:", err);
+      let msg = "Could not start camera";
+      if (err instanceof Error) {
+        if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+          msg = "No camera found on this device";
+        } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          msg = "Camera access denied — check browser settings";
+        } else if (err.name === "NotReadableError") {
+          msg = "Camera is in use by another app";
+        }
+      }
+      setStartError(msg);
       // Clean up partial state
       if (streamRef.current) {
         for (const track of streamRef.current.getTracks()) {
@@ -214,6 +226,7 @@ export function useEmotionDetection(): UseEmotionDetectionReturn {
     isActive: isDetectionActive,
     isSupported,
     isLoading,
+    startError,
     dominantEmotion,
     rawScores,
     startDetection,

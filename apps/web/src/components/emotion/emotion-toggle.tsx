@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils.js";
 
 /** Compact emotion detection toggle for the chat header area. */
 export function EmotionToggle() {
-  const { isActive, isSupported, isLoading, dominantEmotion, startDetection, stopDetection } =
+  const { isActive, isSupported, isLoading, startError, dominantEmotion, startDetection, stopDetection } =
     useEmotionDetection();
 
   if (!isSupported) {
@@ -72,7 +72,10 @@ export function EmotionToggle() {
         )}
       </button>
 
-      {!isActive && !isLoading && (
+      {startError && (
+        <span className="text-[10px] text-destructive/80">{startError}</span>
+      )}
+      {!isActive && !isLoading && !startError && (
         <span className="hidden text-[10px] text-foreground/40 sm:inline">Camera stays local</span>
       )}
     </div>
