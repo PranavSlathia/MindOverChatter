@@ -19,6 +19,11 @@ class SearchMemoryRequest(BaseModel):
     user_id: str
     query: str
     limit: int = 15
+    memory_types: list[str] | None = None
+
+
+class UpdateMemoryRequest(BaseModel):
+    content: str
 
 
 class SummarizeRequest(BaseModel):
@@ -54,6 +59,12 @@ async def get_all_memories(user_id: str):
 async def summarize_session(request: SummarizeRequest):
     # TODO: implement session summary storage (Phase 3)
     return {"stored": False}
+
+
+@app.put("/memories/{memory_id}")
+async def update_memory(memory_id: str, request: UpdateMemoryRequest):
+    # TODO: implement Mem0 memory update (Phase 3)
+    return {"updated": False}
 
 
 @app.delete("/memories/{memory_id}")

@@ -14,3 +14,9 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+
+# Build artifacts
+*.tsbuildinfo
+
+# Dev scripts
+tmux-dev.sh
