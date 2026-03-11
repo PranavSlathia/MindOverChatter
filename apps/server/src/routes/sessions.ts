@@ -823,23 +823,34 @@ async function checkAssessmentEligibility(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n\n");
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: ASSESSMENT_ELIGIBILITY_PROMPT },
-        { role: "user", content: formatted },
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 150,
-      temperature: 0,
-    }),
-  });
+  const groqAbort = new AbortController();
+  const groqTimeout = setTimeout(() => groqAbort.abort(), 15_000);
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: ASSESSMENT_ELIGIBILITY_PROMPT },
+          { role: "user", content: formatted },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 150,
+        temperature: 0,
+      }),
+      signal: groqAbort.signal,
+    });
+  } catch {
+    return; // Timeout or network error — degrade gracefully
+  } finally {
+    clearTimeout(groqTimeout);
+  }
 
   if (!response.ok) return;
 

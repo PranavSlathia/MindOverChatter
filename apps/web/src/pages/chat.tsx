@@ -34,6 +34,7 @@ export function ChatPage() {
     setSessionSummary,
     startAssessment,
     completeAssessment,
+    dismissAssessment,
     reset,
   } = useSessionStore();
 
@@ -198,6 +199,10 @@ export function ChatPage() {
               assessmentType: data.nextScreener,
               parentAssessmentId: data.assessmentId,
             });
+          } else {
+            // No next screener — dismiss the widget after a brief delay
+            // so the user sees the completion state
+            setTimeout(() => dismissAssessment(), 3000);
           }
         } catch {
           // Ignore parse errors

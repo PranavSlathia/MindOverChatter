@@ -100,6 +100,22 @@ describe("Golden Replay — Crisis Keyword Detection & Negation", () => {
       expect(result.isNegated).toBe(false);
     });
 
+    it("KNOWN DESIGN LIMITATION — negation spillover: 'I'm not suicidal but I want to die'", () => {
+      // The word "not" in "not suicidal" falls within the 25-char window before "want to die".
+      // This causes isNegated=true at the keyword level, which routes through Haiku (Stage 2).
+      // This is NOT a safety gap because:
+      //   1. Haiku sees the full message and will classify "want to die" as crisis.
+      //   2. If Haiku fails, the fallback is isCrisis=true (conservative).
+      const result = detectKeywords(
+        "I'm not suicidal but I want to die",
+      );
+      expect(result.detected).toBe(true);
+      expect(result.severity).toBe("high");
+      // isNegated=true due to spillover — "not" in "not suicidal" is within 25 chars of "want to die"
+      // This routes to Haiku which will correctly identify crisis from full context
+      expect(result.isNegated).toBe(true);
+    });
+
     it("distant negation does NOT suppress: 'I'm not feeling well and I want to kill myself'", () => {
       const result = detectKeywords(
         "I'm not feeling well and I want to kill myself",
@@ -264,6 +280,26 @@ describe("Golden Replay — Crisis Pipeline Orchestration", () => {
       );
 
       expect(result.isCrisis).toBe(true);
+    });
+  });
+
+  describe("DESIGN LIMITATION — negation spillover routes through Haiku safely", () => {
+    it("'I'm not suicidal but I want to die' → Haiku sees full context, catches crisis", async () => {
+      // The keyword detector marks isNegated=true due to spillover.
+      // But Haiku classifies correctly from the full message.
+      mockClassify.mockResolvedValue(haikuResult("crisis"));
+      const result = await detectCrisis("I'm not suicidal but I want to die");
+
+      expect(result.isCrisis).toBe(true);
+      expect(mockClassify).toHaveBeenCalled(); // Routed to Haiku (not short-circuited)
+      expect(result.stages).toContain("haiku");
+    });
+
+    it("'I'm not suicidal but I want to die' → Haiku fails → safety fallback to crisis", async () => {
+      mockClassify.mockResolvedValue(null);
+      const result = await detectCrisis("I'm not suicidal but I want to die");
+
+      expect(result.isCrisis).toBe(true); // Conservative fallback
     });
   });
 
