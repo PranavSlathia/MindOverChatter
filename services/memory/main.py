@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("moc.memory")
@@ -44,6 +44,7 @@ VALID_MEMORY_TYPES = {
     "unresolved_thread",
     "safety_critical",
     "win",
+    "session_summary",
 }
 
 # ---------------------------------------------------------------------------
@@ -113,7 +114,7 @@ def _build_mem0_config() -> dict:
                 "user": db_user,
                 "password": db_password,
                 "dbname": db_name,
-                "collection_name": "memories",
+                "collection_name": "mem0_vectors",
                 "embedding_model_dims": 1024,
             },
         },
@@ -307,10 +308,11 @@ def _normalize_search_result(result: Any) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
-async def health():
+async def health(response: Response):
     """Health check reflecting Mem0 initialization status."""
     if _memory_client is not None:
         return {"status": "ok", "service": "memory", "mem0": "initialized"}
+    response.status_code = 503
     return {
         "status": "degraded",
         "service": "memory",
@@ -487,7 +489,7 @@ async def summarize_session(request: SummarizeRequest):
             metadata={
                 "session_id": request.session_id,
                 "level": "session",
-                "memory_type": "unresolved_thread",
+                "memory_type": "session_summary",
             },
         )
     except Exception as exc:

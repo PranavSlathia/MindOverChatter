@@ -11,6 +11,7 @@ export const MemoryTypeSchema = z.enum([
   "unresolved_thread",
   "safety_critical",
   "win",
+  "session_summary",
 ]);
 
 export const SearchMemoriesSchema = z.object({

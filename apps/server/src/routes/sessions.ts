@@ -69,8 +69,24 @@ const app = new Hono()
     const user = await getOrCreateUser();
 
     // Retrieve memories for session context (BLOCKING — returns [] on failure)
-    const rawMemories = await searchMemories(user.id, "user context and therapeutic goals");
-    const mappedMemories = rawMemories.map((m) => ({
+    // Two parallel searches: general context + explicit safety_critical
+    const [generalMemories, safetyMemories] = await Promise.all([
+      searchMemories(user.id, "user context and therapeutic goals"),
+      searchMemories(user.id, "safety concerns, crisis history, medications", 5, ["safety_critical"]),
+    ]);
+
+    // Merge and deduplicate (safety_critical may overlap with general results)
+    const seenIds = new Set<string>();
+    const allMemories: typeof generalMemories = [];
+    // Safety-critical first (highest priority)
+    for (const m of safetyMemories) {
+      if (!seenIds.has(m.id)) { seenIds.add(m.id); allMemories.push(m); }
+    }
+    for (const m of generalMemories) {
+      if (!seenIds.has(m.id)) { seenIds.add(m.id); allMemories.push(m); }
+    }
+
+    const mappedMemories = allMemories.map((m) => ({
       content: m.content,
       memoryType: m.memoryType,
       confidence: m.confidence,

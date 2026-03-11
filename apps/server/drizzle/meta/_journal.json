@@ -8,6 +8,13 @@
       "when": 1773207320546,
       "tag": "0000_round_makkari",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773223722783,
+      "tag": "0001_moaning_maverick",
+      "breakpoints": true
     }
   ]
 }

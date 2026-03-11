@@ -48,15 +48,21 @@ export async function searchMemories(
   userId: string,
   query: string,
   limit: number = 10,
+  memoryTypes?: string[],
 ): Promise<MemorySearchResult[]> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
 
+    const body: Record<string, unknown> = { user_id: userId, query, limit };
+    if (memoryTypes && memoryTypes.length > 0) {
+      body.memory_types = memoryTypes;
+    }
+
     const response = await fetch(`${env.MEMORY_SERVICE_URL}/memories/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, query, limit }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -218,6 +224,7 @@ async function persistProvenance(
         "unresolved_thread",
         "safety_critical",
         "win",
+        "session_summary",
       ] as const;
 
       type ValidMemoryType = (typeof validTypes)[number];
