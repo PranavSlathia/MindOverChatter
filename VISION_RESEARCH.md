@@ -93,7 +93,7 @@ Each "Build Now" feature has a one-line ship/no-ship gate below. These are evalu
 - **Outreach policy**: The app may note patterns *once* per observation ("I noticed you haven't been by in a while"). It does not nag, escalate, or repeatedly flag disengagement
 - **Silence is not a diagnosis**: A user who stops using the app may be doing well, may be busy, may have found a therapist. The app must never interpret disengagement as deterioration without explicit user confirmation
 - **Failure boundary**: If the user disables insights or says "stop noticing," the feature stays off permanently until re-enabled
-- **Kill switch**: If false-positive outreach rate exceeds threshold (TBD during testing), auto-disable
+- **Kill switch**: If false-positive outreach rate exceeds 30% in internal testing, auto-disable
 
 **Open source tools**:
 - No external tools needed for v1 — just query your own session/message tables
@@ -153,21 +153,26 @@ Each "Build Now" feature has a one-line ship/no-ship gate below. These are evalu
 
 ---
 
-## 5. Tiered Memory Architecture (Mem0 + Graphiti + Letta)
+## 5. Memory Architecture — v1: Mem0, v2: Temporal Graph + Editable Memory
 
-**The gap**: Mem0 gives us cheap fact extraction and retrieval, but it treats memories as flat key-value pairs. It doesn't know *when* something changed, *what replaced what*, or let users inspect and edit their own memory. The moat isn't just remembering — it's knowing what changed, when, and what evidence supports it.
+**The gap**: Flat fact extraction isn't enough. The moat is knowing what changed, when, and what evidence supports it.
 
-**What to build**:
-- **Layer 1 — Mem0** (v1, already planned): Fast fact extraction from conversation turns. Cheap, proven, handles dedup
-- **Layer 2 — Graphiti** (v2 sidecar): Temporal knowledge graph that tracks *state changes* over time. "User had insomnia → started evening walks → insomnia resolved" becomes a graph with timestamped edges, not three disconnected facts. Don't replace Postgres/pgvector — extend it as a sidecar
-- **Layer 3 — Letta** (v2+): User-facing editable memory. Users can see what the AI "knows" about them, confirm facts, correct mistakes, delete memories. Letta's architecture treats memory as a first-class stateful object the user co-owns
+**v1 — Mem0 (Build Now)**:
+- Fast fact extraction from conversation turns with typed memories and provenance
+- Cheap, proven, handles dedup
+- Already planned — see MEM0_INTEGRATION_PLAN.md
 
-**Open source tools**:
-- [Graphiti](https://github.com/getzep/graphiti) — temporal knowledge graph for AI agents, by Zep. Tracks entity state changes over time with timestamped edges
-- [Letta](https://github.com/letta-ai/letta) (formerly MemGPT) — stateful AI agents with editable, inspectable memory. Open source, MIT license
-- Mem0 (already in our stack)
+**v2 — Graphiti temporal graph sidecar (Deferred)**:
+- Tracks *state changes* over time: "User had insomnia → started evening walks → insomnia resolved" becomes a graph with timestamped edges, not three disconnected facts
+- Don't replace Postgres/pgvector — extend it as a sidecar
+- [Graphiti](https://github.com/getzep/graphiti) — temporal knowledge graph for AI agents, by Zep
 
-**Why it matters**: The app should be able to say "sleep dropped for 9 days, anxiety spikes before family calls, activity fell after job loss" — connecting temporal events into a causal narrative. That requires a graph, not a vector store.
+**v2+ — Letta user-editable memory (Deferred)**:
+- Users can see what the AI "knows," confirm facts, correct mistakes, delete memories
+- Requires extraction quality to be proven first — surfacing bad memories destroys trust
+- [Letta](https://github.com/letta-ai/letta) (formerly MemGPT) — stateful AI agents with editable, inspectable memory
+
+**Why it matters**: The app should be able to say "sleep dropped for 9 days, anxiety spikes before family calls, activity fell after job loss" — connecting temporal events into a causal narrative. v1 gets us provenance-backed facts; v2 gets us the graph.
 
 ---
 
