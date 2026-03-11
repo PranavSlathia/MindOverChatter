@@ -32,5 +32,10 @@
     "turbo": "latest",
     "hygen": "latest",
     "@biomejs/biome": "latest"
+  },
+  "pnpm": {
+    "overrides": {
+      "expect-type": "1.2.1"
+    }
   }
 }
