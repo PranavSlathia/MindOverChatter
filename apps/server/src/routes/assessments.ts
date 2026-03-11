@@ -16,6 +16,7 @@ import { buildAssessmentContextBlock, buildFormulationText, SEVERITY_DESCRIPTION
 import { invalidateInsightsCache } from "./journey.js";
 import { injectSessionContext } from "../sdk/session-manager.js";
 import { addMemoriesAsync } from "../services/memory-client.js";
+import { generateAndPersistFormulation } from "../services/formulation-service.js";
 import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
 
 const app = new Hono()
@@ -195,6 +196,11 @@ const app = new Hono()
       [{ role: "assistant", content: formulationText }],
       { memory_type: "symptom_episode" },
     );
+
+    // Fire-and-forget: regenerate canonical formulation snapshot
+    generateAndPersistFormulation(user.id, "assessment_submit").catch((err) => {
+      console.error(`[assessments] Formulation generation error:`, err);
+    });
 
     // totalScore is for internal tracking only — NEVER render in UI as a diagnostic indicator
     return c.json(

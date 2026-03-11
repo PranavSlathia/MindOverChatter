@@ -26,6 +26,7 @@ import {
   sendMessage as sdkSendMessage,
   endSdkSession,
   loadSkillFiles,
+  selectRelevantSkills,
   injectSessionContext,
   isSessionActive,
   spawnClaudeStreaming,
@@ -33,10 +34,12 @@ import {
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import {
   getAllMemories,
+  searchMemories,
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
 import { invalidateInsightsCache } from "./journey.js";
+import { generateAndPersistFormulation, getLatestFormulation } from "../services/formulation-service.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
@@ -1029,6 +1032,11 @@ async function generateAndPersistSummary(
 
   // Send the real summary to Mem0 (replaces the old timestamp-only string)
   summarizeSessionAsync(userId, sessionId, content);
+
+  // Fire-and-forget: regenerate canonical formulation snapshot
+  generateAndPersistFormulation(userId, "session_end").catch((err) => {
+    console.error(`[summary] Formulation generation error for session ${sessionId}:`, err);
+  });
 }
 
 // ── Export ────────────────────────────────────────────────────────

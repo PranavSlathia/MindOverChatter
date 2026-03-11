@@ -91,6 +91,13 @@ export interface JourneyFormulation {
     period: string;
   };
   cachedAt?: string;
+  actionRecommendations?: Array<{
+    id: string;
+    priority: "high" | "medium" | "low";
+    domain: DomainKey;
+    conversationHint: string;
+    evidenceSummary: string;
+  }>;
 }
 
 interface JourneyState {

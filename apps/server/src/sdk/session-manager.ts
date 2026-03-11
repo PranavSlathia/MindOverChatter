@@ -524,8 +524,8 @@ export function injectSessionContext(sdkSessionId: string, contextBlock: string)
 
 // ── Skill Loading ─────────────────────────────────────────────
 
-/** Cached skill file contents — loaded once at startup. */
-let cachedSkills: string[] | null = null;
+/** Cached skill files — loaded once at startup, keyed by filename. */
+let cachedSkills: Map<string, string> | null = null;
 
 /**
  * Default skills directory resolved relative to the project root.
@@ -544,14 +544,17 @@ const DEFAULT_SKILLS_DIR = resolve(
  * This is designed to run ONCE at server startup. Subsequent calls
  * return the cached result.
  *
+ * Returns a Map keyed by filename (e.g. "probing-depression.md" -> content).
+ * Use `selectRelevantSkills()` to pick a subset based on formulation state.
+ *
  * @param skillsDir - Override directory path (useful for testing)
- * @returns Array of skill file contents
+ * @returns Map of filename -> skill file content
  */
-export function loadSkillFiles(skillsDir?: string): string[] {
+export function loadSkillFiles(skillsDir?: string): Map<string, string> {
   if (cachedSkills !== null) return cachedSkills;
 
   const dir = skillsDir ?? DEFAULT_SKILLS_DIR;
-  const skills: string[] = [];
+  const skills = new Map<string, string>();
 
   if (!existsSync(dir)) {
     console.warn(`[session-manager] Skills directory not found: ${dir}`);
@@ -568,7 +571,7 @@ export function loadSkillFiles(skillsDir?: string): string[] {
     for (const file of targetFiles) {
       try {
         const content = readFileSync(join(dir, file), "utf-8");
-        skills.push(content);
+        skills.set(file, content);
       } catch (err) {
         console.warn(`[session-manager] Failed to read skill file ${file}:`, err);
       }
@@ -579,6 +582,107 @@ export function loadSkillFiles(skillsDir?: string): string[] {
 
   cachedSkills = skills;
   return skills;
+}
+
+/**
+ * Select relevant skill file contents based on the user's formulation state.
+ *
+ * Rules:
+ * - No formulation (new user) -> only assessment-flow.md
+ * - With formulation -> match domain signals & presenting theme to probing skills
+ * - Always include assessment-flow.md
+ * - Cap at 2 probing skills + assessment-flow (3 total max)
+ *
+ * @param allSkills - Map from loadSkillFiles()
+ * @param formulation - Latest formulation snapshot, or null for new users
+ * @returns Array of skill file contents (string[]) for assemblePrompt
+ */
+export function selectRelevantSkills(
+  allSkills: Map<string, string>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  formulation: Record<string, any> | null,
+): string[] {
+  const selected = new Set<string>();
+
+  // Always include assessment-flow if available
+  const assessmentContent = allSkills.get("assessment-flow.md");
+
+  if (!formulation) {
+    // New user — only assessment-flow
+    return assessmentContent ? [assessmentContent] : [];
+  }
+
+  // ── Domain signal matching from activeStates ──────────────────
+  const activeStates: Array<{ label?: string; domain?: string; confidence?: number }> =
+    Array.isArray(formulation.activeStates) ? formulation.activeStates : [];
+
+  for (const state of activeStates) {
+    const domain = typeof state.domain === "string" ? state.domain.toLowerCase() : "";
+    const confidence = typeof state.confidence === "number" ? state.confidence : 0;
+    const label = typeof state.label === "string" ? state.label.toLowerCase() : "";
+
+    // vitality or groundedness with confidence > 0.5 -> depression
+    if ((domain === "vitality" || domain === "groundedness") && confidence > 0.5) {
+      selected.add("probing-depression.md");
+    }
+
+    // groundedness -> anxiety
+    if (domain === "groundedness") {
+      selected.add("probing-anxiety.md");
+    }
+
+    // grief/loss keywords in label -> grief
+    if (/\b(grief|loss|bereavement|mourning|lost someone|death)\b/i.test(label)) {
+      selected.add("probing-grief.md");
+    }
+
+    // panic keywords in label -> panic
+    if (/\b(panic|attack|palpitation|hyperventilat)/i.test(label)) {
+      selected.add("probing-panic.md");
+    }
+
+    // connection domain -> relationship
+    if (domain === "connection") {
+      selected.add("probing-relationship.md");
+    }
+  }
+
+  // ── Presenting theme keyword matching ─────────────────────────
+  const presentingTheme: string =
+    typeof formulation.formulation?.presentingTheme === "string"
+      ? formulation.formulation.presentingTheme.toLowerCase()
+      : "";
+
+  if (presentingTheme) {
+    if (/\b(depress|sad|low mood|low energy|hopeless|worthless)\b/.test(presentingTheme)) {
+      selected.add("probing-depression.md");
+    }
+    if (/\b(anxi|worry|nervous|tense|restless|on edge)\b/.test(presentingTheme)) {
+      selected.add("probing-anxiety.md");
+    }
+    if (/\b(grief|loss|lonel|bereav|mourn)\b/.test(presentingTheme)) {
+      selected.add("probing-grief.md");
+    }
+    if (/\b(panic|attack)\b/.test(presentingTheme)) {
+      selected.add("probing-panic.md");
+    }
+    if (/\b(relationship|partner|family|conflict|breakup|isolat)\b/.test(presentingTheme)) {
+      selected.add("probing-relationship.md");
+    }
+  }
+
+  // ── Cap at 2 probing skills ───────────────────────────────────
+  const probingFiles = [...selected].slice(0, 2);
+
+  // Build final content array
+  const result: string[] = [];
+  for (const filename of probingFiles) {
+    const content = allSkills.get(filename);
+    if (content) result.push(content);
+  }
+  if (assessmentContent) result.push(assessmentContent);
+
+  return result;
 }
 
 /**

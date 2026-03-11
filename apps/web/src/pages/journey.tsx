@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Link } from "react-router";
+import { ActionCards } from "@/components/journey/action-cards.js";
 import { ActiveStateCards } from "@/components/journey/active-state-cards.js";
 import { FormulationMap } from "@/components/journey/formulation-map.js";
 import { MoodTrajectory } from "@/components/journey/mood-trajectory.js";
@@ -129,6 +130,11 @@ export function JourneyPage() {
       {/* Section 5: Questions Worth Exploring */}
       {!isLoadingInsights && insights && <ReflectiveQuestions formulation={insights} />}
 
+      {/* Section 6: Action Recommendations (not shown for sparse data) */}
+      {!isLoadingInsights && insights && confidence !== "sparse" && (
+        <ActionCards formulation={insights} />
+      )}
+
       {/* Sparse data gentle message for hidden sections */}
       {!isLoadingInsights && insights && confidence === "sparse" && (
         <div className="rounded-2xl border border-primary/10 bg-primary/5 p-6 text-center">
@@ -210,11 +216,8 @@ export function JourneyPage() {
 const MEMORY_TYPE_LABELS: Record<string, string> = {
   life_event: "Life Event",
   profile_fact: "About You",
-  recurring_trigger: "Trigger",
-  unresolved_thread: "Open Thread",
-  coping_strategy: "Coping",
-  relationship: "Relationship",
-  symptom_episode: "Episode",
+  coping_strategy: "Supports",
+  relationship: "Relationships",
   win: "Win",
   goal: "Goal",
 };
@@ -224,12 +227,18 @@ const MEMORY_TYPE_COLORS: Record<string, string> = {
   goal: "bg-teal-50 text-teal-700",
   relationship: "bg-[#b8a9c9]/10 text-[#b8a9c9]",
   life_event: "bg-amber-50 text-amber-700",
-  recurring_trigger: "bg-orange-50 text-orange-600",
-  unresolved_thread: "bg-foreground/5 text-foreground/50",
   coping_strategy: "bg-blue-50 text-blue-600",
-  symptom_episode: "bg-rose-50 text-rose-600",
   profile_fact: "bg-foreground/5 text-foreground/50",
 };
+
+const USER_VISIBLE_MEMORY_TYPES = new Set([
+  "profile_fact",
+  "relationship",
+  "goal",
+  "coping_strategy",
+  "life_event",
+  "win",
+]);
 
 interface MemoryClustersProps {
   memories: Array<{
@@ -242,27 +251,33 @@ interface MemoryClustersProps {
 }
 
 function MemoryClusters({ memories }: MemoryClustersProps) {
-  // Don't show safety_critical memories to user
-  const visible = memories.filter((m) => m.memoryType !== "safety_critical");
+  // Journey keeps internal symptom threads private and shows only high-level continuity cues.
+  const visible = memories.filter((m) => USER_VISIBLE_MEMORY_TYPES.has(m.memoryType));
   if (visible.length === 0) return null;
+
+  const grouped = Array.from(
+    visible.reduce((acc, memory) => {
+      acc.set(memory.memoryType, (acc.get(memory.memoryType) ?? 0) + 1);
+      return acc;
+    }, new Map<string, number>()),
+  ).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="rounded-2xl border border-foreground/10 bg-white p-6 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">Things We Remember</h3>
+      <h3 className="mb-1 text-sm font-semibold text-foreground">What We Keep Track Of</h3>
+      <p className="mb-3 text-xs leading-relaxed text-foreground/45">
+        We keep this intentionally high-level so private or vulnerable details stay inside the conversation.
+      </p>
       <div className="flex flex-wrap gap-2">
-        {visible.slice(0, 15).map((m) => {
-          const colors = MEMORY_TYPE_COLORS[m.memoryType] ?? "bg-foreground/5 text-foreground/50";
+        {grouped.map(([memoryType, count]) => {
+          const colors = MEMORY_TYPE_COLORS[memoryType] ?? "bg-foreground/5 text-foreground/50";
           return (
             <span
-              key={m.id}
+              key={memoryType}
               className={`inline-flex items-center gap-1.5 rounded-full border border-foreground/5 px-3 py-1.5 text-xs ${colors}`}
             >
-              <span className="font-medium">
-                {MEMORY_TYPE_LABELS[m.memoryType] ?? m.memoryType}
-              </span>
-              <span className="opacity-70">
-                {m.content.length > 50 ? `${m.content.slice(0, 50)}...` : m.content}
-              </span>
+              <span className="font-medium">{MEMORY_TYPE_LABELS[memoryType] ?? memoryType}</span>
+              <span className="opacity-70">{count}</span>
             </span>
           );
         })}

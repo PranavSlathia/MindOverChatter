@@ -156,6 +156,17 @@ export const JourneyFormulationSchema = z.object({
     period: z.string(),
   }),
   cachedAt: z.string().optional(),
+  actionRecommendations: z
+    .array(
+      z.object({
+        id: z.string(),
+        priority: z.enum(["high", "medium", "low"]),
+        domain: DomainKeySchema,
+        conversationHint: z.string(),
+        evidenceSummary: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 // ── Assessment History ───────────────────────────────────────────
