@@ -620,13 +620,15 @@ Single database, single source of truth. pgvector extension enables vector simil
 │              │     │                  │     │                  │
 │ id (PK)      │     │ id (PK)          │     │ id (PK)          │
 │ display_name │     │ user_id (FK)     │     │ session_id (FK)  │
-│ core_traits  │     │ status           │     │ role             │
-│ patterns     │     │ started_at       │     │ content          │
-│ goals        │     │ ended_at         │     │ audio_file_path  │
-│ profile_emb  │     │ summary          │     │ created_at       │
-│ created_at   │     │ summary_embedding│     └────────┬─────────┘
-│ updated_at   │     │ themes           │              │
-└──────────────┘     │ created_at       │              │
+│ core_traits  │     │ sdk_session_id   │     │ role             │
+│ patterns     │     │ status           │     │ content          │
+│ goals        │     │ started_at       │     │ audio_file_path  │
+│ profile_emb  │     │ ended_at         │     │ created_at       │
+│ created_at   │     │ last_activity_at │     └────────┬─────────┘
+│ updated_at   │     │ summary          │              │
+└──────────────┘     │ summary_embedding│              │
+                     │ themes           │
+                     │ created_at       │
                      └──────────────────┘     ┌────────▼─────────┐
                                               │ emotion_readings │
 ┌──────────────────┐                          │                  │
@@ -637,8 +639,9 @@ Single database, single source of truth. pgvector extension enables vector simil
 │ user_id (FK)     │                          │ (text|voice|face)│
 │ valence          │                          │ emotion_label    │
 │ arousal          │                          │ confidence       │
-│ source           │                          │ raw_scores       │
-│ created_at       │                          │ prosody_data     │
+│ source           │                          │ signal_weight    │
+│ created_at       │                          │ raw_scores       │
+│                  │                          │ prosody_data     │
 └──────────────────┘                          │ created_at       │
                                               └──────────────────┘
 ┌──────────────────┐     ┌──────────────────┐
@@ -647,12 +650,16 @@ Single database, single source of truth. pgvector extension enables vector simil
 │ id (PK)          │     │ id (PK)          │
 │ session_id (FK)  │     │ user_id (FK)     │
 │ user_id (FK)     │     │ content          │
-│ type (phq9|gad7) │     │ category         │
+│ type (phq9|gad7) │     │ memory_type      │
 │ answers (jsonb)  │     │ importance       │
-│ total_score      │     │ embedding        │
-│ severity         │     │ source_session   │
-│ created_at       │     │ created_at       │
-└──────────────────┘     │ updated_at       │
+│ total_score      │     │ confidence       │
+│ severity         │     │ embedding        │
+│ created_at       │     │ source_session_id│
+└──────────────────┘     │ source_message_id│
+                         │ last_confirmed_at│
+                         │ superseded_by    │
+                         │ created_at       │
+                         │ updated_at       │
                          └──────────────────┘
 
 ┌──────────────────────────┐
@@ -704,6 +711,7 @@ Single database, single source of truth. pgvector extension enables vector simil
   themes: text().array(),
   startedAt: timestamp(),
   endedAt: timestamp(),
+  lastActivityAt: timestamp(),  // Updated on each message; used by orphan cleanup sweep
   createdAt: timestamp(),
 }
 
@@ -815,7 +823,7 @@ CREATE INDEX idx_memories_user_created ON memories (user_id, created_at DESC);
 
 ```sql
 -- "What was I feeling last month?" type queries
-SELECT content, emotion_label, created_at
+SELECT content, themes, created_at
 FROM session_summaries
 WHERE user_id = $1
   AND created_at >= NOW() - INTERVAL '30 days'
