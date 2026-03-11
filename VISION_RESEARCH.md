@@ -27,6 +27,20 @@ Every feature in this product touches mental health. Before any feature ships, i
 
 Features that cannot answer all of these do not ship.
 
+### Release Scorecards
+
+Each "Build Now" feature has a one-line ship/no-ship gate below. These are evaluated before the feature enters user testing.
+
+| Feature | Ship If | No-Ship If |
+|---|---|---|
+| Somatic regulation | All exercises have abort conditions; no body-state claims in output | Any exercise lacks stop condition or makes nervous system claims |
+| Digital phenotyping lite | Opt-in consent flow tested; outreach limited to 1x per pattern; kill switch functional | Outreach fires without consent; false-positive rate >30% in internal testing |
+| Behavioral activation lite | Follow-ups reference specific memories with provenance; no unsolicited push | Follow-ups feel generic or nag; any out-of-session nudges exist |
+| Journey timeline | Every entry has source link; user can edit/delete; no freeform narrative synthesis | Any entry lacks provenance; editability broken; AI generates unsourced life summaries |
+| Structured formulation | Full formulation objects stay internal; user sees only tentative pattern language | Any raw formulation, score, or hypothesis is surfaced to the user |
+| Auditable inferences | Important inferences cite source session; user can flag "that's wrong" | Inferences appear without provenance; no correction mechanism |
+| Indic language pipeline | IndicLID + IndicXlit accuracy >90% on Hinglish test corpus | Misidentification rate causes wrong-language responses |
+
 ---
 
 # Build Now — Safe, High-Impact Features
@@ -45,6 +59,17 @@ Features that cannot answer all of these do not ship.
 - Always **self-initiated** — the user chooses to start an exercise, the AI can suggest but never auto-launch
 - **Low-claim** — "this exercise helps some people feel calmer" not "this will fix your anxiety"
 - No claims about nervous system state — the AI does not tell the user what their body is doing
+
+**Contraindications — do not offer when**:
+- User is in active crisis (crisis pipeline takes priority, not breathing exercises)
+- User reports chest pain, breathing difficulty, or physical distress (direct to medical help)
+- User has flagged that breathing exercises increase their anxiety (some people experience this — respect it)
+- During dissociative episodes — grounding exercises (5-4-3-2-1 senses) are safer than deep breathing in this state
+
+**Abort conditions — stop immediately if**:
+- User says "stop," "this isn't helping," or "I feel worse" — acknowledge and offer alternatives
+- User reports dizziness, lightheadedness, or panic during a breathing exercise
+- Fallback: always offer a simple grounding alternative ("Can you name 5 things you can see right now?") if a somatic exercise is stopped
 
 **Open source tools**:
 - [Box Breathing visual animation](https://lassebomh.github.io/box-breathing/) (open source, GitHub)
@@ -105,24 +130,26 @@ Features that cannot answer all of these do not ship.
 
 **The gap**: Current apps have chat history. Nobody has a *life story*. Our memory architecture (10 typed memory categories, journey timeline) is 80% of the way there. The missing piece is presenting it back to the user as a narrative.
 
-**What to build**:
-- Visual timeline of the user's journey: life events, symptom episodes, wins, turning points, goals
-- Every timeline entry shows **provenance**: "from session on [date]" with link to source
-- User can **edit, correct, or delete** any timeline entry — the AI's narrative is a draft, not an autobiography
-- Frame as "evidence from your sessions" — never as authoritative life narrative
+**What to build (phased)**:
+- **Phase 1 — Structured events**: Visual timeline showing discrete entries: life events, symptom episodes, wins, turning points, goals. Each is a card with source session link, date, and user-confirmed status. No prose. No synthesis
+- **Phase 2 — Trend overlays**: Layer quantitative trends (mood scores, session frequency, assessment scores) onto the timeline. Still data, not narrative
+- **Phase 3 — Tentative narrative** (only after memory quality is proven): AI-generated summary paragraphs ("Over the last 3 months, based on your sessions, you've mentioned work stress and improved sleep after starting walks"). Always framed as "from your sessions" and always editable
+
+**What NOT to build initially**:
+- ~~Freeform life narrative as the primary UX~~: Structured events and trends come first. Narrative synthesis is a later layer
+- ~~AI-authored autobiography~~: The timeline is a structured view of *what the user said*, not what the AI concludes about their life
 
 **Safety constraints — REQUIRED**:
-- **Never AI-authored autobiography**: The timeline is a structured view of *what the user said*, not what the AI concludes about their life
-- **Every statement needs provenance**: "Based on your session on March 5th, you mentioned..."
-- **Editability is mandatory**: If the user says "that's not right," they can correct it immediately and the correction persists
-- **Re-authoring with consent**: Narrative therapy techniques (surfacing counter-examples to problem stories) are powerful but must be framed as questions — "I see you handled the March deadline well — does that fit with how you see things?" — never assertions
+- **Every entry needs provenance**: "From session on March 5th" with link to source
+- **Editability is mandatory**: User can correct or delete any entry; corrections persist
+- **Re-authoring with consent**: Surfacing counter-examples to problem stories must be framed as questions — "I see you handled the March deadline well — does that fit with how you see things?" — never assertions
+- **User-confirmed notes**: User can add their own annotations to the timeline; these take priority over AI-extracted entries
 
 **Open source tools**:
 - Our existing memory system (session_summaries, typed memories, journey timeline queries) is the foundation
 - [Recharts](https://recharts.org/) (already in our stack) for timeline visualization
-- The LLM *is* the narrative engine — Claude can weave memories into a coherent story
 
-**Why it matters**: The most powerful moment in therapy is when someone sees their life from a different angle. But a *wrong* narrative from an AI can feel authoritative and stick. Evidence-backed, user-editable framing makes this safe and transformative.
+**Why it matters**: The most powerful moment in therapy is when someone sees their life from a different angle. But a *wrong* narrative from an AI can feel authoritative and stick. Starting with structured events and earning the right to synthesize narrative — only once memory quality is proven — makes this safe and transformative.
 
 ---
 
@@ -150,9 +177,14 @@ Features that cannot answer all of these do not ship.
 
 **What to build**:
 - Replace "what is wrong with the user?" with structured observation tracking across: symptoms, triggers, routines, relationships, goals, coping strategies, episodes, assessment scores, crisis plans
-- The app says: *"sleep dropped for 9 days, anxiety spikes before family calls, activity fell after job loss"* — NOT *"you have X"*
 - Each observation links back to the session and message where it was captured
 - Longitudinal pattern detection: "anxiety scores elevated 3 of last 4 sessions, correlating with upcoming family events"
+
+**Internal vs user-visible boundary — CRITICAL**:
+- **Full formulation objects are internal-only**: structured hypotheses, confidence scores, evidence arrays, and severity assessments are never shown to the user. They inform the AI's reasoning
+- **Users see only tentative, evidence-backed pattern language**: "I've noticed your sleep has been shorter the last few sessions — does that match how you're feeling?" — not "your sleep score dropped 40% which correlates with elevated anxiety indicators"
+- The app says: *"sleep dropped for 9 days, anxiety spikes before family calls, activity fell after job loss"* — NOT *"you have X"*
+- This boundary prevents drift back toward quasi-diagnosis. If a formulation object is ever surfaced raw, that is a bug
 
 **Why it matters**: This is what good therapists actually do — they track patterns across sessions. They don't diagnose on day one. They say "I'm noticing a pattern" and check it with the client. An AI that builds a structured, evidence-based picture over time is more honest and more useful than one that labels.
 
@@ -162,13 +194,12 @@ Features that cannot answer all of these do not ship.
 
 **The gap**: Current AI companions are black boxes — they say things but can't explain *why*. If the AI says "you seem more anxious this week," the user has no way to know what data informed that. And they can't correct it if it's wrong.
 
-**What to build**:
-- Every important inference carries: source (session + message), confidence score, validity window (how long before re-confirmation needed)
-- Users can inspect what the AI "knows" about them — see their memory, confirm or correct facts, delete anything
+**What to build (phased)**:
+- **Phase 3-4 — Provenance + correction hooks**: Every important inference carries source (session + message) and confidence score. User can flag "that's not right" on any AI statement that references their history, and the correction is stored. Contradiction detection: when new info conflicts with stored memories, flag rather than silently overwrite
+- **Phase 5-6 — Memory browser** (only after extraction quality is stable): Full inspect/edit/delete UI for stored memories. Requires confidence that the memory system isn't producing garbage that would erode trust if surfaced. Validity windows (how long before re-confirmation needed) added here
 - Every therapeutic response can explain which past events, patterns, and assessment scores informed it — "therapeutic memory with proof"
-- Contradiction detection: when new information conflicts with stored memories, flag it rather than silently overwriting
 
-**Why it matters**: Trust is everything in therapeutic relationships. An AI that says "I think you're stressed because your sleep dropped and you mentioned the deadline three times" is more trustworthy than one that just says "you seem stressed." Auditability turns a chatbot into a credible companion.
+**Why it matters**: Trust is everything in therapeutic relationships. An AI that says "I think you're stressed because your sleep dropped and you mentioned the deadline three times" is more trustworthy than one that just says "you seem stressed." But showing users a memory browser full of wrong extractions would *destroy* trust — so provenance first, full browser after quality is proven.
 
 ---
 
@@ -262,7 +293,9 @@ Additionally, HRV specificity for mental state is overstated. A dropping HRV cou
 
 Put these together — the safe, high-impact features — and you get:
 
-> **An AI companion that understands your behavior patterns (app telemetry with consent), remembers your entire story as a temporal knowledge graph (Mem0 + Graphiti + Letta), regulates your nervous system on request (somatic exercises), helps you do things not just talk about them (behavioral activation), builds structured clinical formulations from evidence (not labels), makes every inference auditable and user-editable, understands Hinglish natively (IndicLID + IndicXlit + IndicTrans2), and meets you with the right therapeutic approach at the right time — with provenance, consent, and kill switches on every feature.**
+> **v1: An AI companion that understands your behavior patterns (app telemetry with consent), remembers your story with provenance (Mem0 + structured memory types), regulates your nervous system on request (somatic exercises with abort conditions), helps you do things not just talk about them (in-session behavioral activation), builds structured observations from evidence (not labels, internal-only formulation), makes important inferences auditable and correctable, understands Hinglish natively (IndicLID + IndicXlit), and meets you with the right therapeutic approach at the right time — with consent, kill switches, and contraindications on every feature.**
+>
+> **v2+: Extend with Graphiti temporal graph, Letta user-editable memory, IndicTrans2 full translation, and evidence-backed journey timeline once memory quality is proven.**
 
 Every existing product has 1-2 of these. Nobody has all of them. And critically, nobody has the **longitudinal memory with proof** that makes them meaningful — because knowing that "walks help you" and "Sunday nights are your hardest time" and "your inner critic gets loud before presentations," *with timestamps, evidence, and user-confirmed confidence* — transforms generic advice into something that truly knows you and can prove it.
 
@@ -272,14 +305,17 @@ Every existing product has 1-2 of these. Nobody has all of them. And critically,
 
 | Feature | Phase | Dependencies | Safety Gate |
 |---|---|---|---|
-| Structured clinical formulation | Phase 3-4 | Memory types, provenance fields | Framing review |
-| Auditable inferences + user memory view | Phase 3-4 | Memory system, frontend | Editability testing |
-| Somatic regulation (breathing, grounding) | Phase 4-5 | TTS, basic session flow | Low-claim language review |
-| Indic language pipeline (IndicLID + IndicXlit) | Phase 4-5 | Python services | Accuracy testing on Hinglish |
-| Digital phenotyping lite (app telemetry) | Phase 5-6 | Message history, session data | Consent flow, outreach policy, kill switch |
-| Behavioral activation lite (in-session) | Phase 5-6 | Memory system, session lifecycle | False-positive rate for follow-ups |
-| Evidence-backed journey timeline | Phase 6-7 | Full memory + journey timeline | Provenance + editability mandatory |
-| Feature safety framework | Every phase | All features | Blocking gate for each release |
+| Structured clinical formulation (internal-only) | Phase 3-4 | Memory types, provenance fields | Internal/external boundary enforced |
+| Inference provenance + correction hooks | Phase 3-4 | Memory system | Provenance on important inferences; "that's wrong" works |
+| Somatic regulation (breathing, grounding) | Phase 4-5 | TTS, basic session flow | Contraindications + abort conditions tested |
+| Indic language pipeline (IndicLID + IndicXlit) | Phase 4-5 | Python services | >90% accuracy on Hinglish test corpus |
+| Digital phenotyping lite (app telemetry) | Phase 5-6 | Message history, session data | Consent flow, 1x outreach policy, kill switch functional |
+| Behavioral activation lite (in-session) | Phase 5-6 | Memory system, session lifecycle | Follow-ups cite specific memories; no out-of-session nudges |
+| Full memory browser (inspect/edit/delete) | Phase 5-6 | Stable extraction quality | Extraction quality proven before surfacing to users |
+| Journey timeline — structured events | Phase 6 | Full memory + journey timeline | Every entry has source link; editability works |
+| Journey timeline — trend overlays | Phase 6-7 | Structured timeline stable | Data-only, no narrative |
+| Journey timeline — tentative narrative | Phase 7+ | Memory quality proven | Framed as "from your sessions"; fully editable |
+| Feature safety scorecard review | Every phase | All features | Blocking gate — see scorecard table above |
 | Graphiti temporal graph sidecar | v2 | Mem0 stable, Postgres | — |
 | Letta user-editable memory | v2 | Graphiti, user trust established | — |
 | IndicTrans2 full translation | v2 | Indic pipeline v1 stable | — |
