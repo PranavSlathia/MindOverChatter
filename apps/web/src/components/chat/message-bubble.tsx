@@ -197,6 +197,19 @@ export function StreamingBubble({ content }: StreamingBubbleProps) {
   );
 }
 
+export function ThinkingBubble() {
+  return (
+    <div className="flex w-full justify-start">
+      <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-muted px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-primary/60" />
+          <span className="text-xs text-foreground/50">Thinking...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface CrisisBannerProps {
   crisisResponse: CrisisResponse;
 }

@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router";
 import { ChatPage } from "./pages/chat.js";
 import { HistoryPage } from "./pages/history.js";
 import { HomePage } from "./pages/home.js";
+import { JourneyPage } from "./pages/journey.js";
 import { MoodPage } from "./pages/mood.js";
 import { ProfilePage } from "./pages/profile.js";
 
@@ -13,6 +14,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/chat/:sessionId" element={<ChatPage />} />
+          <Route path="/journey" element={<JourneyPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/mood" element={<MoodPage />} />
           <Route path="/profile" element={<ProfilePage />} />

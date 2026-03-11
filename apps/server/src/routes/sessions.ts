@@ -36,6 +36,12 @@ import {
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
+import { invalidateInsightsCache } from "./journey.js";
+
+// ── Assessment Re-trigger Guard ──────────────────────────────────
+// Tracks which assessment types have been emitted per session to prevent
+// re-triggering when the eligibility check fires on subsequent messages.
+const emittedAssessments = new Map<string, Set<string>>();
 
 // ── Route Definitions ────────────────────────────────────────────
 
@@ -283,6 +289,12 @@ const app = new Hono()
       return c.json({ userMessageId: userMsg!.id, crisis: false });
     }
 
+    // Notify SSE subscribers that the AI is processing
+    sessionEmitter.emit(sessionId, {
+      event: "ai.thinking",
+      data: { status: "thinking" },
+    });
+
     // Kick off streaming in the background — do not await
     streamAiResponse(sessionId, sdkSessionId, text, userMsg!.id, session.userId).catch((err) => {
       console.error(`AI streaming error for session ${sessionId}:`, err);
@@ -393,6 +405,12 @@ const app = new Hono()
         lastActivityAt: endedAt,
       })
       .where(eq(sessions.id, sessionId));
+
+    // Clean up assessment re-trigger guard for this session
+    emittedAssessments.delete(sessionId);
+
+    // Invalidate journey insights cache so next visit generates fresh insights
+    invalidateInsightsCache();
 
     // Notify SSE subscribers that the session ended (immediate — UI shows "ended" right away)
     sessionEmitter.emit(sessionId, {
@@ -642,12 +660,17 @@ async function streamAiResponse(
     data: { messageId: assistantMsg!.id },
   });
 
-  // Emit assessment.start for each detected marker
+  // Emit assessment.start for each detected marker (guarded against re-trigger)
   for (const assessmentType of assessmentMarkers) {
-    sessionEmitter.emit(sessionId, {
-      event: "assessment.start",
-      data: { assessmentType },
-    });
+    const emittedForSession = emittedAssessments.get(sessionId) ?? new Set<string>();
+    if (!emittedForSession.has(assessmentType)) {
+      emittedForSession.add(assessmentType);
+      emittedAssessments.set(sessionId, emittedForSession);
+      sessionEmitter.emit(sessionId, {
+        event: "assessment.start",
+        data: { assessmentType },
+      });
+    }
   }
 
   // Fire-and-forget: extract memories from the conversation turn
@@ -790,15 +813,22 @@ async function checkAssessmentEligibility(
   // Step 1: Deterministic signal detection
   const signals = detectAssessmentSignals(allMessages);
 
+  // Merge completedTypes with already-emitted types (prevents re-trigger for in-progress assessments)
+  const emittedForSession = emittedAssessments.get(sessionId) ?? new Set<string>();
+
   if (signals.evidenceMessages >= 2) {
-    if (signals.phq9Score >= 3 && !completedTypes.has("phq9")) {
+    if (signals.phq9Score >= 3 && !completedTypes.has("phq9") && !emittedForSession.has("phq9")) {
+      emittedForSession.add("phq9");
+      emittedAssessments.set(sessionId, emittedForSession);
       sessionEmitter.emit(sessionId, {
         event: "assessment.start",
         data: { assessmentType: "phq9" },
       });
       return;
     }
-    if (signals.gad7Score >= 3 && !completedTypes.has("gad7")) {
+    if (signals.gad7Score >= 3 && !completedTypes.has("gad7") && !emittedForSession.has("gad7")) {
+      emittedForSession.add("gad7");
+      emittedAssessments.set(sessionId, emittedForSession);
       sessionEmitter.emit(sessionId, {
         event: "assessment.start",
         data: { assessmentType: "gad7" },
@@ -867,7 +897,9 @@ async function checkAssessmentEligibility(
   }
 
   const validTypes = new Set(["phq9", "gad7"]);
-  if (result.suggest && result.type && validTypes.has(result.type) && !completedTypes.has(result.type)) {
+  if (result.suggest && result.type && validTypes.has(result.type) && !completedTypes.has(result.type) && !emittedForSession.has(result.type)) {
+    emittedForSession.add(result.type);
+    emittedAssessments.set(sessionId, emittedForSession);
     sessionEmitter.emit(sessionId, {
       event: "assessment.start",
       data: { assessmentType: result.type as "phq9" | "gad7" },
@@ -974,6 +1006,12 @@ async function generateAndPersistSummary(
     ? parsed.action_items.filter((a): a is string => typeof a === "string")
     : [];
 
+  // Fetch session timestamps for periodStart/periodEnd
+  const [sess] = await db
+    .select({ startedAt: sessions.startedAt, endedAt: sessions.endedAt })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+
   // Persist to session_summaries table
   await db.insert(sessionSummaries).values({
     userId,
@@ -983,19 +1021,14 @@ async function generateAndPersistSummary(
     themes: themes.length > 0 ? themes : null,
     cognitivePatterns: cognitivePatterns.length > 0 ? cognitivePatterns : null,
     actionItems: actionItems.length > 0 ? actionItems : null,
+    periodStart: sess?.startedAt,
+    periodEnd: sess?.endedAt ?? new Date(),
   });
 
   console.log(`[summary] Persisted session summary for session ${sessionId}`);
 
   // Send the real summary to Mem0 (replaces the old timestamp-only string)
   summarizeSessionAsync(userId, sessionId, content);
-
-  // Emit a second SSE event with the summary so the UI can display it
-  // (the initial session.ended was already sent immediately)
-  sessionEmitter.emit(sessionId, {
-    event: "session.ended",
-    data: { summary: content },
-  });
 }
 
 // ── Export ────────────────────────────────────────────────────────

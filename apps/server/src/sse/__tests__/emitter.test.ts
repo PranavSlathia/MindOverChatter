@@ -13,14 +13,11 @@ describe("SessionEventEmitter", () => {
 
     sessionEmitter.emit(sessionId, {
       event: "session.ended",
-      data: { summary: "Session concluded normally" },
+      data: {},
     });
 
     expect(received).toHaveLength(1);
     expect(received[0]!.event).toBe("session.ended");
-    expect((received[0] as { event: "session.ended"; data: { summary?: string } }).data.summary).toBe(
-      "Session concluded normally",
-    );
 
     unsub();
   });

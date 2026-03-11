@@ -1,5 +1,6 @@
 export * from "./assessment.js";
 export * from "./emotion.js";
+export * from "./journey.js";
 export * from "./memory.js";
 export * from "./message.js";
 export * from "./mood-log.js";

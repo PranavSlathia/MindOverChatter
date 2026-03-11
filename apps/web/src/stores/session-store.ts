@@ -29,6 +29,7 @@ interface SessionState {
   status: "idle" | "active" | "completed" | "crisis_escalated";
   messages: Message[];
   isConnected: boolean;
+  isThinking: boolean;
   isStreaming: boolean;
   streamingContent: string;
   isCrisis: boolean;
@@ -45,6 +46,7 @@ interface SessionState {
   setMessages: (messages: Message[]) => void;
   updateMessage: (id: string, content: string) => void;
   setConnected: (connected: boolean) => void;
+  setThinking: (thinking: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   appendStreamingContent: (chunk: string) => void;
   clearStreamingContent: () => void;
@@ -62,6 +64,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   status: "idle",
   messages: [],
   isConnected: false,
+  isThinking: false,
   isStreaming: false,
   streamingContent: "",
   isCrisis: false,
@@ -79,6 +82,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       messages: state.messages.map((m) => (m.id === id ? { ...m, content } : m)),
     })),
   setConnected: (connected) => set({ isConnected: connected }),
+  setThinking: (thinking) => set({ isThinking: thinking }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   appendStreamingContent: (chunk) =>
     set((state) => ({ streamingContent: state.streamingContent + chunk })),
@@ -96,6 +100,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       status: "idle",
       messages: [],
       isConnected: false,
+      isThinking: false,
       isStreaming: false,
       streamingContent: "",
       isCrisis: false,

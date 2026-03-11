@@ -4,14 +4,31 @@
 
 /** Payload shape for each SSE event type */
 export type SSEEventData =
+  | { event: "ai.thinking"; data: { status: string } }
   | { event: "ai.chunk"; data: { content: string } }
   | { event: "ai.response_complete"; data: { messageId: string } }
   | { event: "ai.error"; data: { error: string } }
-  | { event: "session.crisis"; data: { message: string; helplines: ReadonlyArray<{ readonly name: string; readonly number: string; readonly country: string }> } }
-  | { event: "session.ended"; data: { summary?: string } }
+  | {
+      event: "session.crisis";
+      data: {
+        message: string;
+        helplines: ReadonlyArray<{
+          readonly name: string;
+          readonly number: string;
+          readonly country: string;
+        }>;
+      };
+    }
+  | { event: "session.ended"; data: Record<string, never> }
   | { event: "assessment.start"; data: { assessmentType: string } }
-  | { event: "assessment.complete"; data: { assessmentId: string; severity: string; nextScreener: string | null } }
-  | { event: "emotion.ai_detected"; data: { emotionLabel: string; confidence: number; channel: string } };
+  | {
+      event: "assessment.complete";
+      data: { assessmentId: string; severity: string; nextScreener: string | null };
+    }
+  | {
+      event: "emotion.ai_detected";
+      data: { emotionLabel: string; confidence: number; channel: string };
+    };
 
 export type SSECallback = (event: SSEEventData) => void;
 

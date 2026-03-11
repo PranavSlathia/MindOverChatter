@@ -15,6 +15,13 @@ export function HomePage() {
             Start Chatting
           </Link>
           <Link
+            to="/journey"
+            className="text-sm font-medium text-foreground/50 transition-colors hover:text-primary"
+            aria-label="View your journey"
+          >
+            Your Journey
+          </Link>
+          <Link
             to="/history"
             className="text-sm font-medium text-foreground/50 transition-colors hover:text-primary"
             aria-label="View session history"

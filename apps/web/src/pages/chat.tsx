@@ -3,7 +3,12 @@ import { useCallback, useEffect, useRef } from "react";
 import { useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
-import { CrisisBanner, MessageBubble, StreamingBubble } from "@/components/chat/message-bubble.js";
+import {
+  CrisisBanner,
+  MessageBubble,
+  StreamingBubble,
+  ThinkingBubble,
+} from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
 import { api } from "@/lib/api.js";
 import { useEmotionStore } from "@/stores/emotion-store.js";
@@ -16,22 +21,22 @@ export function ChatPage() {
     sessionId,
     status,
     messages,
+    isThinking,
     isStreaming,
     streamingContent,
     isCrisis,
     crisisResponse,
-    sessionSummary,
     activeAssessment,
     setSessionId,
     setStatus,
     addMessage,
     setMessages,
     setConnected,
+    setThinking,
     setStreaming,
     appendStreamingContent,
     clearStreamingContent,
     setCrisis,
-    setSessionSummary,
     startAssessment,
     completeAssessment,
     dismissAssessment,
@@ -48,7 +53,7 @@ export function ChatPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional scroll triggers
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent, isCrisis, activeAssessment]);
+  }, [messages, streamingContent, isCrisis, activeAssessment, isThinking]);
 
   // Connect SSE for a given session
   const connectSSE = useCallback(
@@ -65,9 +70,14 @@ export function ChatPage() {
         setConnected(true);
       });
 
+      es.addEventListener("ai.thinking", () => {
+        setThinking(true);
+      });
+
       es.addEventListener("ai.chunk", (event) => {
         try {
           const data = JSON.parse(event.data) as { content: string };
+          setThinking(false);
           if (!streamingMessageIdRef.current) {
             streamingMessageIdRef.current = crypto.randomUUID();
             setStreaming(true);
@@ -126,6 +136,7 @@ export function ChatPage() {
           });
         }
         streamingMessageIdRef.current = null;
+        setThinking(false);
         setStreaming(false);
         clearStreamingContent();
       });
@@ -154,19 +165,13 @@ export function ChatPage() {
           });
         }
         streamingMessageIdRef.current = null;
+        setThinking(false);
         setStreaming(false);
         clearStreamingContent();
       });
 
-      es.addEventListener("session.ended", (event) => {
-        try {
-          const data = JSON.parse(event.data) as { summary?: string };
-          if (data.summary) {
-            setSessionSummary(data.summary);
-          }
-        } catch {
-          // Ignore parse errors
-        }
+      es.addEventListener("session.ended", () => {
+        setThinking(false);
         setStatus("completed");
       });
 
@@ -241,15 +246,16 @@ export function ChatPage() {
     },
     [
       setConnected,
+      setThinking,
       setStreaming,
       appendStreamingContent,
       clearStreamingContent,
       addMessage,
       setCrisis,
       setStatus,
-      setSessionSummary,
       startAssessment,
       completeAssessment,
+      dismissAssessment,
       setEmotionFromSSE,
     ],
   );
@@ -428,6 +434,7 @@ export function ChatPage() {
             <MessageBubble key={msg.id} message={msg} />
           ))}
 
+          {isThinking && !isStreaming && <ThinkingBubble />}
           {isStreaming && <StreamingBubble content={streamingContent} />}
 
           {activeAssessment && (
@@ -443,9 +450,6 @@ export function ChatPage() {
           {status === "completed" && (
             <div className="my-6 rounded-xl border border-foreground/10 bg-muted/50 p-5 text-center">
               <p className="mb-2 text-sm font-medium text-foreground/70">Session ended</p>
-              {sessionSummary && (
-                <p className="mb-4 text-xs leading-relaxed text-foreground/50">{sessionSummary}</p>
-              )}
               <button
                 type="button"
                 onClick={handleNewSession}
@@ -465,11 +469,7 @@ export function ChatPage() {
       <MessageInput
         onSend={handleSendMessage}
         disabled={inputDisabled}
-        placeholder={
-          status === "completed"
-            ? "Session has ended"
-            : "Type a message..."
-        }
+        placeholder={status === "completed" ? "Session has ended" : "Type a message..."}
       />
     </div>
   );

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import assessments from "./assessments.js";
 import emotions from "./emotions.js";
 import health from "./health.js";
+import journey from "./journey.js";
 import moodLogs from "./mood-logs.js";
 import sessions from "./sessions.js";
 import userProfile from "./user-profile.js";
@@ -18,6 +19,7 @@ const app = new Hono()
   .route("/api/sessions", sessions)
   .route("/api/assessments", assessments)
   .route("/api/emotions", emotions)
+  .route("/api/journey", journey)
   .route("/api/mood-logs", moodLogs)
   .route("/api/user", userProfile)
   .route("/api", voice);
