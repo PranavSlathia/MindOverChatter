@@ -357,7 +357,14 @@ Produce a JSON object matching this exact schema:
     "<domain>": { "level": "low|medium|high", "trend": "improving|stable|declining", "evidence": "..." }
   },
   "questionsWorthExploring": [{ "question": "...", "rationale": "internal reasoning", "linkedTo": "which formulation part" }],
-  "themeOfToday": "one evocative sentence capturing the most salient current thread"
+  "themeOfToday": "one evocative sentence capturing the most salient current thread",
+  "copingSteps": [
+    {
+      "step": "Short action label — warm, specific, ≤8 words",
+      "rationale": "1-2 sentences connecting this to what the person has actually shared. Reference their words or experiences, not generic advice.",
+      "domain": "connection|momentum|groundedness|meaning|self_regard|vitality"
+    }
+  ]
 }
 
 PROVENANCE: Every root, activator, cycle, strength, and activeState SHOULD include evidenceRefs with the sourceType and the 8-char ID prefix from the memory data below (shown as [xxxxxxxx]). This makes the formulation auditable.
@@ -371,6 +378,7 @@ MAPPING RULES:
 - Use the pre-computed Structured Domain Signals as the PRIMARY source for domainSignals output. Enrich with qualitative evidence from sessions and memories, but NEVER contradict algorithmic signals without explicit evidence.
 - Use Action Recommendations to guide questionsWorthExploring.
 - themeOfToday: one sentence capturing the most salient current thread (not a mood label)
+- copingSteps: Generate 2-4 gentle, actionable suggestions DIRECTLY grounded in the person's own data. Reference their specific experiences (e.g. "You've mentioned sleep has been tough for years — even a small wind-down shift can help"). Frame as invitations, not prescriptions. Use "you might..." or "it could help to...". NO clinical language. NO generic advice that could apply to anyone.
 
 QUESTION DEPTH: ${questionDepth}
 
@@ -412,7 +420,7 @@ SAFETY RULES (NON-NEGOTIABLE):
 - NEVER use the word "patient" or position as a therapist. This is a companion observing alongside.
 - userReflection.summary must use warm, human language. "We've noticed" not "Clinical assessment indicates."
 - Assessments inform but do not dominate. A mild GAD-7 score should not override rich conversational evidence about grief or attachment.
-- Cap output to ~800 tokens.
+- Cap output to ~1000 tokens.
 
 Respond with ONLY valid JSON, no markdown fences, no explanation.`;
 
@@ -464,6 +472,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
         domainSignals: mergedDomainSignals,
         questionsWorthExploring: Array.isArray(parsed.questionsWorthExploring) ? parsed.questionsWorthExploring : [],
         themeOfToday: parsed.themeOfToday ?? "",
+        copingSteps: Array.isArray(parsed.copingSteps) ? parsed.copingSteps : [],
         dataConfidence,
         moodTrend,
       };
@@ -550,18 +559,44 @@ async function persistFormulation(
   console.log(`[formulation-service] Persisted formulation v${nextVersion} for user ${userId} (triggered by: ${triggeredBy})`);
 }
 
+/**
+ * Collapse near-duplicate memories within the same type.
+ * Two memories are "near-duplicates" if they share the same type and
+ * their content (lowercased, first 100 chars) matches, AND they were
+ * created within 24 hours of each other. Keep the higher-confidence one.
+ */
 function deduplicateMemories<
-  T extends { content: string; memoryType: string; confidence: number },
+  T extends { content: string; memoryType: string; confidence: number; createdAt: Date },
 >(rows: T[]): T[] {
+  const PROXIMITY_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const result: T[] = [];
   const seen = new Map<string, T>();
+
   for (const row of rows) {
-    const key = `${row.memoryType}::${row.content.toLowerCase().trim().slice(0, 60)}`;
+    const key = `${row.memoryType}::${row.content.toLowerCase().trim().slice(0, 100)}`;
     const existing = seen.get(key);
-    if (!existing || row.confidence > existing.confidence) {
-      seen.set(key, row);
+    if (existing) {
+      // Only dedup if within 24h proximity
+      const timeDiff = Math.abs(row.createdAt.getTime() - existing.createdAt.getTime());
+      if (timeDiff <= PROXIMITY_MS) {
+        // Keep the higher-confidence one
+        if (row.confidence > existing.confidence) {
+          seen.set(key, row);
+        }
+        continue;
+      }
+    }
+    seen.set(key, row);
+  }
+
+  // Collect unique values
+  const resultSet = new Set(seen.values());
+  for (const row of rows) {
+    if (resultSet.has(row)) {
+      result.push(row);
     }
   }
-  return [...seen.values()];
+  return result.length > 0 ? result : [...seen.values()];
 }
 
 function computeMoodTrend(moodRows: Array<{ valence: number; arousal: number; createdAt: Date }>): {

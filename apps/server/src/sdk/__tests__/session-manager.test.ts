@@ -13,6 +13,7 @@ import {
   isSessionActive,
   loadSkillFiles,
   resetSkillCache,
+  selectRelevantSkills,
 } from "../session-manager.js";
 
 describe("SDK Session Manager", () => {
@@ -244,7 +245,7 @@ describe("SDK Session Manager", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it("loads probing-*.md and assessment-flow.md files", () => {
+    it("loads probing-*.md and assessment-flow.md files as Map", () => {
       resetSkillCache();
       writeFileSync(join(tmpDir, "probing-depression.md"), "# Depression probing");
       writeFileSync(join(tmpDir, "probing-anxiety.md"), "# Anxiety probing");
@@ -253,27 +254,30 @@ describe("SDK Session Manager", () => {
 
       const skills = loadSkillFiles(tmpDir);
 
-      expect(skills).toHaveLength(3);
-      expect(skills).toContain("# Depression probing");
-      expect(skills).toContain("# Anxiety probing");
-      expect(skills).toContain("# Assessment flow");
+      expect(skills).toBeInstanceOf(Map);
+      expect(skills.size).toBe(3);
+      expect(skills.get("probing-depression.md")).toBe("# Depression probing");
+      expect(skills.get("probing-anxiety.md")).toBe("# Anxiety probing");
+      expect(skills.get("assessment-flow.md")).toBe("# Assessment flow");
       // other-skill.md should NOT be loaded
-      expect(skills).not.toContain("# Should be ignored");
+      expect(skills.has("other-skill.md")).toBe(false);
     });
 
-    it("returns empty array for non-existent directory", () => {
+    it("returns empty Map for non-existent directory", () => {
       resetSkillCache();
       const skills = loadSkillFiles("/tmp/non-existent-dir-12345");
-      expect(skills).toEqual([]);
+      expect(skills).toBeInstanceOf(Map);
+      expect(skills.size).toBe(0);
     });
 
-    it("returns empty array for directory with no matching files", () => {
+    it("returns empty Map for directory with no matching files", () => {
       resetSkillCache();
       writeFileSync(join(tmpDir, "unrelated.md"), "# Not a skill");
       writeFileSync(join(tmpDir, "readme.md"), "# Readme");
 
       const skills = loadSkillFiles(tmpDir);
-      expect(skills).toEqual([]);
+      expect(skills).toBeInstanceOf(Map);
+      expect(skills.size).toBe(0);
     });
 
     it("caches results after first call", () => {
@@ -281,13 +285,13 @@ describe("SDK Session Manager", () => {
       writeFileSync(join(tmpDir, "probing-grief.md"), "# Grief probing");
 
       const first = loadSkillFiles(tmpDir);
-      expect(first).toHaveLength(1);
+      expect(first.size).toBe(1);
 
       // Add another file — should not be picked up due to caching
       writeFileSync(join(tmpDir, "probing-panic.md"), "# Panic probing");
 
       const second = loadSkillFiles(tmpDir);
-      expect(second).toHaveLength(1);
+      expect(second.size).toBe(1);
       expect(second).toBe(first); // Same reference (cached)
     });
 
@@ -296,14 +300,124 @@ describe("SDK Session Manager", () => {
       writeFileSync(join(tmpDir, "probing-grief.md"), "# Grief probing");
 
       const first = loadSkillFiles(tmpDir);
-      expect(first).toHaveLength(1);
+      expect(first.size).toBe(1);
 
       // Reset cache and add another file
       resetSkillCache();
       writeFileSync(join(tmpDir, "probing-panic.md"), "# Panic probing");
 
       const second = loadSkillFiles(tmpDir);
-      expect(second).toHaveLength(2);
+      expect(second.size).toBe(2);
+    });
+  });
+
+  describe("selectRelevantSkills", () => {
+    const makeSkillMap = (): Map<string, string> => {
+      const m = new Map<string, string>();
+      m.set("probing-depression.md", "# Depression probing");
+      m.set("probing-anxiety.md", "# Anxiety probing");
+      m.set("probing-grief.md", "# Grief probing");
+      m.set("probing-panic.md", "# Panic probing");
+      m.set("probing-relationship.md", "# Relationship probing");
+      m.set("assessment-flow.md", "# Assessment flow");
+      return m;
+    };
+
+    it("returns only assessment-flow when no formulation", () => {
+      const result = selectRelevantSkills(makeSkillMap(), null);
+      expect(result).toEqual(["# Assessment flow"]);
+    });
+
+    it("returns only assessment-flow for empty formulation (no signals)", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toEqual(["# Assessment flow"]);
+    });
+
+    it("selects depression skill from vitality domain with high confidence", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [{ label: "Low energy", domain: "vitality", confidence: 0.7 }],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Depression probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("selects anxiety skill from groundedness domain", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [{ label: "Restlessness", domain: "groundedness", confidence: 0.3 }],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Anxiety probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("selects relationship skill from connection domain", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [{ label: "Isolation", domain: "connection", confidence: 0.6 }],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Relationship probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("selects grief skill from label keywords", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [{ label: "Grief after loss", domain: "meaning", confidence: 0.8 }],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Grief probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("selects panic skill from label keywords", () => {
+      const formulation = {
+        formulation: { presentingTheme: "" },
+        activeStates: [{ label: "Panic attacks", domain: "meaning", confidence: 0.4 }],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Panic probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("selects skills from presentingTheme keywords", () => {
+      const formulation = {
+        formulation: { presentingTheme: "Persistent worry and nervousness about work" },
+        activeStates: [],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      expect(result).toContain("# Anxiety probing");
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("caps probing skills at 2 plus assessment-flow", () => {
+      const formulation = {
+        formulation: { presentingTheme: "Depression with anxiety and grief" },
+        activeStates: [
+          { label: "Low vitality", domain: "vitality", confidence: 0.8 },
+          { label: "Restless", domain: "groundedness", confidence: 0.7 },
+          { label: "Grief and loss", domain: "meaning", confidence: 0.9 },
+          { label: "Panic attacks", domain: "groundedness", confidence: 0.6 },
+          { label: "Relationship conflict", domain: "connection", confidence: 0.5 },
+        ],
+      };
+      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      // Should be at most 2 probing + 1 assessment = 3 total
+      expect(result.length).toBeLessThanOrEqual(3);
+      expect(result).toContain("# Assessment flow");
+    });
+
+    it("returns empty array when no assessment-flow and no formulation", () => {
+      const emptyMap = new Map<string, string>();
+      const result = selectRelevantSkills(emptyMap, null);
+      expect(result).toEqual([]);
     });
   });
 });

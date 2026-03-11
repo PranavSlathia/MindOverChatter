@@ -381,15 +381,24 @@ vi.mock("../../src/sdk/session-manager.js", () => ({
   createSdkSession: vi.fn(),
   sendMessage: vi.fn(),
   endSdkSession: vi.fn(),
-  loadSkillFiles: vi.fn(),
+  loadSkillFiles: vi.fn().mockReturnValue(new Map()),
+  selectRelevantSkills: vi.fn().mockReturnValue([]),
   injectSessionContext: vi.fn(),
   isSessionActive: vi.fn(),
   spawnClaudeStreaming: vi.fn(),
 }));
 vi.mock("../../src/services/memory-client.js", () => ({
   getAllMemories: vi.fn(),
+  searchMemories: vi.fn().mockResolvedValue([]),
   addMemoriesAsync: vi.fn(),
   summarizeSessionAsync: vi.fn(),
+}));
+vi.mock("../../src/routes/journey.js", () => ({
+  invalidateInsightsCache: vi.fn(),
+}));
+vi.mock("../../src/services/formulation-service.js", () => ({
+  generateAndPersistFormulation: vi.fn(),
+  getLatestFormulation: vi.fn().mockResolvedValue(null),
 }));
 
 import { detectAssessmentSignals } from "../routes/sessions.js";

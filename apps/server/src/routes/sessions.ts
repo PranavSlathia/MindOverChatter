@@ -95,19 +95,56 @@ const app = new Hono()
   .post("/", async (c) => {
     const user = await getOrCreateUser();
 
-    // Retrieve ALL memories for full user context (BLOCKING — returns [] on failure)
-    const allMemories = await getAllMemories(user.id);
+    // Fetch the latest formulation to drive skill selection and memory ranking
+    const formulation = await getLatestFormulation(user.id);
 
-    const mappedMemories = allMemories.map((m) => ({
-      content: m.content,
-      memoryType: m.memoryType,
-      confidence: m.confidence,
-    }));
+    // ── Memory retrieval: formulation-ranked or full fallback ────
+    let mappedMemories: Array<{ content: string; memoryType: string; confidence: number }>;
 
-    // Create an SDK session with memory context and therapeutic skills
+    if (formulation && formulation.snapshot.formulation?.presentingTheme) {
+      // Ranked search based on presenting theme (top 20)
+      const rankedMemories = await searchMemories(
+        user.id,
+        formulation.snapshot.formulation.presentingTheme,
+        20,
+      );
+      // Always separately fetch safety_critical memories
+      const safetyMemories = await searchMemories(
+        user.id,
+        "safety critical",
+        10,
+        ["safety_critical"],
+      );
+      // Merge, dedup by id
+      const seen = new Set<string>();
+      const combined = [...rankedMemories, ...safetyMemories].filter((m) => {
+        if (seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+      });
+      mappedMemories = combined.map((m) => ({
+        content: m.content,
+        memoryType: m.memoryType,
+        confidence: m.confidence,
+      }));
+    } else {
+      // No formulation (new user) — fall back to all memories
+      const allMemories = await getAllMemories(user.id);
+      mappedMemories = allMemories.map((m) => ({
+        content: m.content,
+        memoryType: m.memoryType,
+        confidence: m.confidence,
+      }));
+    }
+
+    // ── Selective skill loading based on formulation ─────────────
+    const allSkills = loadSkillFiles();
+    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null);
+
+    // Create an SDK session with memory context and selectively loaded skills
     const sdkSessionId = await createSdkSession(
       mappedMemories.length > 0 ? mappedMemories : undefined,
-      loadSkillFiles(),
+      selectedSkills,
     );
 
     // Inject user profile context so the AI knows the user's name, traits, patterns, and goals
@@ -127,6 +164,29 @@ const app = new Hono()
         sdkSessionId,
         `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
       );
+    }
+
+    // ── Inject formulation context (3C) ─────────────────────────
+    if (formulation) {
+      const f = formulation.snapshot;
+      const parts: string[] = [];
+      if (f.formulation?.presentingTheme) {
+        parts.push(`Presenting theme: ${f.formulation.presentingTheme}`);
+      }
+      const activeStates = f.activeStates?.slice(0, 5) ?? [];
+      if (activeStates.length > 0) {
+        parts.push(`Active patterns: ${activeStates.map((s: any) => `${s.label} (${s.domain})`).join(', ')}`);
+      }
+      const actions = formulation.actionRecommendations?.slice(0, 3) ?? [];
+      if (actions.length > 0) {
+        parts.push(`Recommended conversation areas: ${actions.map((a: any) => a.conversationHint).join('; ')}`);
+      }
+      if (parts.length > 0) {
+        injectSessionContext(
+          sdkSessionId,
+          `=== Formulation Context ===\n${parts.join('\n')}\n=== End Formulation Context ===\n\nUse this context to inform your approach. Reference the presenting theme naturally. Prioritize conversation areas marked as recommended.`,
+        );
+      }
     }
 
     const [session] = await db
@@ -538,19 +598,52 @@ const app = new Hono()
         .where(eq(sessions.id, sessionId));
     }
 
-    // Retrieve ALL memories for full user context (same pattern as POST /)
-    const allMemories = await getAllMemories(user.id);
+    // Fetch the latest formulation to drive skill selection and memory ranking
+    const formulation = await getLatestFormulation(user.id);
 
-    const mappedMemories = allMemories.map((m) => ({
-      content: m.content,
-      memoryType: m.memoryType,
-      confidence: m.confidence,
-    }));
+    // ── Memory retrieval: formulation-ranked or full fallback (same pattern as POST /) ────
+    let mappedMemories: Array<{ content: string; memoryType: string; confidence: number }>;
 
-    // Create a fresh SDK session with memory context and therapeutic skills
+    if (formulation && formulation.snapshot.formulation?.presentingTheme) {
+      const rankedMemories = await searchMemories(
+        user.id,
+        formulation.snapshot.formulation.presentingTheme,
+        20,
+      );
+      const safetyMemories = await searchMemories(
+        user.id,
+        "safety critical",
+        10,
+        ["safety_critical"],
+      );
+      const seen = new Set<string>();
+      const combined = [...rankedMemories, ...safetyMemories].filter((m) => {
+        if (seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+      });
+      mappedMemories = combined.map((m) => ({
+        content: m.content,
+        memoryType: m.memoryType,
+        confidence: m.confidence,
+      }));
+    } else {
+      const allMemories = await getAllMemories(user.id);
+      mappedMemories = allMemories.map((m) => ({
+        content: m.content,
+        memoryType: m.memoryType,
+        confidence: m.confidence,
+      }));
+    }
+
+    // ── Selective skill loading based on formulation ─────────────
+    const allSkills = loadSkillFiles();
+    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null);
+
+    // Create a fresh SDK session with memory context and selectively loaded skills
     const sdkSessionId = await createSdkSession(
       mappedMemories.length > 0 ? mappedMemories : undefined,
-      loadSkillFiles(),
+      selectedSkills,
     );
 
     // Inject user profile context (same pattern as POST /)
@@ -570,6 +663,29 @@ const app = new Hono()
         sdkSessionId,
         `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
       );
+    }
+
+    // ── Inject formulation context (3C) ─────────────────────────
+    if (formulation) {
+      const f = formulation.snapshot;
+      const parts: string[] = [];
+      if (f.formulation?.presentingTheme) {
+        parts.push(`Presenting theme: ${f.formulation.presentingTheme}`);
+      }
+      const activeStates = f.activeStates?.slice(0, 5) ?? [];
+      if (activeStates.length > 0) {
+        parts.push(`Active patterns: ${activeStates.map((s: any) => `${s.label} (${s.domain})`).join(', ')}`);
+      }
+      const actions = formulation.actionRecommendations?.slice(0, 3) ?? [];
+      if (actions.length > 0) {
+        parts.push(`Recommended conversation areas: ${actions.map((a: any) => a.conversationHint).join('; ')}`);
+      }
+      if (parts.length > 0) {
+        injectSessionContext(
+          sdkSessionId,
+          `=== Formulation Context ===\n${parts.join('\n')}\n=== End Formulation Context ===\n\nUse this context to inform your approach. Reference the presenting theme naturally. Prioritize conversation areas marked as recommended.`,
+        );
+      }
     }
 
     // Load existing conversation history from the database
@@ -611,7 +727,7 @@ const app = new Hono()
 // ── Background AI Streaming ──────────────────────────────────────
 
 /** Regex to detect and strip [ASSESSMENT_READY:type] markers from AI output. */
-const ASSESSMENT_MARKER_RE = /\[ASSESSMENT_READY:(phq9|gad7)\]/g;
+const ASSESSMENT_MARKER_RE = /\[ASSESSMENT_READY:(phq9|gad7|dass21|isi|rosenberg_se|who5|pc_ptsd5|copenhagen_burnout)\]/g;
 
 /**
  * Calls the SDK session manager to get an AI response, streaming
@@ -899,7 +1015,7 @@ async function checkAssessmentEligibility(
     return;
   }
 
-  const validTypes = new Set(["phq9", "gad7"]);
+  const validTypes = new Set(["phq9", "gad7", "dass21", "isi", "rosenberg_se", "who5", "pc_ptsd5", "copenhagen_burnout"]);
   if (result.suggest && result.type && validTypes.has(result.type) && !completedTypes.has(result.type) && !emittedForSession.has(result.type)) {
     emittedForSession.add(result.type);
     emittedAssessments.set(sessionId, emittedForSession);

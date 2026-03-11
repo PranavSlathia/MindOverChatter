@@ -85,6 +85,11 @@ export interface JourneyFormulation {
     linkedTo: string;
   }>;
   themeOfToday: string;
+  copingSteps?: Array<{
+    step: string;
+    rationale: string;
+    domain: DomainKey;
+  }>;
   dataConfidence: "sparse" | "emerging" | "established";
   moodTrend: {
     direction: "improving" | "stable" | "declining";

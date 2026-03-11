@@ -36,8 +36,8 @@ interface Session {
 
 // ── Constants ───────────────────────────────────────────────────
 
-/** Timeout for a conversation response (ms). Sonnet may take a while. */
-const RESPONSE_TIMEOUT_MS = 60_000;
+/** Timeout for a conversation response (ms). Formulation prompts (~13K chars) need more headroom. */
+const RESPONSE_TIMEOUT_MS = 120_000;
 
 /** Model to use for conversation. Lazy-read to avoid importing env.ts at module level (breaks test isolation). */
 function getClaudeModel(): string {

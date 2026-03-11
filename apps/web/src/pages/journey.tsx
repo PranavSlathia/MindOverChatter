@@ -2,8 +2,10 @@ import { useEffect } from "react";
 import { Link } from "react-router";
 import { ActionCards } from "@/components/journey/action-cards.js";
 import { ActiveStateCards } from "@/components/journey/active-state-cards.js";
+import { CopingSteps } from "@/components/journey/coping-steps.js";
 import { FormulationMap } from "@/components/journey/formulation-map.js";
 import { MoodTrajectory } from "@/components/journey/mood-trajectory.js";
+import { ProtectiveStrengths } from "@/components/journey/protective-strengths.js";
 import { ReflectiveQuestions } from "@/components/journey/reflective-questions.js";
 import { SessionTimeline } from "@/components/journey/session-timeline.js";
 import { ThemeOfToday } from "@/components/journey/theme-of-today.js";
@@ -12,7 +14,6 @@ import { api } from "@/lib/api.js";
 import type {
   JourneyFormulation,
   TimelineAssessment,
-  TimelineMemory,
   TimelineMood,
   TimelineSession,
 } from "@/stores/journey-store.js";
@@ -70,15 +71,9 @@ export function JourneyPage() {
   const moodItems = timeline.filter(
     (item): item is { type: "mood"; data: TimelineMood } => item.type === "mood",
   );
-  const memoryItems = timeline.filter(
-    (item): item is { type: "memory"; data: TimelineMemory } => item.type === "memory",
-  );
 
   const hasTimeline =
-    sessionItems.length > 0 ||
-    assessmentItems.length > 0 ||
-    moodItems.length > 0 ||
-    memoryItems.length > 0;
+    sessionItems.length > 0 || assessmentItems.length > 0 || moodItems.length > 0;
 
   const confidence = insights?.dataConfidence ?? "sparse";
 
@@ -117,20 +112,23 @@ export function JourneyPage() {
       {/* Section 2: What's Active Right Now */}
       {!isLoadingInsights && insights && <ActiveStateCards formulation={insights} />}
 
-      {/* Section 3: Wellbeing Map (not shown for sparse data) */}
+      {/* Section 3: What You're Building */}
+      {!isLoadingInsights && insights && <ProtectiveStrengths formulation={insights} />}
+
+      {/* Section 4: Wellbeing Map (not shown for sparse data) */}
       {!isLoadingInsights && insights && confidence !== "sparse" && (
         <WellbeingMap formulation={insights} />
       )}
 
-      {/* Section 4: How We Understand This (not shown for sparse data) */}
+      {/* Section 5: How We Understand This (not shown for sparse data) */}
       {!isLoadingInsights && insights && confidence !== "sparse" && (
         <FormulationMap formulation={insights} />
       )}
 
-      {/* Section 5: Questions Worth Exploring */}
+      {/* Section 6: Questions Worth Exploring */}
       {!isLoadingInsights && insights && <ReflectiveQuestions formulation={insights} />}
 
-      {/* Section 6: Action Recommendations (not shown for sparse data) */}
+      {/* Section 7: Action Recommendations (not shown for sparse data) */}
       {!isLoadingInsights && insights && confidence !== "sparse" && (
         <ActionCards formulation={insights} />
       )}
@@ -164,13 +162,13 @@ export function JourneyPage() {
               period={insights?.moodTrend.period ?? ""}
             />
 
-            {/* Memory Clusters */}
-            {memoryItems.length > 0 && <MemoryClusters memories={memoryItems.map((m) => m.data)} />}
-
             <SessionTimeline
               sessions={sessionItems.map((s) => s.data)}
               assessments={assessmentItems.map((a) => a.data)}
             />
+
+            {/* Things That Might Help */}
+            {!isLoadingInsights && insights && <CopingSteps formulation={insights} />}
           </div>
         ) : (
           <div className="rounded-2xl border border-primary/10 bg-primary/5 p-8 text-center">
@@ -207,81 +205,6 @@ export function JourneyPage() {
           </div>
         )}
       </section>
-    </div>
-  );
-}
-
-// ── Memory Clusters ─────────────────────────────────────────────
-
-const MEMORY_TYPE_LABELS: Record<string, string> = {
-  life_event: "Life Event",
-  profile_fact: "About You",
-  coping_strategy: "Supports",
-  relationship: "Relationships",
-  win: "Win",
-  goal: "Goal",
-};
-
-const MEMORY_TYPE_COLORS: Record<string, string> = {
-  win: "bg-[#7c9a82]/10 text-[#7c9a82]",
-  goal: "bg-teal-50 text-teal-700",
-  relationship: "bg-[#b8a9c9]/10 text-[#b8a9c9]",
-  life_event: "bg-amber-50 text-amber-700",
-  coping_strategy: "bg-blue-50 text-blue-600",
-  profile_fact: "bg-foreground/5 text-foreground/50",
-};
-
-const USER_VISIBLE_MEMORY_TYPES = new Set([
-  "profile_fact",
-  "relationship",
-  "goal",
-  "coping_strategy",
-  "life_event",
-  "win",
-]);
-
-interface MemoryClustersProps {
-  memories: Array<{
-    id: string;
-    content: string;
-    memoryType: string;
-    confidence: number;
-    createdAt: string;
-  }>;
-}
-
-function MemoryClusters({ memories }: MemoryClustersProps) {
-  // Journey keeps internal symptom threads private and shows only high-level continuity cues.
-  const visible = memories.filter((m) => USER_VISIBLE_MEMORY_TYPES.has(m.memoryType));
-  if (visible.length === 0) return null;
-
-  const grouped = Array.from(
-    visible.reduce((acc, memory) => {
-      acc.set(memory.memoryType, (acc.get(memory.memoryType) ?? 0) + 1);
-      return acc;
-    }, new Map<string, number>()),
-  ).sort((a, b) => b[1] - a[1]);
-
-  return (
-    <div className="rounded-2xl border border-foreground/10 bg-white p-6 shadow-sm">
-      <h3 className="mb-1 text-sm font-semibold text-foreground">What We Keep Track Of</h3>
-      <p className="mb-3 text-xs leading-relaxed text-foreground/45">
-        We keep this intentionally high-level so private or vulnerable details stay inside the conversation.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {grouped.map(([memoryType, count]) => {
-          const colors = MEMORY_TYPE_COLORS[memoryType] ?? "bg-foreground/5 text-foreground/50";
-          return (
-            <span
-              key={memoryType}
-              className={`inline-flex items-center gap-1.5 rounded-full border border-foreground/5 px-3 py-1.5 text-xs ${colors}`}
-            >
-              <span className="font-medium">{MEMORY_TYPE_LABELS[memoryType] ?? memoryType}</span>
-              <span className="opacity-70">{count}</span>
-            </span>
-          );
-        })}
-      </div>
     </div>
   );
 }
