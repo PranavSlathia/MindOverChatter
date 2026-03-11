@@ -12,10 +12,10 @@
 
     "gen": "hygen",
 
-    "db:generate": "pnpm --filter @moc/server drizzle-kit generate",
-    "db:migrate": "pnpm --filter @moc/server drizzle-kit migrate",
-    "db:push": "pnpm --filter @moc/server drizzle-kit push",
-    "db:studio": "pnpm --filter @moc/server drizzle-kit studio",
+    "db:generate": "NODE_OPTIONS='--import tsx' pnpm --filter @moc/server drizzle-kit generate",
+    "db:migrate": "NODE_OPTIONS='--import tsx' pnpm --filter @moc/server drizzle-kit migrate",
+    "db:push": "NODE_OPTIONS='--import tsx' pnpm --filter @moc/server drizzle-kit push",
+    "db:studio": "NODE_OPTIONS='--import tsx' pnpm --filter @moc/server drizzle-kit studio",
 
     "ui:add": "pnpm --filter @moc/web dlx shadcn@latest add",
 

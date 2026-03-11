@@ -8,3 +8,9 @@ drizzle/meta
 .turbo
 .DS_Store
 volumes/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/

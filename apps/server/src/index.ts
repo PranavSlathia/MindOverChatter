@@ -1,13 +1,12 @@
 import { serve } from "@hono/node-server";
+import { env } from "./env.js";
 import { app } from "./routes/index.js";
 
-const port = Number(process.env.PORT) || 3000;
-
-console.log(`Server starting on port ${port}`);
+console.log(`Server starting on port ${env.PORT}`);
 
 serve({
   fetch: app.fetch,
-  port,
+  port: env.PORT,
 });
 
-console.log(`Server running at http://localhost:${port}`);
+console.log(`Server running at http://localhost:${env.PORT}`);

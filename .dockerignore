@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.turbo
+.DS_Store
+.env
+.env.local
+.env.production
+volumes/
+*.db
+__pycache__
+.venv
+*.pyc
+*.egg-info

@@ -27,13 +27,34 @@ export interface ProsodyFeatures {
 
 // ── Session Types ──────────────────────────────────────────────
 
-export type SessionStatus = "active" | "completed" | "crisis_escalated";
+// SessionStatus is exported from validators/session.ts (Zod-inferred)
 
 export type CrisisLevel = "safe" | "elevated_risk" | "crisis";
 
-// ── WebSocket JSON-RPC Method Types ───────────────────────────
+// ── SSE Event Types ──────────────────────────────────────────
 
-/** Client → Server methods */
+/** Server -> Client SSE event types */
+export type SSEEventType =
+  | "ai.chunk"
+  | "ai.thinking"
+  | "ai.response_complete"
+  | "ai.tool_use"
+  | "ai.audio_ready"
+  | "ai.error"
+  | "session.started"
+  | "session.ended"
+  | "session.crisis"
+  | "emotion.ai_detected"
+  | "assessment.due";
+
+// ── Summary Types ──────────────────────────────────────────────
+
+export type SummaryLevel = "turn" | "session" | "weekly" | "monthly" | "profile";
+
+// ── Legacy WebSocket Types (DEPRECATED) ────────────────────────
+// TODO: Remove once Pixel migrates frontend from WebSocket to REST+SSE
+
+/** @deprecated Use REST+SSE instead of WebSocket JSON-RPC */
 export type ClientMethod =
   | "session.start"
   | "session.end"
@@ -44,7 +65,7 @@ export type ClientMethod =
   | "memory.query"
   | "session.history";
 
-/** Server → Client methods */
+/** @deprecated Use SSEEventType instead */
 export type ServerMethod =
   | "ai.chunk"
   | "ai.thinking"
@@ -57,9 +78,7 @@ export type ServerMethod =
   | "assessment.due"
   | "error";
 
-// ── JSON-RPC 2.0 Interfaces ──────────────────────────────────
-
-/** Request (client → server) */
+/** @deprecated Use REST requests instead of JSON-RPC */
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: string;
@@ -67,7 +86,7 @@ export interface JsonRpcRequest {
   params: Record<string, unknown>;
 }
 
-/** Response (server → client) */
+/** @deprecated Use REST responses instead of JSON-RPC */
 export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: string;
@@ -79,7 +98,7 @@ export interface JsonRpcResponse {
   };
 }
 
-/** Notification (server → client, no ID = no response expected) */
+/** @deprecated Use SSE notifications instead of JSON-RPC */
 export interface JsonRpcNotification {
   jsonrpc: "2.0";
   method: string;

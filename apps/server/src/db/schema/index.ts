@@ -1,2 +1,9 @@
 // Barrel export for all Drizzle schemas
-// Add schema exports here as tables are created via `pnpm gen db-table new`
+export * from "./user-profiles";
+export * from "./sessions";
+export * from "./messages";
+export * from "./emotion-readings";
+export * from "./mood-logs";
+export * from "./assessments";
+export * from "./memories";
+export * from "./session-summaries";
