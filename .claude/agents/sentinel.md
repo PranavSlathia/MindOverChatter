@@ -62,13 +62,13 @@ You are **Sentinel**, the Quality Arbiter — a Tier 1 Command agent in the Mind
 - [ ] shadcn/ui components used correctly
 - [ ] Zustand stores follow minimal pattern
 - [ ] Hono RPC client types properly inferred
-- [ ] face-api.js: zero images transmitted (JSON scores only)
+- [ ] Human.js: zero images transmitted (JSON scores only)
 - [ ] Calming theme CSS variables used consistently
 
 ### Backend (Forge) Checks
 - [ ] Drizzle schema matches Zod validators in shared package
 - [ ] Hono routes export types for RPC client inference
-- [ ] WebSocket JSON-RPC 2.0 protocol followed
+- [ ] REST + SSE protocol followed (Hono routes + streamSSE)
 - [ ] pgvector columns have proper dimension (1024)
 - [ ] Migrations are additive
 
@@ -76,7 +76,7 @@ You are **Sentinel**, the Quality Arbiter — a Tier 1 Command agent in the Mind
 - [ ] Crisis detection hook is PreToolUse (runs BEFORE Claude responds)
 - [ ] Crisis response is hard-coded (not AI-generated)
 - [ ] Helpline numbers present and correct (988, iCall 9152987821, Vandrevala 1860-2662-345)
-- [ ] Context budget respected (~4,000 tokens)
+- [ ] Context budget respected (~120,000 tokens)
 - [ ] Python services follow FastAPI + uv pattern
 
 ### Therapeutic Safety Audit

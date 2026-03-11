@@ -10,7 +10,7 @@
 2. [Service Topology](#2-service-topology)
 3. [Data Flow Diagrams](#3-data-flow-diagrams)
 4. [Claude Agent SDK Architecture](#4-claude-agent-sdk-architecture)
-5. [WebSocket Protocol (JSON-RPC)](#5-websocket-protocol-json-rpc)
+5. [REST + SSE Protocol](#5-rest--sse-protocol)
 6. [Database Architecture](#6-database-architecture)
 7. [Memory Architecture](#7-memory-architecture)
 8. [AI Pipeline Architecture](#8-ai-pipeline-architecture)
@@ -44,12 +44,12 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 │  │                     React Frontend (apps/web)                    │  │
 │  │                                                                  │  │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │  │
-│  │  │  Chat UI     │  │ Dashboard    │  │ face-api.js            │  │  │
+│  │  │  Chat UI     │  │ Dashboard    │  │ Human.js               │  │  │
 │  │  │  (streaming) │  │ (mood/PHQ/   │  │ (TensorFlow.js)        │  │  │
 │  │  │             │  │  GAD charts) │  │ 7 emotions → JSON only │  │  │
 │  │  └──────┬──────┘  └──────┬───────┘  └───────────┬────────────┘  │  │
 │  │         │                │                      │               │  │
-│  │         │    WebSocket (JSON-RPC)               │               │  │
+│  │         │    REST + SSE (Hono RPC)               │               │  │
 │  │         └────────────────┼──────────────────────┘               │  │
 │  └──────────────────────────┼──────────────────────────────────────┘  │
 │                             │           │                              │
@@ -104,7 +104,7 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 | Service | Container | Port | Responsibility |
 |---|---|---|---|
 | **web** | `moc-web` | 5173 | React frontend (Vite dev / nginx prod) |
-| **server** | `moc-server` | 3000 | Hono backend + Claude Agent SDK + WebSocket |
+| **server** | `moc-server` | 3000 | Hono backend + Claude Agent SDK + SSE streaming |
 | **db** | `pgvector/pgvector:pg16` | 5432 | PostgreSQL 16 + pgvector extension |
 | **whisper** | `moc-whisper` | 8001 | faster-whisper STT (large-v3-turbo) |
 | **emotion** | `moc-emotion` | 8002 | SenseVoice voice emotion + librosa prosody |
@@ -113,7 +113,7 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 ### Service Communication Map
 
 ```
-web ──WebSocket──► server ──Drizzle──► db
+web ──REST/SSE──► server ──Drizzle──► db
  │                   │
  │                   ├──MCP──► db (Claude Agent SDK direct DB access)
  │                   │
@@ -124,7 +124,7 @@ web ──WebSocket──► server ──Drizzle──► db
  └──HTTP──► emotion  (POST /analyze)
 ```
 
-**Key pattern**: Frontend sends audio directly to Python services (parallel). Frontend sends the merged results + text to the Hono server via WebSocket. This avoids double-hop latency for audio processing.
+**Key pattern**: Frontend sends audio directly to Python services (parallel). Frontend sends the merged results + text to the Hono server via POST /api/sessions/:id/messages. This avoids double-hop latency for audio processing.
 
 ### Network
 
@@ -140,7 +140,7 @@ All services on a shared Docker network (`moc-net`). No service exposed external
 User types message
         │
         ▼
-[Frontend] ──WebSocket JSON-RPC──► [Hono Server]
+[Frontend] ──POST /api/sessions/:id/messages──► [Hono Server]
                                         │
                                         ▼
                                   [Crisis Detector]
@@ -175,7 +175,7 @@ User types message
                             - Write to DB via Drizzle
                                    │
                                    ▼
-[Frontend] ◄──WebSocket stream──── [Hono Server]
+[Frontend] ◄──SSE stream──── [Hono Server]
         │
         ▼
   Render AI response
@@ -223,7 +223,7 @@ User records audio utterance
   Merge: {text, voice_emotion, prosody}
         │
         ▼
-  Send merged payload via WebSocket to [Hono Server]
+  Send merged payload via POST /api/sessions/:id/messages to [Hono Server]
         │
         ▼
   (continues as Text Conversation Flow with enriched context)
@@ -232,13 +232,13 @@ User records audio utterance
 ### 3.3 Facial Emotion Flow (Browser-Side)
 
 ```
-[Frontend] - face-api.js running in-browser
+[Frontend] - Human.js (@vladmandic/human) running in-browser
         │
         ▼
-  Webcam frames ──► TinyFaceDetector (15-30 FPS)
+  Webcam frames ──► Human face detection (15-30 FPS)
         │
         ▼
-  FER model (TensorFlow.js, ~7MB cached)
+  Emotion model (TensorFlow.js, ~10MB cached)
         │
         ▼
   7-emotion JSON scores per frame:
@@ -250,7 +250,7 @@ User records audio utterance
   (reduce jitter, emit stable readings)
         │
         ▼
-  [WebSocket] ──JSON-RPC "emotion.face_update"──► [Hono Server]
+  [POST /api/emotions] ──fire-and-forget──► [Hono Server]
         │
         ▼
   Store in emotion_readings table (face channel)
@@ -285,7 +285,7 @@ User records audio utterance
   Store reference in messages table
         │
         ▼
-[Frontend] ◄──WebSocket (audio URL or base64 chunk)
+[Frontend] ◄──SSE event (audio URL)
         │
         ▼
   Play audio via Web Audio API
@@ -297,7 +297,7 @@ User records audio utterance
 User opens app / starts new session
         │
         ▼
-[Frontend] ──WebSocket "session.start"──► [Hono Server]
+[Frontend] ──POST /api/sessions──► [Hono Server]
         │
         ▼
   Create new session record in DB
@@ -305,11 +305,11 @@ User opens app / starts new session
         │
         ▼
   Initialize Claude Agent SDK session:
-  - Load system prompt (~500 tokens) with therapeutic framework
-  - Retrieve user profile from DB (~500 tokens)
-  - Retrieve last session summary (~300 tokens)
-  - Query Mem0 for relevant memories (~1500 tokens)
-  - Total context budget: ~4000 tokens
+  - Load system prompt (~2,000 tokens) with therapeutic framework
+  - Retrieve user profile from DB (~3,000 tokens)
+  - Retrieve session summaries (~3,000 tokens)
+  - Query Mem0 for relevant memories (~12,000 tokens, 10-15 chunks)
+  - Total context budget: ~120,000 tokens
         │
         ▼
   SDK session ready, awaiting user input
@@ -331,11 +331,32 @@ User opens app / starts new session
   6. Check if weekly/monthly rollup needed
         │
         ▼
-[Frontend] ◄──WebSocket "session.ended"──── [Hono Server]
+[Frontend] ◄──SSE event via /api/sessions/:id/events──── [Hono Server]
         │
         ▼
   Show session summary card
 ```
+
+### Session End Triggers
+
+| Trigger | Mechanism | Reliability |
+|---|---|---|
+| Explicit end | User clicks "End Session" → `POST /api/sessions/:id/end` | Guaranteed |
+| Inactivity timeout | Server timer: 30 min no activity → auto-end | Guaranteed |
+| Browser/tab close | `beforeunload` → `navigator.sendBeacon()` | Best-effort |
+| Orphan cleanup | Server sweep every 5 min: stale active sessions → auto-end | Guaranteed (delayed) |
+
+**Orphan detection query:**
+```sql
+UPDATE sessions
+SET status = 'completed', ended_at = NOW()
+WHERE status = 'active'
+  AND last_activity_at < NOW() - INTERVAL '30 minutes'
+RETURNING id;
+```
+Each returned session ID triggers the summary generation pipeline asynchronously.
+
+**Crisis sessions** are never auto-summarized — they are preserved verbatim and flagged for review.
 
 ---
 
@@ -346,7 +367,7 @@ User opens app / starts new session
 ```
 apps/server/src/sdk/
 ├── session-manager.ts      # Create, resume, end SDK sessions
-├── message-transformer.ts  # SDK streaming → JSON-RPC WebSocket events
+├── message-transformer.ts  # SDK streaming → SSE events
 ├── skill-loader.ts         # Load .claude/skills/*.md as system context
 ├── hook-registry.ts        # Register PreToolUse, PostToolUse hooks
 ├── mcp-config.ts           # MCP server configurations
@@ -364,11 +385,12 @@ interface TherapySession {
   userId: string;                // User identifier
   status: 'active' | 'completed' | 'crisis_escalated';
   contextBudget: {
-    systemPrompt: number;        // ~500 tokens
-    userProfile: number;         // ~500 tokens
-    lastSummary: number;         // ~300 tokens
-    retrievedMemories: number;   // ~1500 tokens
-    conversationHistory: number; // ~1200 tokens
+    systemPrompt: number;        // ~2,000 tokens
+    userProfile: number;         // ~3,000 tokens
+    sessionSummaries: number;    // ~3,000 tokens
+    retrievedMemories: number;   // ~12,000 tokens
+    conversationHistory: number; // ~96,000 tokens
+    responseReserve: number;     // ~4,000 tokens
   };
 }
 
@@ -465,107 +487,122 @@ interface TherapySession {
 
 ---
 
-## 5. WebSocket Protocol (JSON-RPC)
+## 5. REST + SSE Protocol
 
-### Connection
+### API Surface
 
-```
-ws://localhost:3000/ws
-```
+All client-server communication uses REST endpoints. AI streaming responses use SSE (Server-Sent Events) via Hono's `streamSSE`. Hono RPC provides end-to-end type safety automatically.
 
-Single WebSocket connection per client session. All real-time communication flows through this channel.
+### Route Registry
 
-### Message Format (JSON-RPC 2.0)
-
-```typescript
-// Request (client → server)
-interface JsonRpcRequest {
-  jsonrpc: "2.0";
-  id: string;              // UUID for request correlation
-  method: string;          // Namespaced method name
-  params: Record<string, unknown>;
-}
-
-// Response (server → client)
-interface JsonRpcResponse {
-  jsonrpc: "2.0";
-  id: string;              // Matches request ID
-  result?: unknown;        // Success payload
-  error?: {                // Error payload (mutually exclusive with result)
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-}
-
-// Notification (server → client, no ID = no response expected)
-interface JsonRpcNotification {
-  jsonrpc: "2.0";
-  method: string;
-  params: Record<string, unknown>;
-}
-```
-
-### Method Registry
-
-#### Client → Server (Requests)
-
-| Method | Params | Description |
+| Method | Route | Description |
 |---|---|---|
-| `session.start` | `{}` | Start new therapy session |
-| `session.end` | `{sessionId}` | End current session |
-| `message.send` | `{sessionId, text, voiceEmotion?, facialEmotion?, prosody?}` | Send message with optional multimodal context |
-| `emotion.face_update` | `{sessionId, scores: EmotionScores}` | Periodic facial emotion update from face-api.js |
-| `assessment.submit` | `{sessionId, type: "phq9"|"gad7", answers: number[]}` | Submit clinical assessment |
-| `mood.log` | `{sessionId, valence: number, arousal: number}` | Manual mood log (circumplex model) |
-| `memory.query` | `{query: string}` | Search user's memory (for dashboard) |
-| `session.history` | `{limit, offset}` | Fetch past sessions list |
+| `POST` | `/api/sessions` | Create new therapy session |
+| `GET` | `/api/sessions/:id` | Get session details |
+| `POST` | `/api/sessions/:id/messages` | Send message, returns SSE stream (Claude streaming) |
+| `POST` | `/api/sessions/:id/end` | End current session |
+| `POST` | `/api/emotions` | Ingest emotion frame (fire-and-forget, facial/voice at 2-10Hz) |
+| `POST` | `/api/assessments` | Submit clinical assessment (PHQ-9, GAD-7) |
+| `GET` | `/api/assessments` | List assessments |
+| `POST` | `/api/mood-logs` | Create mood log (circumplex model) |
+| `GET` | `/api/mood-logs` | List mood logs |
+| `GET` | `/api/sessions/:id/events` | SSE stream for session notifications (crisis, assessment due) |
 
-#### Server → Client (Notifications)
+### SSE Streaming (Claude AI Responses)
 
-| Method | Params | Description |
-|---|---|---|
-| `ai.chunk` | `{sessionId, text, done: boolean}` | Streaming AI response token |
-| `ai.thinking` | `{sessionId}` | AI is processing (show typing indicator) |
-| `ai.response_complete` | `{sessionId, messageId, fullText}` | Full response assembled |
-| `ai.audio_ready` | `{sessionId, audioUrl}` | TTS audio available for playback |
-| `session.started` | `{sessionId, resumedFrom?}` | Session successfully initialized |
-| `session.ended` | `{sessionId, summary}` | Session ended with summary |
-| `session.crisis` | `{resources: CrisisResource[]}` | Crisis detected, resources surfaced |
-| `emotion.ai_detected` | `{sessionId, emotion, source: "text"|"context"}` | AI detected emotion in conversation |
-| `assessment.due` | `{type: "phq9"|"gad7"}` | Time for periodic assessment |
-| `error` | `{code, message, data?}` | Typed error notification |
+`POST /api/sessions/:id/messages` returns a streaming SSE response with the following event types:
 
-### Example Message Exchange
+```
+event: thinking
+data: {"stage": "analyzing_emotion"}
+
+event: chunk
+data: {"text": "Main ", "done": false}
+
+event: chunk
+data: {"text": "samajh sakta hoon...", "done": true}
+
+event: response_complete
+data: {"messageId": "ai-msg-99", "tokensUsed": 47}
+
+event: audio_ready
+data: {"audioUrl": "/api/audio/tts-99.wav", "duration": 3.8}
+```
+
+### Session Event SSE (Notifications)
+
+`GET /api/sessions/:id/events` provides a persistent SSE connection for push notifications:
+
+```
+event: crisis
+data: {"crisisResponse": "I hear you...", "helplines": [...], "severity": "high"}
+
+event: assessment_due
+data: {"type": "PHQ-9", "reason": "bi_weekly_schedule"}
+
+event: emotion_detected
+data: {"primary": "anxious", "secondary": "hopeful", "confidence": 0.82}
+```
+
+### Emotion Ingestion
+
+Facial and voice emotion data is sent via `POST /api/emotions` with HTTP keep-alive. At 2-10Hz for a single user, this is efficient and avoids the complexity of WebSocket.
 
 ```json
-// Client sends message with multimodal context
-→ {
-    "jsonrpc": "2.0",
-    "id": "msg-001",
-    "method": "message.send",
-    "params": {
-      "sessionId": "sess-abc123",
-      "text": "Aaj bahut anxious feel ho raha hai",
-      "voiceEmotion": {"emotion": "sad", "confidence": 0.72},
-      "prosody": {"pitch_mean": 180, "energy_mean": 0.3, "speaking_rate": 3.2},
-      "facialEmotion": {"sad": 0.45, "neutral": 0.35, "anxious": 0.15}
-    }
-  }
-
-// Server streams response
-← {"jsonrpc": "2.0", "method": "ai.thinking", "params": {"sessionId": "sess-abc123"}}
-← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "Main ", "done": false}}
-← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "samajh ", "done": false}}
-← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "sakta ", "done": false}}
-← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "hoon...", "done": false}}
-← {"jsonrpc": "2.0", "method": "ai.chunk", "params": {"sessionId": "sess-abc123", "text": "", "done": true}}
-← {"jsonrpc": "2.0", "method": "ai.response_complete", "params": {"sessionId": "sess-abc123", "messageId": "msg-resp-001", "fullText": "Main samajh sakta hoon..."}}
-← {"jsonrpc": "2.0", "method": "ai.audio_ready", "params": {"sessionId": "sess-abc123", "audioUrl": "/audio/msg-resp-001.wav"}}
-
-// Server confirms original request
-← {"jsonrpc": "2.0", "id": "msg-001", "result": {"messageId": "msg-req-001", "received": true}}
+POST /api/emotions
+{
+  "sessionId": "sess-abc123",
+  "channel": "face",
+  "dominant": "sad",
+  "scores": {"happy": 0.02, "sad": 0.71, "neutral": 0.10, "...": "..."}
+}
 ```
+
+### Example Request-Response Cycle
+
+```
+// Client sends message with multimodal context
+POST /api/sessions/sess-abc123/messages
+Content-Type: application/json
+
+{
+  "text": "Aaj bahut anxious feel ho raha hai",
+  "voiceEmotion": {"emotion": "sad", "confidence": 0.72},
+  "prosody": {"pitch_mean": 180, "energy_mean": 0.3, "speaking_rate": 3.2},
+  "facialEmotion": {"sad": 0.45, "neutral": 0.35, "anxious": 0.15}
+}
+
+// Server responds with SSE stream
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+
+event: thinking
+data: {"stage": "analyzing_emotion"}
+
+event: chunk
+data: {"text": "Main ", "done": false}
+
+event: chunk
+data: {"text": "samajh sakta hoon...", "done": true}
+
+event: response_complete
+data: {"messageId": "msg-resp-001", "fullText": "Main samajh sakta hoon..."}
+
+event: audio_ready
+data: {"audioUrl": "/audio/msg-resp-001.wav"}
+```
+
+### Why REST + SSE (Not WebSocket)
+
+| Concern | REST + SSE | WebSocket |
+|---|---|---|
+| **Type safety** | Hono RPC provides full end-to-end inference | Returns `Promise<unknown>` |
+| **Complexity** | Standard HTTP, no connection management | Connection lifecycle, reconnection logic |
+| **Caching/CDN** | Works with standard HTTP infrastructure | Requires special proxy support |
+| **Emotion ingestion** | POST with keep-alive (fine at 2-10Hz single-user) | Marginal benefit at this frequency |
+| **AI streaming** | SSE is purpose-built for server-to-client streaming | Overkill for unidirectional streaming |
+
+**Note**: A dedicated WebSocket may be added later ONLY for real-time audio streaming (v2), but the main API is REST+SSE.
 
 ---
 
@@ -681,6 +718,9 @@ Single database, single source of truth. pgvector extension enables vector simil
 }
 
 // emotion_readings
+// NOTE: Face and voice emotions are WEAK signals (FER accuracy ~65-72% even for humans).
+// Use these to prompt follow-up questions, never to conclude emotional state.
+// Highest-signal input is structured self-report + longitudinal change.
 {
   id: uuid().primaryKey(),
   messageId: uuid().references(messages.id),
@@ -688,6 +728,7 @@ Single database, single source of truth. pgvector extension enables vector simil
   channel: text(),              // 'text' | 'voice' | 'face'
   emotionLabel: text(),         // Primary emotion detected
   confidence: real(),           // 0-1 confidence score
+  signalWeight: real(),         // Channel reliability: text=0.8, voice=0.5, face=0.3
   rawScores: jsonb(),           // Full emotion distribution
   prosodyData: jsonb(),         // Pitch, energy, MFCCs (voice only)
   createdAt: timestamp(),
@@ -721,10 +762,14 @@ Single database, single source of truth. pgvector extension enables vector simil
   id: uuid().primaryKey(),
   userId: uuid().references(userProfiles.id),
   content: text(),              // Extracted fact/memory
-  category: text(),             // 'personal' | 'emotional' | 'behavioral' | 'goal' | 'relationship'
+  memoryType: text(),           // 'profile_fact' | 'relationship' | 'goal' | 'coping_strategy' | 'recurring_trigger' | 'life_event' | 'symptom_episode' | 'unresolved_thread' | 'safety_critical' | 'win'
   importance: real(),           // 0-1 importance score
+  confidence: real(),           // 0-1 extraction confidence
   embedding: vector(1024),      // For semantic retrieval
   sourceSessionId: uuid(),      // Which session this was extracted from
+  sourceMessageId: uuid(),      // Specific message that produced this memory
+  lastConfirmedAt: timestamp(), // When user last reaffirmed this fact
+  supersededBy: uuid(),         // Points to newer memory that contradicts this one
   createdAt: timestamp(),
   updatedAt: timestamp(),
 }
@@ -822,7 +867,7 @@ Three-layer memory system: **Mem0** (automatic fact extraction), **Hierarchical 
 │  └──────────────────────────────┬───────────────────────────┘  │
 │                                 │                              │
 │  ┌──────────────────────────────▼───────────────────────────┐  │
-│  │  Layer 5: User Profile (~2K tokens, always in context)   │  │
+│  │  Layer 5: User Profile (~3K tokens, always in context)   │  │
 │  │  Core traits, persistent patterns, long-term goals       │  │
 │  │  Updated after each monthly synthesis                    │  │
 │  │  → Store in user_profiles table                          │  │
@@ -840,13 +885,14 @@ Three-layer memory system: **Mem0** (automatic fact extraction), **Hierarchical 
 │                                                                │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  Context Assembly (per new session)                      │  │
-│  │  Total budget: ~4,000 tokens                             │  │
+│  │  Total budget: ~120,000 tokens                           │  │
 │  │                                                          │  │
-│  │  System prompt (therapeutic framework)    ~500 tokens    │  │
-│  │  User profile / core memory              ~500 tokens    │  │
-│  │  Most recent session summary             ~300 tokens    │  │
-│  │  Retrieved relevant memories (3-5)       ~1,500 tokens  │  │
-│  │  Current conversation history            ~1,200 tokens  │  │
+│  │  System prompt (therapeutic framework)    ~2,000 tokens  │  │
+│  │  User profile / core memory              ~3,000 tokens  │  │
+│  │  Session summaries (recent 3-5)          ~3,000 tokens  │  │
+│  │  Retrieved relevant memories (10-15)     ~12,000 tokens │  │
+│  │  Current conversation history            ~96,000 tokens │  │
+│  │  Response reserve                        ~4,000 tokens  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -857,16 +903,16 @@ Three-layer memory system: **Mem0** (automatic fact extraction), **Hierarchical 
 New session starts
         │
         ▼
-  1. Load user profile (always, ~500 tokens)
+  1. Load user profile (always, ~3,000 tokens)
         │
         ▼
-  2. Load most recent session summary (~300 tokens)
+  2. Load recent session summaries (~3,000 tokens)
         │
         ▼
   3. Query Mem0 with session context:
      - "What do I know about this user?"
      - Score by relevance × importance × recency
-     - Select top 3-5 memories (~1,500 tokens)
+     - Select top 10-15 memories (~12,000 tokens)
         │
         ▼
   4. Assemble into system prompt
@@ -874,6 +920,42 @@ New session starts
         ▼
   Context ready for Claude Agent SDK query
 ```
+
+### User Journey Timeline
+
+Beyond retrieval, the memory system supports longitudinal queries like "what has changed over the last 3 months?" and "when did this pattern start?"
+
+**Timeline entries** are derived from stored memories and assessments:
+
+| Entry Type | Source | Example |
+|---|---|---|
+| Symptom episode | `memories` (type: `symptom_episode`) | "Insomnia period: Feb 1-15, 2026" |
+| Life event | `memories` (type: `life_event`) | "Breakup: Jan 2026" |
+| Assessment trend | `assessments` (PHQ-9/GAD-7 over time) | "PHQ-9: 18→14→11 over 6 weeks" |
+| Turning point | `memories` (type: `win` or `life_event`) | "First successful CBT reframe: Feb 20" |
+| Active problem | `memories` (type: `unresolved_thread`) | "Childhood bullying — raised but not explored" |
+| Goal progress | `memories` (type: `goal`) + session evidence | "Work anxiety: improving (3 sessions of progress)" |
+
+**Timeline query pattern:**
+```sql
+SELECT content, memory_type, confidence, created_at, last_confirmed_at
+FROM memories
+WHERE user_id = $1
+  AND memory_type IN ('life_event', 'symptom_episode', 'win', 'goal')
+  AND created_at >= NOW() - INTERVAL '90 days'
+ORDER BY created_at DESC;
+```
+
+This enables the AI to construct a narrative of the user's journey, not just retrieve isolated memories.
+
+### Memory Provenance & Contradiction Handling
+
+Every memory has provenance (source_session_id, source_message_id) and confidence tracking:
+
+- **Confirmation**: If a user reaffirms a fact in a later session, `last_confirmed_at` is updated and `confidence` increases
+- **Contradiction**: If new evidence contradicts an existing memory, the old memory's `superseded_by` field is set to the new memory's ID. The old memory is NOT deleted — it becomes part of the historical record
+- **Decay**: Memories that haven't been confirmed in 90+ days have their effective importance reduced at retrieval time (not in storage)
+- **Safety-critical memories are NEVER decayed or superseded** — they persist permanently
 
 ---
 
@@ -887,10 +969,10 @@ New session starts
 │                                                                 │
 │  BROWSER (client-side)                                         │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  face-api.js (@vladmandic/face-api)                      │  │
+│  │  Human.js (@vladmandic/human)                             │  │
 │  │  TensorFlow.js runtime                                   │  │
-│  │  TinyFaceDetector + FER model                            │  │
-│  │  ~7MB cached, 15-30 FPS                                  │  │
+│  │  Built-in face detection + emotion model                 │  │
+│  │  ~10MB cached, 15-30 FPS                                 │  │
 │  │  7 emotions: happy, sad, angry, fearful,                 │  │
 │  │              disgusted, surprised, neutral                │  │
 │  └──────────────────────────────────────────────────────────┘  │
@@ -1109,8 +1191,8 @@ Service call fails
         │
         ├── Recoverable? → Retry or degrade gracefully
         │
-        └── Fatal? → Log to DB + notify frontend via WebSocket error notification
-                     {jsonrpc: "2.0", method: "error", params: {code, message}}
+        └── Fatal? → Log to DB + notify frontend via SSE error event on /api/sessions/:id/events
+                     event: error, data: {code, message}
 ```
 
 ### Python Microservice Error Format
@@ -1194,7 +1276,7 @@ Since v1 is personal use running locally via Docker Compose:
 |---|---|
 | **Auth** | None (single user) |
 | **Network** | All services on internal Docker network, only web + server exposed to localhost |
-| **Facial data** | Never leaves browser - face-api.js processes locally, sends JSON scores only |
+| **Facial data** | Never leaves browser - Human.js processes locally, sends JSON scores only |
 | **Audio data** | Stored in local Docker volume, never transmitted externally |
 | **API keys** | Claude uses local binary auth (existing Claude Code login) |
 | **Database** | Local PostgreSQL, no external access |
@@ -1202,7 +1284,7 @@ Since v1 is personal use running locally via Docker Compose:
 
 ### Data Privacy Guarantees
 
-1. **Zero facial images** transmitted to any server - face-api.js runs in-browser
+1. **Zero facial images** transmitted to any server - Human.js runs in-browser
 2. **Audio stays local** - stored in Docker volume, processed by local microservices
 3. **No external API calls** for sensitive data - Claude runs via local binary
 4. **Single PostgreSQL instance** - all data in one place, easy to audit/delete
@@ -1227,7 +1309,7 @@ When ready to package as a desktop app:
 |---|---|---|
 | **React frontend** | Browser at localhost:5173 | Electron renderer (BrowserWindow) |
 | **Hono server** | Node.js process at localhost:3000 | Electron main process |
-| **WebSocket** | ws:// over network | Electron IPC bridge (or local ws://) |
+| **REST + SSE** | HTTP over network | Electron IPC bridge (or local HTTP) |
 | **Claude SDK** | Server spawns local binary | Main process has direct binary access |
 | **Docker services** | Docker Compose | Can keep Docker OR bundle Python with app |
 | **File storage** | Docker volume | App data directory (`userData`) |
@@ -1237,9 +1319,9 @@ When ready to package as a desktop app:
 
 - React component tree (entire UI)
 - Zustand stores
-- WebSocket message protocol (JSON-RPC)
+- REST + SSE protocol (Hono RPC types)
 - All shared types and validators
-- face-api.js in-browser processing
+- Human.js in-browser processing
 - Python microservice APIs (if kept in Docker)
 - Claude Agent SDK integration code
 - Drizzle schema definitions (if staying on PG)
@@ -1248,7 +1330,7 @@ When ready to package as a desktop app:
 
 1. Add Electron shell (`electron-builder` or `electron-forge`)
 2. Move Hono server into Electron main process
-3. Replace WebSocket with Electron IPC (or keep local WebSocket)
+3. Replace REST + SSE with Electron IPC (or keep local HTTP)
 4. Update Claude SDK binary resolution (use 1code's `env.ts` pattern)
 5. Configure auto-updater
 6. Package Python services (or keep Docker requirement)

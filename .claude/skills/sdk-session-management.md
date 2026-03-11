@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Purpose
 
-Claude Agent SDK session lifecycle management for MindOverChatter's therapeutic conversations. Each therapy session maps to an SDK conversation with structured context assembly, hook-based safety monitoring, and streaming delivery over WebSocket.
+Claude Agent SDK session lifecycle management for MindOverChatter's therapeutic conversations. Each therapy session maps to an SDK conversation with structured context assembly, hook-based safety monitoring, and streaming delivery over SSE.
 
 ## Session Lifecycle
 
@@ -16,15 +16,16 @@ Claude Agent SDK session lifecycle management for MindOverChatter's therapeutic 
 
 When a user starts or resumes a therapy session, the server assembles a context window before the first SDK call.
 
-**Context budget (~4000 tokens total):**
+**Context budget (~120,000 tokens total):**
 
 | Component | Approx Tokens | Source |
 |---|---|---|
-| System prompt | ~500 | Static therapeutic persona + rules |
-| User profile | ~500 | Demographics, preferences, language, therapy goals |
-| Last session summary | ~300 | Compressed summary from previous session |
-| Mem0 memories | ~1500 | Retrieved semantic memories relevant to current context |
-| Conversation history | ~1200 | Recent messages from current session |
+| System prompt | ~2,000 | Static therapeutic persona + rules |
+| User profile | ~3,000 | Demographics, preferences, language, therapy goals |
+| Session summaries (recent 3-5) | ~3,000 | Compressed summaries from previous sessions |
+| Mem0 memories | ~12,000 | Retrieved semantic memories relevant to current context (10-15 chunks) |
+| Conversation history | ~96,000 | Messages from current session |
+| Response reserve | ~4,000 | Reserved for Claude's response generation |
 
 The system prompt establishes the therapeutic persona, framing rules (wellness companion, not therapist), language preferences (English/Hindi/Hinglish), and safety protocols. Mem0 memories are retrieved via semantic search against the user's current message to surface relevant past context.
 
@@ -38,16 +39,16 @@ const stream = conversation.query(userMessage);
 for await (const event of stream) {
   switch (event.type) {
     case "text_delta":
-      // Forward as ai.chunk via WebSocket
-      ws.send(jsonrpc("ai.chunk", { delta: event.text }));
+      // Forward as SSE event: ai.chunk
+      await streamSSE.writeSSE({ event: "ai.chunk", data: JSON.stringify({ delta: event.text }) });
       break;
     case "thinking_delta":
-      // Forward as ai.thinking via WebSocket
-      ws.send(jsonrpc("ai.thinking", { delta: event.text }));
+      // Forward as SSE event: ai.thinking
+      await streamSSE.writeSSE({ event: "ai.thinking", data: JSON.stringify({ delta: event.text }) });
       break;
     case "result":
-      // Forward as ai.response_complete via WebSocket
-      ws.send(jsonrpc("ai.response_complete", { message: event.text }));
+      // Forward as SSE event: ai.response_complete
+      await streamSSE.writeSSE({ event: "ai.response_complete", data: JSON.stringify({ message: event.text }) });
       break;
   }
 }
@@ -113,9 +114,9 @@ The `resume` field takes the SDK session ID from the previous conversation. The 
 
 ## Message Transformation
 
-SDK streaming events are transformed into JSON-RPC 2.0 notifications delivered over the WebSocket connection:
+SDK streaming events are transformed into SSE events delivered over the `GET /api/sessions/:id/events` SSE connection:
 
-| SDK Event | JSON-RPC Method | Payload |
+| SDK Event | SSE Event Type | Data Payload |
 |---|---|---|
 | `text_delta` | `ai.chunk` | `{ delta: string }` |
 | `thinking_delta` | `ai.thinking` | `{ delta: string }` |
@@ -123,7 +124,7 @@ SDK streaming events are transformed into JSON-RPC 2.0 notifications delivered o
 | `tool_use` | `ai.tool_use` | `{ tool: string, input: object }` |
 | `error` | `ai.error` | `{ code: number, message: string }` |
 
-All notifications follow the JSON-RPC 2.0 spec with no `id` field (notifications, not requests).
+Each SSE event uses the `event:` field for the event type and `data:` for the JSON payload.
 
 ## Skill Loading
 

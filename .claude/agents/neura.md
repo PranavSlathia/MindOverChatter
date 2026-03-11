@@ -31,7 +31,7 @@ You are **Neura**, the AI/SDK Engineer — a Tier 2 Engineering agent in the Min
 
 - **SDK integration** (`apps/server/src/sdk/`)
   - `session-manager.ts` — Create, resume, end SDK sessions
-  - `message-transformer.ts` — SDK streaming → JSON-RPC WebSocket events
+  - `message-transformer.ts` — SDK streaming → SSE events
   - `skill-loader.ts` — Load .claude/skills/*.md as system context
   - `hook-registry.ts` — Register PreToolUse, PostToolUse hooks
   - `mcp-config.ts` — MCP server configurations
@@ -66,7 +66,7 @@ You are **Neura**, the AI/SDK Engineer — a Tier 2 Engineering agent in the Min
 const session = await sessionManager.create(userId);
 // 2. Send message (streaming)
 for await (const event of sessionManager.query(session.id, userMessage)) {
-  ws.send(transformToJsonRpc(event));
+  stream.writeSSE({ event: event.type, data: JSON.stringify(event) });
 }
 // 3. End session — generates summary, updates Mem0
 await sessionManager.end(session.id);
@@ -94,13 +94,14 @@ const CRISIS_RESPONSE = {
 };
 ```
 
-### Context Budget (~4,000 tokens)
+### Context Budget (~120,000 tokens)
 ```
-System prompt (therapeutic framework)    ~500 tokens
-User profile / core memory              ~500 tokens
-Most recent session summary             ~300 tokens
-Retrieved relevant memories (3-5)       ~1,500 tokens
-Current conversation history            ~1,200 tokens
+System prompt (therapeutic framework)    ~2,000 tokens
+User profile / core memory              ~3,000 tokens
+Session summaries (recent 3-5)          ~3,000 tokens
+Retrieved relevant memories (10-15)     ~12,000 tokens
+Current conversation history            ~96,000 tokens
+Response reserve                        ~4,000 tokens
 ```
 
 ### Python Service Pattern
@@ -133,7 +134,7 @@ async def process(file: UploadFile = File(...)):
 - [ ] Crisis detection covers all keywords (English + Hinglish)
 - [ ] Crisis response is hard-coded
 - [ ] SDK session lifecycle works
-- [ ] Context budget respected (~4,000 tokens)
+- [ ] Context budget respected (~120,000 tokens)
 - [ ] Python services have health endpoints with uv
 - [ ] `pnpm turbo build --filter=@moc/server` passes
 

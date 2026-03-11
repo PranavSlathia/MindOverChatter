@@ -79,13 +79,14 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 
 ### P0 -- v1 (MVP) Features
 
-#### 4.1 Claude-Powered Hinglish Conversation
+#### 4.1 Claude-Powered Adaptive Conversation
 - Use Anthropic Claude Sonnet 4 as the primary AI conversation engine
-- Claude handles code-switching natively (Hinglish conversation)
-- Streaming responses via WebSocket for a conversational feel
+- **Language adaptation**: AI mirrors the user's language — adapts to English, Hinglish, or Hindi based on user input. Primary usage expected to be English with occasional Hinglish
+- Claude handles code-switching natively when user mixes languages
+- Streaming responses via SSE (Server-Sent Events) for a conversational feel
 - Prompt caching: 1-hour cache on Sonnet, minimum 1024 tokens to reduce costs on static system prompt and user context
 - Use Claude Haiku for lightweight tasks like emotion classification from text
-- System prompt with therapeutic framework (~500 tokens)
+- System prompt with therapeutic framework (~2,000 tokens)
 
 #### 4.2 Voice Input (Speech-to-Text)
 - Use faster-whisper (SYSTRAN/faster-whisper) with large-v3-turbo model for general STT
@@ -95,14 +96,15 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 - Batch transcription per utterance (record -> transcribe -> respond) for v1 (simpler than real-time streaming)
 
 #### 4.3 Browser-Side Facial Emotion Detection
-- Use face-api.js (@vladmandic/face-api, actively maintained fork) running entirely in-browser via TensorFlow.js
-- Detects 7 emotions from FER-2013/FERPlus/RAF-DB trained models
-- Achieves 15-30 FPS with TinyFaceDetector
-- Total model size: ~7MB (cacheable)
-- Integration: sends only JSON emotion scores (e.g., {happy: 0.85, neutral: 0.12}) to backend via WebSocket
+- Use Human.js (@vladmandic/human, actively maintained successor to the archived face-api.js) running entirely in-browser via TensorFlow.js
+- Detects 7 emotions from built-in face detection + emotion models
+- Achieves 15-30 FPS with built-in face detection pipeline
+- Total model size: ~10MB (cacheable)
+- Integration: sends only JSON emotion scores (e.g., {happy: 0.85, neutral: 0.12}) to backend via POST /api/emotions
 - Zero facial images transmitted to server
 - Display clear visual indicator when emotion detection is active
 - Allow opt-out at any time
+- **Signal weighting**: Facial emotion is a WEAK signal, not ground truth. FER accuracy is ~65-72% even for humans on standard benchmarks. Use facial signals to prompt follow-up questions ("You seem a bit tense — how are you feeling?"), never to conclude emotional state. The highest-signal input for mental state assessment is structured self-report + longitudinal change.
 
 #### 4.4 Voice Emotion Detection
 - Use SenseVoice-Small (FunAudioLLM/SenseVoice, 8K+ GitHub stars) as primary engine
@@ -143,19 +145,44 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 2. **Session summary (300-500 words)**: Themes, insights, cognitive patterns, action items -- generated via Claude after each session
 3. **Weekly rollup**: Patterns across sessions, progress on goals
 4. **Monthly synthesis**: Long-term patterns, growth areas, recurring concerns
-5. **User profile**: Core traits, persistent patterns, long-term goals (~2K tokens, always in context)
+5. **User profile**: Core traits, persistent patterns, long-term goals (~3K tokens, always in context)
 
-#### 4.8 Context Budget Per New Session (~4,000 tokens)
-- System prompt with therapeutic framework: ~500 tokens
-- User profile / core memory: ~500 tokens
-- Most recent session summary: ~300 tokens
-- Retrieved relevant past context (3-5 chunks): ~1,500 tokens
-- Current conversation history: ~1,200 tokens
+**Structured memory types** — "evergrowing memory" means structured and queryable, not just more summaries. Each memory is categorized into explicit types:
 
-#### 4.9 CBT-Informed Session Structure
+| Type | Description | Examples |
+|---|---|---|
+| `profile_fact` | Demographic or biographical detail | "Works as a software engineer", "Lives in Mumbai" |
+| `relationship` | Person in user's life and role | "Sister Priya — close, supportive", "Manager Raj — source of stress" |
+| `goal` | Stated therapeutic or life goal | "Want to manage work anxiety", "Trying to improve sleep" |
+| `coping_strategy` | What the user does to cope (adaptive or maladaptive) | "Goes for walks when stressed", "Tends to isolate" |
+| `recurring_trigger` | Situations that reliably trigger distress | "Sunday evenings before work week", "Arguments with partner" |
+| `life_event` | Major event with approximate date | "Breakup in Jan 2026", "Promoted at work March 2026" |
+| `symptom_episode` | Period of notable symptoms | "2 weeks of insomnia starting Feb 2026" |
+| `unresolved_thread` | Topic raised but not fully explored | "Mentioned childhood bullying but changed subject" |
+| `safety_critical` | Crisis history or safety-relevant fact | "Previous crisis flag on 2026-02-15", "Has therapist Dr. Sharma" |
+| `win` | Positive achievement or breakthrough | "Used CBT reframing successfully", "Slept full night for first time in weeks" |
+
+#### 4.8 Context Budget Per Session (~120,000 tokens)
+- System prompt with therapeutic framework: ~2,000 tokens
+- User profile / core memory: ~3,000 tokens
+- Session summaries (recent 3-5): ~3,000 tokens
+- Retrieved relevant past context (10-15 chunks): ~12,000 tokens
+- Current conversation history: ~96,000 tokens
+- Response reserve: ~4,000 tokens
+
+#### 4.9 Therapeutic Approach: Open-Ended with Blended Techniques
+- **Philosophy**: Start open-ended — understand the user completely before applying any specific framework. The AI should not jump to conclusions about which approach works best. Let sessions evolve naturally based on what the user brings.
+- **Blended techniques** (applied organically, not rigidly):
+  - **CBT** (Thought Record Cycle): When user presents distorted thinking patterns
+  - **MI-OARS**: As the default conversational style (reflective, non-directive)
+  - **Open exploration**: When the user just needs to talk or process
+- The AI selects techniques based on accumulated understanding of the user, not on session number or rigid protocols
+- **Adaptive framing**: Match the user's tone — clinical if they're clinical, casual if they're casual, somewhere in between if that's where they are
+
+#### 4.9.1 CBT Techniques (Applied When Appropriate)
 - Core technique: Thought Record Cycle
   - Situation -> Automatic Thought -> Emotion -> Evidence For/Against -> Balanced Thought -> Outcome
-- AI guides users through each step sequentially
+- AI guides users through steps when cognitive distortions are detected — not by default
 - Uses Socratic questioning (not directive advice):
   - "What evidence supports this thought?"
   - "What would you tell a friend in this situation?"
@@ -168,7 +195,7 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
   - Emotional reasoning
 - Claude can identify distortions in user text with appropriate system prompting
 
-#### 4.10 Motivational Interviewing (MI-OARS) Conversational Style
+#### 4.9.2 Motivational Interviewing (MI-OARS) — Default Conversational Style
 - **Open-ended questions**: Requiring elaboration, not yes/no
 - **Affirmations**: Recognizing strengths and efforts
 - **Reflections**: Paraphrasing and deepening what the user said; aim for 2:1 reflection-to-question ratio
@@ -176,6 +203,42 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 - Detect change talk using DARN-CAT framework:
   - Desire, Ability, Reason, Need, Commitment, Activation, Taking steps
 - Selectively reinforce change talk through reflection
+
+#### 4.9.3 Human-Authored Probing Flows (Top 5 Use Cases)
+- The LLM handles tone, reflection, and empathy. But **designed flows control what evidence is collected**, what screeners are triggered, and when safety escalation overrides the chat.
+- Each flow defines: entry signals, required evidence to gather, screeners to trigger, escalation points, and exit criteria.
+
+| # | Use Case | Entry Signals | Key Evidence to Gather | Screener Triggers |
+|---|----------|---------------|------------------------|-------------------|
+| 1 | **Depression** | Low mood, anhedonia, hopelessness, PHQ-9 ≥ 10 | Duration, sleep changes, appetite, concentration, suicidal ideation (→ crisis if present) | PHQ-9, sleep ladder, functioning |
+| 2 | **Generalized Anxiety** | Worry, tension, restlessness, GAD-7 ≥ 10 | Worry topics, physical symptoms, avoidance, duration, control attempts | GAD-7, functioning, sleep ladder |
+| 3 | **Panic / Stress Overload** | Panic episodes, overwhelm, somatic complaints | Frequency, triggers, avoidance patterns, physical vs. cognitive symptoms | Panic ladder, functioning |
+| 4 | **Grief / Loneliness** | Loss mention, isolation, "nobody understands" | Type of loss, timeline, support network, complicated grief indicators | Relationship/loneliness ladder, functioning |
+| 5 | **Relationship Conflict** | Partner/family/friend conflict, anger, resentment | Conflict patterns, communication style, boundaries, escalation history | Relationship ladder, safety screen |
+
+- Flows are implemented as system prompt instructions (not hardcoded UI flows) — Claude follows the probing structure while maintaining natural conversation
+- Each flow has a **safety override**: if crisis indicators appear at any point, the flow is immediately interrupted and crisis protocol takes over
+
+#### 4.10 Session Lifecycle & End Triggers
+
+Sessions are bounded conversations. A session starts when the user sends their first message and ends via one of these triggers:
+
+1. **Explicit end**: User clicks "End Session" button in the UI → `POST /api/sessions/:id/end`
+2. **Inactivity timeout**: No user message for 30 minutes → server-side timer triggers end
+3. **Browser close/tab close**: `beforeunload` event fires a `navigator.sendBeacon()` to `POST /api/sessions/:id/end` — best-effort, not guaranteed
+4. **Orphan detection**: Server-side periodic sweep (every 5 minutes) finds sessions with `status: active` and `last_activity_at` older than 30 minutes → auto-ends them
+
+When a session ends (regardless of trigger):
+1. Server generates a session summary via Claude (300-500 words)
+2. Summary + embedding stored in DB
+3. Mem0 updated with extracted facts
+4. Session record updated (`status: completed`, `ended_at: now()`)
+5. Weekly/monthly rollup checked
+6. Frontend shows session summary card (if still connected)
+
+**Browser crash / power loss**: The `beforeunload` beacon is best-effort. If it fails, the orphan detection sweep handles cleanup within 5 minutes. No data is lost — all messages are persisted per-turn, so the summary can be generated retroactively from stored messages.
+
+**Crisis sessions**: Sessions flagged `crisis_escalated` follow the same end flow but are never auto-summarized by AI — they are preserved verbatim for safety audit.
 
 #### 4.11 Mood Tracking (Circumplex Model of Affect)
 - Two dimensions:
@@ -187,9 +250,32 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
   - Anxious: high arousal, negative valence
   - Sad: low arousal, negative valence
 
-#### 4.12 Periodic Clinical Assessments
-- **PHQ-9** (depression): 0-27 scale, administer weekly, free to use, no license required
-- **GAD-7** (anxiety): 0-21 scale, administer weekly, free to use, no license required
+#### 4.12 Structured Assessment & Symptom Formulation
+- **NOT diagnosis** — the app is a wellness companion, not a clinician. Assessments produce structured symptom formulations: hypotheses with confidence, supporting evidence, duration, impairment level, and next-best-question.
+- **Core screeners** (administer weekly, all free/no license):
+  - **PHQ-9** (depression): 0-27 scale
+  - **GAD-7** (anxiety): 0-21 scale
+- **Branching assessment ladder** (triggered by screener scores or conversational signals):
+  - **Sleep**: ISI-like questions (onset latency, wake frequency, daytime impairment)
+  - **Panic/stress overload**: Frequency of panic episodes, avoidance behaviors, physical symptoms
+  - **Trauma**: PCL-5-inspired screening (intrusions, avoidance, hypervigilance) — ask gently, never push
+  - **Mania/hypomania**: Energy/sleep changes, grandiosity, risk-taking — important to screen before assuming depression
+  - **Functioning**: Work/school/relationship impact, self-care changes
+  - **Substance use**: Frequency, coping-related use, impact on mood — non-judgmental framing
+  - **Relationship/loneliness stress**: Social isolation, conflict patterns, support network
+- **Output format**: Each assessment produces a structured hypothesis:
+  ```
+  {
+    area: "depression",
+    confidence: 0.7,
+    supporting_evidence: ["PHQ-9 score 14", "sleep disruption 3 weeks", "anhedonia mentioned 4 sessions"],
+    duration: "3 weeks",
+    impairment: "moderate — affecting work attendance",
+    next_best_question: "Have you noticed changes in appetite or weight?"
+  }
+  ```
+- Hypotheses are stored in the user profile and updated as new evidence emerges
+- **Contradiction handling**: If new evidence contradicts a hypothesis, lower confidence and flag for review rather than silently discarding
 
 #### 4.13 Crisis Safety Rails (MANDATORY)
 - Every user message must pass through a crisis detection classifier
@@ -257,6 +343,7 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 | HF ViT (dima806) | ~91%* | Needs GPU | 7 | -- |
 
 - *Note: 91% figure is on a custom test split; FER2013 human accuracy is only ~65-72%, so claims above ~75% on standard splits warrant skepticism
+- **v2 upgrade path**: For state-of-the-art accuracy, the team can migrate to ONNX Runtime Web + EmotiEffLib (HSEmotion) for server-side or browser-side inference, leveraging AffectNet-trained models with best-in-class valence-arousal and categorical emotion accuracy
 
 #### 4.19 Self-Editing Memory (Letta/MemGPT)
 - Letta (formerly MemGPT, letta-ai/letta, 16.4K stars)
@@ -315,9 +402,9 @@ Audio -> VAD -> [Parallel]
 4. Fused result sent to Claude for response generation
 
 ### Facial Emotion Flow (v1)
-1. face-api.js processes webcam frames in-browser
+1. Human.js processes webcam frames in-browser
 2. Extracts 7-emotion JSON scores only
-3. JSON scores sent to backend via WebSocket
+3. JSON scores sent to backend via POST /api/emotions
 4. No facial images ever leave the user's device
 5. Clear visual indicator displayed when active
 6. User can opt-out at any time
@@ -332,8 +419,8 @@ Audio -> VAD -> [Parallel]
 
 ### Temporal Memory Query Flow
 ```sql
-SELECT content, dominant_emotion, created_at
-FROM session_segments
+SELECT content, themes, created_at
+FROM session_summaries
 WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '30 days'
 ORDER BY embedding <=> $2  -- cosine similarity to query embedding
 LIMIT 5;
@@ -353,8 +440,11 @@ LIMIT 5;
 3. Immediately surface crisis resources (988, iCall, Vandrevala Foundation)
 4. Override any ongoing conversation state
 
-### Cultural Entry Point (Wysa Insight)
-- Replace "mental health" as entry point with culturally resonant terms (e.g., "akelapan" / loneliness)
+### Adaptive Entry Point
+- AI adapts its greeting and framing to match the user's established tone and language
+- First session: warm, casual, non-clinical — "Hey, what's on your mind?" or similar
+- Subsequent sessions: informed by user profile and last session context
+- Replace "mental health" framing with culturally resonant terms when appropriate (e.g., "akelapan" / loneliness per Wysa insight)
 - Build psychoeducation into onboarding
 - Anonymous and stigma-free positioning
 
@@ -367,31 +457,35 @@ LIMIT 5;
 | Layer | Technology | Rationale |
 |---|---|---|
 | Frontend | React + Vite + TypeScript + shadcn/ui + Tailwind CSS | Largest ecosystem, best Claude Code training data, customizable wellness themes |
-| Backend | FastAPI (Python 3.11+) | Native async, WebSocket streaming, excellent AI library ecosystem |
+| Backend | Hono (TypeScript, Node.js 22 LTS) | Full TS stack, ultra-fast, Web Standards, SSE streaming support, end-to-end type safety with Hono RPC |
 | Database | PostgreSQL 16 + pgvector | Single DB for structured data + vector embeddings |
-| ORM | SQLAlchemy 2.0 + Alembic migrations | Standard, async-capable, well-documented |
+| ORM | Drizzle ORM | TypeScript-native, type-safe, lightweight, excellent pgvector support |
 | AI Conversation | Anthropic Claude Sonnet 4 (streaming) | Quality/cost balance, excellent streaming SDK |
 | Speech-to-Text | faster-whisper (large-v3-turbo) | 4x faster than original Whisper, good Hindi support |
 | Voice Emotion | SenseVoice-Small + librosa | ASR+emotion in one pass (70ms/10s audio), supplementary prosody features |
-| Facial Emotion | face-api.js (browser-side) | Zero-server FER, complete privacy, 15-30 FPS |
+| Facial Emotion | Human.js (browser-side) | Zero-server FER, complete privacy, 15-30 FPS |
 | Text-to-Speech | Kokoro TTS (82M params, Apache 2.0) + edge-tts fallback | Kokoro: fast, lightweight, Hindi support. edge-tts: zero-setup Microsoft neural voices including hi-IN |
 | Memory | Mem0 + pgvector backend | Automatic fact extraction, hybrid retrieval, HIPAA-compliant |
-| Containerization | Docker Compose (5 services) | frontend, backend, db (pgvector/pgvector:pg16), whisper, tts |
+| AI Engine | Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) | Programmatic Claude Code: session management, tool use, MCP, hooks, streaming |
+| Containerization | Docker Compose (7 services) | web, server, db, whisper, emotion, tts, memory |
 
-### Production Starter Template
-- Official Full Stack FastAPI Template: Docker Compose + PostgreSQL + React + JWT auth + Alembic migrations + Traefik + CI/CD
-- Covers ~60% of boilerplate
+### Monorepo Structure
+- Turborepo + pnpm workspaces monorepo
+- `apps/web` (React frontend), `apps/server` (Hono backend), `packages/shared` (types, validators)
+- Python AI microservices in `services/` directory (FastAPI thin wrappers with uv)
 
 ### Containerization
-- Docker Compose with 5 services:
-  1. Frontend (React)
-  2. Backend (FastAPI)
+- Docker Compose with 7 services:
+  1. Frontend (React + Vite)
+  2. Backend (Hono + Claude Agent SDK)
   3. Database (pgvector/pgvector:pg16)
-  4. Whisper (STT service)
-  5. TTS (Kokoro)
+  4. Whisper (STT service — FastAPI + faster-whisper)
+  5. Emotion (Voice emotion — FastAPI + SenseVoice + librosa)
+  6. TTS (Text-to-speech — FastAPI + Kokoro)
+  7. Memory (Mem0 — FastAPI + pgvector backend)
 
 ### API Integration Details
-- Claude API: Streaming responses via WebSocket
+- Claude API: Streaming responses via SSE (Server-Sent Events)
 - Prompt caching: 1-hour cache on Sonnet, minimum 1024 tokens
 - Claude Haiku for lightweight tasks (emotion classification from text)
 
@@ -466,7 +560,7 @@ LIMIT 5;
   - Apache 2.0, 9.5K+ GitHub stars
 
 ### Facial Emotion Models
-- **face-api.js** (@vladmandic/face-api): 7 emotions, in-browser, TensorFlow.js, 15-30 FPS, ~7MB
+- **Human.js** (@vladmandic/human): 7 emotions, in-browser, TensorFlow.js, 15-30 FPS, ~10MB
 - **DeepFace**: ~65-67% accuracy FER2013, 8-15 FPS CPU, 7 emotions, MIT license
 - **FER**: ~65-70% accuracy, 15-25 FPS, 7 emotions, MIT
 - **HSEmotion**: AffectNet accuracy, 10-20 FPS, 8+ emotions + valence-arousal, Apache 2.0
@@ -505,9 +599,9 @@ LIMIT 5;
 ## 8. Data & Privacy Requirements
 
 ### Privacy Architecture (v1)
-- Facial processing runs entirely in-browser (face-api.js via TensorFlow.js)
+- Facial processing runs entirely in-browser (Human.js via TensorFlow.js)
 - Zero facial images transmitted to server
-- Only JSON emotion scores sent to backend via WebSocket
+- Only JSON emotion scores sent to backend via POST /api/emotions
 - Never store, transmit, or log facial images
 - Display clear visual indicator when emotion detection is active
 - Allow opt-out at any time
@@ -537,7 +631,7 @@ LIMIT 5;
 ### Performance Benchmarks
 - SenseVoice: 70ms for 10 seconds of audio (15x faster than Whisper-Large)
 - faster-whisper: 4x faster than original Whisper; large-v3-turbo processes 13 minutes of audio in ~19 seconds on RTX 3070 Ti
-- face-api.js: 15-30 FPS with TinyFaceDetector, ~7MB model (cacheable)
+- Human.js: 15-30 FPS with built-in face detection, ~10MB models (cacheable)
 - Kokoro TTS: 2x real-time on CPU
 - openSMILE: eGeMAPSv02 feature extraction in near-real-time
 
@@ -557,7 +651,7 @@ LIMIT 5;
 ### Model Sizes
 - Kokoro TTS: 82M parameters
 - emotion2vec+ large: ~300M parameters
-- face-api.js models: ~7MB total
+- Human.js models: ~10MB total
 - AI4Bharat January 2026 encoders: 270M, 1B, 4B parameter sizes
 
 ---
@@ -636,7 +730,7 @@ LIMIT 5;
 - STT accuracy: Oriserve reports 39% improvement over pretrained Whisper for code-switched speech
 - ASR Word Error Rate: IndicWhisper achieves 4.1 WER reduction over base Whisper; collabora/whisper-base-hindi hits 8.49% WER on FLEURS-hi
 - Sentiment classification: HingBERT F1 ~0.70 on SentiMix benchmark
-- Facial emotion detection: face-api.js 15-30 FPS; FER2013 human accuracy baseline ~65-72%
+- Facial emotion detection: Human.js 15-30 FPS; FER2013 human accuracy baseline ~65-72%
 - SpeechBrain: ~75.3% accuracy on 4-class emotion recognition
 - Memory retrieval: Mem0 shows 26% higher accuracy than OpenAI's memory system
 
@@ -704,7 +798,7 @@ LIMIT 5;
 - FER2013 human accuracy is only ~65-72%, so facial emotion claims above ~75% on standard splits warrant skepticism
 - openSMILE commercial use requires license from audEERING
 - Parselmouth is GPL v3+ licensed (copyleft implications)
-- Context budget per session limited to ~4,000 tokens
+- Context window per session: ~120,000 tokens
 
 ### Assumptions
 - Claude handles Hinglish code-switching well (stated as v1 assumption)
@@ -713,7 +807,7 @@ LIMIT 5;
 
 ### Dependencies
 - Anthropic Claude API (Sonnet 4, Haiku) availability and pricing
-- Open-source model maintenance (face-api.js fork, HingBERT, SenseVoice, etc.)
+- Open-source model maintenance (Human.js, HingBERT, SenseVoice, etc.)
 - AI4Bharat ecosystem continued development
 - PostgreSQL 16 + pgvector stability
 
@@ -724,7 +818,7 @@ LIMIT 5;
 ### v1 (MVP) -- Ship First
 - Claude-powered Hinglish conversation (Claude handles code-switching natively)
 - faster-whisper for voice input (large-v3-turbo)
-- face-api.js for browser-side facial emotion detection
+- Human.js for browser-side facial emotion detection
 - pgvector for unified storage
 - Mem0 for memory management
 - Kokoro TTS for voice responses (edge-tts fallback)
@@ -770,7 +864,7 @@ LIMIT 5;
 | Transliteration | IndicXlit | Roman <-> Devanagari as needed |
 | STT | faster-whisper (large-v3-turbo) | 4x faster, good Hindi, batch per utterance |
 | Voice Emotion | SenseVoice-Small + librosa | Single-pass ASR+emotion, supplementary prosody |
-| Facial Emotion | face-api.js (browser) | Privacy-first, 15-30 FPS, ~7MB |
+| Facial Emotion | Human.js (browser) | Privacy-first, 15-30 FPS, ~10MB |
 | TTS | Kokoro (primary) + edge-tts (fallback) | #1 TTS Arena, Hindi, <$0.06/hr, Apache 2.0 |
 | Memory | Mem0 + pgvector | HIPAA-compliant, 26% better than OpenAI memory |
 | Database | PostgreSQL 16 + pgvector | Single DB for everything, ACID, temporal+vector queries |
@@ -792,9 +886,10 @@ Audio -> VAD -> [Parallel]
 ### Additional Sentiment Resources
 - rohanrajpal/bert-base-multilingual-codemixed-cased-sentiment: 3-class classification (negative/neutral/positive) on code-mixed text
 
-### Full Stack FastAPI Template
-- Includes: Docker Compose + PostgreSQL + React + JWT auth + Alembic migrations + Traefik + CI/CD
-- Covers ~60% of the boilerplate for this project
+### Codegen & Type Flow
+- Hono RPC provides end-to-end type inference from server routes to frontend client (no OpenAPI/codegen needed)
+- Drizzle schema → Zod validators → Hono routes → Hono RPC client (zero manual type syncing)
+- Hygen templates for scaffolding routes, features, services, and components
 
 ### Key Numeric Facts Referenced
 - L3Cube-HingCorpus: 52.93M sentences, 1.04B tokens
@@ -812,10 +907,10 @@ Audio -> VAD -> [Parallel]
 - SenseVoice: 70ms per 10s audio, 4 emotions, 50+ languages
 - emotion2vec+ large: ~300M params, 9 categories, 10 languages
 - Kokoro TTS: 82M params, 2x real-time CPU, <$0.06/hr
-- face-api.js: 7 emotions, 15-30 FPS, ~7MB
+- Human.js: 7 emotions, 15-30 FPS, ~10MB
 - faster-whisper: 4x faster, 13min audio in ~19s on RTX 3070 Ti
-- Context budget: ~4,000 tokens per session
-- User profile: ~2K tokens always in context
+- Context budget: ~120,000 tokens per session
+- User profile: ~3K tokens always in context
 - Prompt cache: 1-hour, min 1024 tokens
 - HingBERT sentiment F1: ~0.70
 - MuRIL: 27% better than mBERT on transliterated Hindi

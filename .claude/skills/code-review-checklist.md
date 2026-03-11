@@ -26,7 +26,7 @@ These apply to every file in every domain:
 - [ ] **shadcn/ui components** -- Use shadcn/ui primitives (Button, Card, Dialog, etc.) instead of custom HTML elements. Check that new UI uses the component library, not raw divs with custom styles.
 - [ ] **Zustand store patterns** -- State management uses Zustand stores with selectors. No prop drilling beyond 2 levels. Stores should be small and focused (one per domain concern).
 - [ ] **Hono RPC type inference** -- API calls use the Hono RPC client with full type inference from the backend route definitions. No manual type annotations on API responses -- types flow from Forge automatically.
-- [ ] **face-api.js privacy** -- Verify that face-api.js only emits JSON emotion scores. No canvas snapshots, no image blobs, no frame data should ever be sent over the network. All facial processing is browser-only.
+- [ ] **Human.js privacy** -- Verify that Human.js only emits JSON emotion scores. No canvas snapshots, no image blobs, no frame data should ever be sent over the network. All facial processing is browser-only.
 - [ ] **Calming theme CSS variables** -- UI styling uses the defined CSS custom properties for the calming therapeutic theme. No hardcoded colors -- use `var(--color-name)` references. Check that new components respect the theme system.
 - [ ] **Responsive and accessible** -- Components work on mobile viewports. Interactive elements have proper ARIA attributes. Focus management is correct for modals and dialogs.
 
@@ -34,7 +34,7 @@ These apply to every file in every domain:
 
 - [ ] **Drizzle-Zod validator parity** -- Every Drizzle table schema has a corresponding Zod validator generated via drizzle-zod. Insert and select schemas must stay in sync with the database schema. If a migration changes a table, the Zod schema must update too.
 - [ ] **Hono route type exports** -- All Hono route handlers export their types so the frontend RPC client can infer them. Check that new routes are added to the type chain.
-- [ ] **JSON-RPC 2.0 compliance** -- WebSocket messages follow JSON-RPC 2.0 format. Requests have `id`, notifications do not. Responses include either `result` or `error`, never both. Error objects have `code` and `message` fields.
+- [ ] **REST + SSE compliance** -- REST endpoints use proper HTTP methods and status codes. SSE events use typed `event:` fields with JSON `data:` payloads. All routes export types for Hono RPC inference.
 - [ ] **pgvector dimensions (1024)** -- Vector columns use 1024 dimensions, matching the embedding model output. Verify any new vector operations use the correct dimensionality.
 - [ ] **Migration safety** -- Database migrations must be reversible. No dropping columns or tables without a migration that can undo it. Check for data-destructive operations. Migrations run in transactions.
 - [ ] **No N+1 queries** -- Database queries inside loops are forbidden. Use joins, subqueries, or batch operations. Check that new query patterns do not introduce N+1 problems.
@@ -51,7 +51,7 @@ These apply to every file in every domain:
 ## Cross-Domain Checks
 
 - [ ] **Type chain integrity** -- Verify the full type chain: Drizzle schema -> Zod validator -> Hono route type -> RPC client inference. A change at any point must propagate through the chain. If a database column changes, trace it all the way to the frontend.
-- [ ] **WebSocket event registry** -- New WebSocket methods or notifications must be added to the shared event type registry. Both client and server must agree on the event schema. Check that new events follow JSON-RPC 2.0 format.
+- [ ] **SSE event registry** -- New SSE event types must be added to the shared event type registry. Both client and server must agree on the event schema. Check that new events use typed `event:` fields with JSON `data:` payloads.
 - [ ] **No circular dependencies** -- Imports must not form cycles across packages or modules. Shared types live in a shared package, not imported cross-domain. Use `madge` or similar tools to verify if uncertain.
 - [ ] **Environment variable consistency** -- If a new env var is introduced, it must appear in `.env.example`, the Docker Compose file, and any deployment configuration. Check all entry points.
 
@@ -69,6 +69,6 @@ These checks are non-negotiable for a mental health application:
 
 - [ ] **No secrets in code** -- Grep for API keys, tokens, passwords, connection strings. Check `.gitignore` covers `.env` files. Verify no secrets in Docker build args.
 - [ ] **No sensitive data in logs** -- Log statements must not include user messages, emotional data, session content, or any PII. Structured logging with safe fields only.
-- [ ] **face-api.js privacy verification** -- Double-check that no code path transmits facial image data. Search for canvas.toDataURL, toBlob, getImageData, or similar APIs near face-api.js usage. Only JSON emotion scores should cross the browser boundary.
-- [ ] **Input validation** -- All user inputs are validated with Zod schemas before processing. WebSocket messages are validated against JSON-RPC 2.0 schema. File uploads have size and type restrictions.
+- [ ] **Human.js privacy verification** -- Double-check that no code path transmits facial image data. Search for canvas.toDataURL, toBlob, getImageData, or similar APIs near Human.js usage. Only JSON emotion scores should cross the browser boundary.
+- [ ] **Input validation** -- All user inputs are validated with Zod schemas before processing. REST request bodies are validated via `@hono/zod-validator`. File uploads have size and type restrictions.
 - [ ] **CORS and CSP** -- CORS is restricted to known origins. Content Security Policy headers prevent inline scripts and unauthorized resource loading.

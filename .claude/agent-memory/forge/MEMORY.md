@@ -1,6 +1,6 @@
 # Forge Memory
 
-> Schema decisions, migration history, Hono route patterns, WebSocket protocol notes.
+> Schema decisions, migration history, Hono route patterns, REST + SSE protocol notes.
 
 ---
 
@@ -14,4 +14,4 @@
 
 ## API Patterns
 
-<!-- Hono route and WebSocket patterns -->
+<!-- Hono route and SSE streaming patterns -->

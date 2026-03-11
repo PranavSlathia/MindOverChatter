@@ -45,7 +45,7 @@ This document defines the standard development procedures for MindOverChatter, e
 2. Use Hono RPC client for API calls (types auto-inferred)
 3. Use Zustand for client state (minimal stores)
 4. Use calming theme CSS variables (not hardcoded colors)
-5. face-api.js: ZERO images leave the browser (JSON scores only)
+5. Human.js: ZERO images leave the browser (JSON scores only)
 6. Run `pnpm turbo build --filter=@moc/web` to verify
 
 ---
@@ -55,7 +55,7 @@ This document defines the standard development procedures for MindOverChatter, e
 1. Session lifecycle: create → query (streaming) → end (summarize)
 2. Crisis detection: PreToolUse hook, runs on EVERY message
 3. Memory extraction: PostToolUse hook
-4. Context budget: ~4,000 tokens per session
+4. Context budget: ~120,000 tokens per session
 5. Skills: `.claude/skills/*.md` files
 6. Python services: FastAPI + uv, health endpoint required
 7. **Any crisis change → Vigil testing MANDATORY**

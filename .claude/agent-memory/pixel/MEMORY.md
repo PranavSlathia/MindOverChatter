@@ -1,6 +1,6 @@
 # Pixel Memory
 
-> Frontend patterns, component decisions, face-api.js integration notes.
+> Frontend patterns, component decisions, Human.js integration notes.
 
 ---
 

@@ -107,16 +107,16 @@ working code. Each owns a distinct technology domain.
 | Designation | Frontend Engineer |
 | Model | inherit |
 | Prefix | PXL |
-| Domain | React 19, TypeScript, Vite 6, shadcn/ui, Zustand, face-api.js, Tailwind v4 |
+| Domain | React 19, TypeScript, Vite 6, shadcn/ui, Zustand, Human.js, Tailwind v4 |
 
 **Pixel owns:**
 - Components (shadcn/ui + custom wellness-themed components)
-- Hooks (WebSocket, emotion detection, Hono RPC client)
+- Hooks (SSE streaming, emotion detection, Hono RPC client)
 - Stores (Zustand: session, mood, emotion, chat)
 - Pages (chat, dashboard, assessments, settings)
-- face-api.js integration (browser-side facial emotion detection)
+- Human.js integration (browser-side facial emotion detection)
 - Calming UI theme (sage green, soft cream, warm lavender)
-- WebSocket client (JSON-RPC message handling)
+- Hono RPC client + EventSource (SSE) for real-time streaming
 - Charts (mood trends, PHQ-9/GAD-7 visualizations)
 
 **Pixel does NOT touch:** Database migrations, Python code, backend routes, Agent SDK.
@@ -125,7 +125,7 @@ working code. Each owns a distinct technology domain.
 - shadcn/ui direct usage (no unnecessary wrappers)
 - Hono RPC client for type-safe API calls
 - Zustand for client state (minimal, hook-based)
-- face-api.js: JSON scores only, zero images transmitted
+- Human.js: JSON scores only, zero images transmitted
 - `pnpm turbo build` must pass with 0 errors
 
 ---
@@ -139,24 +139,24 @@ working code. Each owns a distinct technology domain.
 | Designation | Hono Backend & Database Engineer |
 | Model | inherit |
 | Prefix | FRG |
-| Domain | Hono 4.x, Drizzle ORM, PostgreSQL 16 + pgvector, WebSocket (ws), Docker Compose |
+| Domain | Hono 4.x, Drizzle ORM, PostgreSQL 16 + pgvector, SSE streaming, Docker Compose |
 
 **Forge owns:**
 - Hono route handlers (`apps/server/src/routes/`)
 - Drizzle schema definitions (`apps/server/src/db/schema/`)
 - Drizzle migrations (`apps/server/drizzle/`)
-- WebSocket server (JSON-RPC protocol implementation)
+- SSE streaming handlers (`apps/server/src/sse/`)
 - Database queries and Drizzle query builders
 - Zod validators (shared package: `packages/shared/src/validators/`)
 - Docker Compose configuration
 - Service health checks
 
-**Forge does NOT touch:** React components, Python AI services, Agent SDK integration, face-api.js.
+**Forge does NOT touch:** React components, Python AI services, Agent SDK integration, Human.js.
 
 **Key patterns Forge follows:**
 - Schema-first: Drizzle schema -> `pnpm db:generate` -> `pnpm db:migrate`
 - Hono RPC type export: every route exports its type for frontend inference
-- JSON-RPC 2.0 WebSocket protocol
+- SSE streaming via Hono `streamSSE` for real-time AI responses
 - Zod validators in shared package (single source of truth)
 - pgvector columns for embedding storage
 - All migrations via Drizzle Kit
@@ -193,7 +193,7 @@ working code. Each owns a distinct technology domain.
 - Memory extraction as PostToolUse hook
 - Python services: FastAPI thin wrappers with uv dependency management
 - Skills as .claude/skills/*.md files loaded into SDK context
-- Context budget: ~4,000 tokens per session
+- Context budget: ~120,000 tokens per session
 
 ---
 
@@ -218,7 +218,7 @@ Validation agent. Ensures quality and therapeutic safety before shipping.
 - Crisis detection exhaustive testing
 - Therapeutic safety validation (CBT/MI-OARS compliance)
 - Edge case discovery (Hinglish edge cases, emotion signal conflicts)
-- WebSocket protocol testing
+- REST + SSE protocol testing
 - Python microservice health validation
 - Cross-domain regression testing
 
@@ -227,10 +227,10 @@ Validation agent. Ensures quality and therapeutic safety before shipping.
 **Vigil's paranoid checklist:**
 - Test crisis detection with known trigger phrases (English + Hinglish)
 - Test emotion signal conflicts (face says happy, voice says sad)
-- Verify WebSocket JSON-RPC protocol compliance
+- Verify REST + SSE protocol compliance
 - Check session lifecycle (start, resume, end, summarize)
 - Validate PHQ-9/GAD-7 scoring accuracy
-- Test face-api.js opt-out flow
+- Test Human.js opt-out flow
 - Verify zero facial images leave the browser
 
 ---
@@ -313,10 +313,10 @@ FRONTEND                    BACKEND                     AI/ML
   |                            |                           |
 React 19 + TS             Hono 4.x                  Claude Agent SDK
 Vite 6                    Drizzle ORM               Claude Sonnet 4
-shadcn/ui                 WebSocket (ws)            Claude Haiku
+shadcn/ui                 SSE (streamSSE)           Claude Haiku
 Zustand                   Zod validators            Mem0 + pgvector
-Tailwind CSS v4           JSON-RPC 2.0              Therapeutic skills
-face-api.js                                         Crisis detection
+Tailwind CSS v4           REST + SSE                Therapeutic skills
+Human.js                                         Crisis detection
 Recharts                  DATABASE                   PYTHON SERVICES
                               |                           |
                           PostgreSQL 16              whisper-service
@@ -367,8 +367,8 @@ the appropriate agents. The routing table (first match wins):
 | 2 | Bug/Error | Compass | +domain engineers | not working, error, 500, broke, regression |
 | 3 | Feature Idea | Compass | (solo OK) | what if, should we, feature idea, brainstorm |
 | 4 | Feature Impl | Compass | +all domain engineers | build this, implement, add feature |
-| 5 | Frontend | Pixel | +Forge if API types | component, hook, styling, form, React, face-api |
-| 6 | Backend/WS | Forge | — | Hono, route, WebSocket, Drizzle, query |
+| 5 | Frontend | Pixel | +Forge if API types | component, hook, styling, form, React, human.js |
+| 6 | Backend/SSE | Forge | — | Hono, route, SSE, streaming, Drizzle, query |
 | 7 | AI/SDK | Neura | +Forge if DB | Claude SDK, session, memory, Mem0, skill |
 | 8 | Python Svc | Neura | — | whisper, emotion, tts, FastAPI, Python |
 | 9 | Therapeutic | Neura | +Vigil | crisis, CBT, MI-OARS, safety, therapeutic |
@@ -469,8 +469,8 @@ Before any code ships:
 1. **Evidence over claims** — Show test output, screenshots, metrics.
    Never say "it works" without proof.
 
-2. **Precise over vague** — "WebSocket returns error code -32600 for
-   invalid JSON-RPC" beats "WebSocket is broken."
+2. **Precise over vague** — "POST /api/sessions returns 422 for
+   invalid payload" beats "the API is broken."
 
 3. **Domain ownership** — Each agent speaks authoritatively about their
    domain and defers to others on theirs.

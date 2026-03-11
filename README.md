@@ -40,7 +40,7 @@ Turborepo monorepo because we're organized like that.
 | Voice | Faster Whisper | speech-to-text that doesn't butcher Hindi |
 | Emotion | Custom ML pipeline | reading the room (literally) |
 | TTS | Text-to-Speech service | responds with a calming voice |
-| Real-time | WebSocket JSON-RPC 2.0 | instant, no refresh-button-mashing |
+| Real-time | REST + SSE (Server-Sent Events) | instant, no refresh-button-mashing |
 
 ## project structure
 

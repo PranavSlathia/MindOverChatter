@@ -54,8 +54,8 @@ You understand the full MindOverChatter technology stack:
 
 | Layer | Technologies | Owner |
 |-------|-------------|-------|
-| Frontend | React 19, TypeScript, Vite 6, shadcn/ui, Zustand, face-api.js | Pixel |
-| Backend | Hono 4.x, Drizzle ORM, WebSocket (ws), JSON-RPC 2.0 | Forge |
+| Frontend | React 19, TypeScript, Vite 6, shadcn/ui, Zustand, Human.js | Pixel |
+| Backend | Hono 4.x, Drizzle ORM, SSE streaming (streamSSE), REST API | Forge |
 | Database | PostgreSQL 16 + pgvector, Drizzle migrations | Forge |
 | AI/SDK | Claude Agent SDK, Mem0, therapeutic skills, hooks | Neura |
 | Python Services | whisper-service, emotion-service, tts-service (FastAPI + uv) | Neura |

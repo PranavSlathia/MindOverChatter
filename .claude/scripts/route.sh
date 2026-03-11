@@ -21,8 +21,8 @@ Read the user's message and classify it into exactly ONE category (first match w
 | 2 | BUG/ERROR | not working, error, 500, broke, regression, crash, bug | compass (+domain agents) |
 | 3 | FEATURE IDEA | what if, should we, feature idea, brainstorm, research | compass (solo) |
 | 4 | FEATURE IMPL | build this, implement, add feature, create, multi-domain | compass (+all needed) |
-| 5 | FRONTEND | component, hook, styling, form, React, face-api, chart, UI, page | pixel (+forge if API) |
-| 6 | BACKEND/WS | Hono, route, WebSocket, Drizzle query, JSON-RPC, endpoint | forge |
+| 5 | FRONTEND | component, hook, styling, form, React, human.js, chart, UI, page | pixel (+forge if API) |
+| 6 | BACKEND/API | Hono, route, REST, SSE, Drizzle query, endpoint, streaming | forge |
 | 7 | AI/SDK | Claude SDK, session, memory, Mem0, skill, Agent SDK, hook | neura (+forge if DB) |
 | 8 | PYTHON SVC | whisper, emotion-service, tts, FastAPI, Python, uv, Docker service | neura |
 | 9 | THERAPEUTIC | crisis, CBT, MI-OARS, safety, therapeutic, helpline, distortion | neura (+vigil MANDATORY) |
@@ -69,8 +69,8 @@ After agents complete:
 |-------|------|-----------|--------|
 | Compass | T1 | NO | Planning, research, architecture |
 | Sentinel | T1 | NO | Code review, safety audit |
-| Pixel | T2 | YES | React, shadcn/ui, face-api.js, Zustand |
-| Forge | T2 | YES | Hono, Drizzle, PostgreSQL, WebSocket |
+| Pixel | T2 | YES | React, shadcn/ui, Human.js, Zustand |
+| Forge | T2 | YES | Hono, Drizzle, PostgreSQL, REST+SSE |
 | Neura | T2 | YES | Claude SDK, therapeutic skills, Python services |
 | Vigil | T3 | NO (test only) | QA, testing, therapeutic safety validation |
 

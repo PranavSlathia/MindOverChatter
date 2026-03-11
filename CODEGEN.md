@@ -527,8 +527,8 @@ module.exports = [
   },
   {
     type: "confirm",
-    name: "withWebSocket",
-    message: "Uses WebSocket for real-time data?",
+    name: "withSSE",
+    message: "Uses SSE for real-time streaming?",
     initial: false,
   },
   {
@@ -608,8 +608,8 @@ export const use<%= h.PascalCase(name) %>Store = create<<%= h.PascalCase(name) %
 to: apps/web/src/hooks/use-<%= name %>.ts
 ---
 import { useState, useEffect } from "react";
-<% if (withWebSocket) { %>
-import { useWebSocket } from "@/hooks/use-websocket";
+<% if (withSSE) { %>
+import { useSSE } from "@/hooks/use-sse";
 <% } %>
 
 export function use<%= h.PascalCase(name) %>() {
@@ -617,12 +617,12 @@ export function use<%= h.PascalCase(name) %>() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-<% if (withWebSocket) { %>
-  const { send, subscribe } = useWebSocket();
+<% if (withSSE) { %>
+  const { subscribe } = useSSE();
 
   useEffect(() => {
-    const unsubscribe = subscribe("<%= h.snake_case(name) %>.update", (params) => {
-      setData(params);
+    const unsubscribe = subscribe("<%= h.snake_case(name) %>.update", (event) => {
+      setData(JSON.parse(event.data));
     });
     return unsubscribe;
   }, [subscribe]);

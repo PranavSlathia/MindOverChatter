@@ -14,9 +14,9 @@ Multimodal emotion detection and signal merging for MindOverChatter. Three indep
 
 ### Face Channel (Browser-Side)
 
-- **Library**: face-api.js with TinyFaceDetector model
+- **Library**: Human.js (@vladmandic/human, successor to the archived Human.js)
 - **Frame rate**: 15-30 FPS sampling from webcam stream
-- **Model size**: ~7MB, cached in browser after first load
+- **Model size**: ~10MB, cached in browser after first load
 - **Emotions detected**: 7 -- `happy`, `sad`, `angry`, `fearful`, `disgusted`, `surprised`, `neutral`
 - **Output**: JSON object with emotion label and confidence score per emotion
 - **Privacy**: ZERO images leave the browser. All face detection and emotion classification runs entirely client-side via TensorFlow.js. The browser only emits a JSON summary of detected emotions -- never raw pixels, frames, or any image data.
@@ -79,57 +79,65 @@ User speaks
     +--> Audio blob --> POST /analyze (Emotion service, port 8002)
     |                   Returns: { voiceEmotion, prosody }
     |
-    +--> Face JSON  --> Already computed client-side (face-api.js)
+    +--> Face JSON  --> Already computed client-side (Human.js)
     |
     v
 [Frontend merges all results into unified payload]
     |
     v
-[Send merged payload via WebSocket: message.send]
+[Send merged payload via POST /api/sessions/:id/messages]
 ```
 
-Both the Whisper and Emotion HTTP calls fire simultaneously. The frontend awaits both responses, then merges them with the face-api.js results before sending a single WebSocket message to the backend.
+Both the Whisper and Emotion HTTP calls fire simultaneously. The frontend awaits both responses, then merges them with the Human.js results before sending a single POST request to the backend.
 
 ## Signal Merging
 
-The merged payload sent via `message.send` WebSocket method:
+The merged payload sent via `POST /api/sessions/:id/messages`:
 
 ```typescript
+// POST /api/sessions/:id/messages
 {
-  jsonrpc: "2.0",
-  method: "message.send",
-  id: "msg-uuid",
-  params: {
-    text: "I'm doing okay I guess",           // from Whisper transcription
-    voiceEmotion: {                             // from SenseVoice
-      label: "sad",
-      confidence: 0.78
-    },
-    prosody: {                                  // from librosa
-      pitchMean: 142.5,
-      pitchStd: 18.3,
-      energy: 0.34,
-      speakingRate: 112,
-      mfccs: [/* 13 coefficients */]
-    },
-    facialEmotion: {                            // from face-api.js
-      dominant: "sad",
-      scores: { happy: 0.02, sad: 0.71, /* ... */ }
-    },
-    language: "hi-en",                          // detected by Whisper
-    audioConfidence: 0.92
-  }
+  text: "I'm doing okay I guess",             // from Whisper transcription
+  voiceEmotion: {                               // from SenseVoice
+    label: "sad",
+    confidence: 0.78
+  },
+  prosody: {                                    // from librosa
+    pitchMean: 142.5,
+    pitchStd: 18.3,
+    energy: 0.34,
+    speakingRate: 112,
+    mfccs: [/* 13 coefficients */]
+  },
+  facialEmotion: {                              // from Human.js
+    dominant: "sad",
+    scores: { happy: 0.02, sad: 0.71, /* ... */ }
+  },
+  language: "hi-en",                            // detected by Whisper
+  audioConfidence: 0.92
 }
 ```
 
 The backend AI layer (Neura) receives this merged payload and uses all three emotion signals to inform its therapeutic response. When channels disagree (e.g., text says "I'm fine" but face and voice indicate sadness), the AI can gently explore that discrepancy -- a core therapeutic skill.
+
+## Signal Weighting Policy
+
+Face and voice are **weak signals**, not ground truth. FER accuracy is ~65-72% even for humans on standard benchmarks. Signal weights:
+
+| Channel | Weight | Rationale |
+|---------|--------|-----------|
+| Text (self-report + longitudinal) | 0.8 | Highest-signal: what the user actually says and how it changes over time |
+| Voice (SenseVoice + prosody) | 0.5 | Moderate: prosodic features add value but are noisy |
+| Face (Human.js) | 0.3 | Weakest: FER models have known accuracy limits and bias concerns |
+
+**How to use**: Emotion signals should prompt follow-up questions ("You seem a bit tense — how are you feeling?"), never conclude emotional state on their own. The definitive source for mental state assessment is structured self-report plus longitudinal change across sessions.
 
 ## Privacy Guarantees
 
 | Data Type | Where It Lives | Transmitted? |
 |-----------|---------------|-------------|
 | Facial images / webcam frames | Browser memory only | NEVER -- zero images leave the browser |
-| Face emotion JSON | Browser -> WebSocket | Yes, JSON scores only |
+| Face emotion JSON | Browser -> REST POST | Yes, JSON scores only |
 | Raw audio blobs | Browser -> Docker services | Yes, within local Docker network |
 | Audio files | Docker volumes | Stays local, never leaves Docker volumes |
 | Transcribed text | Backend -> AI | Yes, for therapeutic processing |

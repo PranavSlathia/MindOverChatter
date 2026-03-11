@@ -18,7 +18,7 @@
 | **Backend** | Hono | 4.x |
 | **AI Engine** | Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) | latest |
 | **AI Models** | Anthropic Claude Sonnet 4 (primary) + Haiku (lightweight) | latest |
-| **Real-time** | WebSocket (native `ws`) | latest |
+| **Real-time** | SSE (Server-Sent Events via Hono `streamSSE`) | latest |
 | **Database** | PostgreSQL 16 + pgvector | pg16, pgvector 0.7+ |
 | **ORM** | Drizzle ORM | latest |
 | **AI/ML Microservices** | Python 3.11+ (uv) in Docker | per-service |
@@ -38,11 +38,11 @@
 │  │  apps/web    │   │ apps/server  │   │ packages/     │   │
 │  │  React+Vite  │   │ Hono+SDK     │   │ shared types  │   │
 │  │  shadcn/ui   │   │ Drizzle ORM  │   │ validators    │   │
-│  │  Zustand     │   │ WebSocket    │   │ constants     │   │
-│  │  face-api.js │   │ Agent SDK    │   │               │   │
+│  │  Zustand     │   │ SSE stream   │   │ constants     │   │
+│  │  Human.js    │   │ Agent SDK    │   │               │   │
 │  └──────┬───────┘   └──────┬───────┘   └───────────────┘   │
 │         │                  │                                │
-│         │    WebSocket     │                                │
+│         │    REST + SSE    │                                │
 │         └──────────────────┘                                │
 └─────────────────────────────────────────────────────────────┘
               │                    │
@@ -90,7 +90,7 @@ moc/
 │   │   │   ├── components/       # shadcn/ui + custom
 │   │   │   ├── hooks/            # Custom React hooks
 │   │   │   ├── stores/           # Zustand stores
-│   │   │   ├── lib/              # face-api.js, utils
+│   │   │   ├── lib/              # Human.js, utils
 │   │   │   ├── pages/            # Route pages
 │   │   │   └── styles/           # Tailwind + calming theme
 │   │   ├── vite.config.ts
@@ -99,7 +99,7 @@ moc/
 │   └── server/                   # Hono backend
 │       ├── src/
 │       │   ├── routes/           # Hono route handlers
-│       │   ├── ws/               # WebSocket handlers
+│       │   ├── sse/              # SSE streaming handlers
 │       │   ├── sdk/              # Claude Agent SDK integration
 │       │   ├── db/               # Drizzle schema + migrations
 │       │   ├── services/         # Business logic
@@ -165,7 +165,7 @@ Theme generated via [tweakcn.com](https://tweakcn.com) targeting earth tones and
 
 | Tool | Purpose | Details |
 |---|---|---|
-| **face-api.js** (`@vladmandic/face-api`) | Facial emotion detection | Runs entirely in-browser via TensorFlow.js. 7 emotions, 15-30 FPS, ~7MB models (cacheable). Zero images leave the device -- only JSON emotion scores sent via WebSocket. |
+| **Human.js** (`@vladmandic/human`) | Facial emotion detection | Runs entirely in-browser via TensorFlow.js. 7 emotions, 15-30 FPS, ~10MB models (cacheable). Zero images leave the device -- only JSON emotion scores sent to backend. Note: `@vladmandic/human` is the actively maintained successor to the archived `face-api.js` (archived Feb 2025). For v2, the team can upgrade to ONNX Runtime Web + EmotiEffLib (HSEmotion) for state-of-the-art AffectNet accuracy. |
 
 ### Key Frontend Libraries
 
@@ -182,9 +182,9 @@ Theme generated via [tweakcn.com](https://tweakcn.com) targeting earth tones and
 
 | Tool | Purpose | Why |
 |---|---|---|
-| **Hono 4.x** | HTTP framework | Ultra-fast, Web Standards, great WebSocket support |
+| **Hono 4.x** | HTTP framework | Ultra-fast, Web Standards, built-in SSE streaming via `streamSSE` |
 | **Claude Agent SDK** | AI conversation engine | Programmatic Claude Code: session management, tool use, MCP, hooks, streaming |
-| **WebSocket (`ws`)** | Real-time | Full duplex streaming for AI responses + emotion data |
+| **SSE (`streamSSE`)** | Real-time streaming | Server-to-client streaming for AI responses; emotion data via POST with keep-alive |
 | **Drizzle ORM** | Database access | Type-safe queries, lightweight, excellent pgvector support |
 | **Zod** | Validation | Shared schemas between frontend and backend |
 
@@ -197,7 +197,7 @@ The Agent SDK wraps the **local Claude Code binary** (same one in your terminal)
 - **Local binary resolution**: SDK spawns the Claude binary at `~/.claude/local/claude`
 - **Session isolation**: Per-session config directories at `~/.claude-sessions/{sessionId}`
 - **Async generator streaming**: `for await (const msg of query({...}))` streams responses
-- **Message transformation**: SDK streaming output converted to UI-friendly WebSocket events
+- **Message transformation**: SDK streaming output converted to SSE events for the frontend
 
 **Capabilities:**
 
@@ -206,20 +206,20 @@ The Agent SDK wraps the **local Claude Code binary** (same one in your terminal)
 - **Hooks**: `PreToolUse` for crisis detection safety rails, `PostToolUse` for audit logging
 - **Skills**: Therapeutic frameworks (CBT, MI-OARS) defined as `.claude/skills/*.md` files
 - **Allowed tools**: Restrict Claude to safe operations only
-- **Streaming**: Async generator pattern streams responses to frontend via WebSocket
+- **Streaming**: Async generator pattern streams responses to frontend via SSE
 
 ### Electron Migration Path
 
 The web app architecture is designed for zero-rewrite Electron migration:
 - **React frontend** -> Electron renderer process (as-is)
 - **Hono server** -> Electron main process (minimal changes)
-- **WebSocket** -> Electron IPC / tRPC bridge
+- **SSE / REST** -> Electron IPC / tRPC bridge
 - **Claude SDK** -> moves from server to Electron main process (direct binary access)
 
 ### API Design
 
 - REST endpoints for CRUD operations (sessions, assessments, mood logs)
-- WebSocket for real-time AI conversation streaming + emotion data ingestion
+- SSE for real-time AI conversation streaming; POST endpoints for emotion data ingestion
 - Internal HTTP calls to Python AI microservices
 
 ---
@@ -261,7 +261,7 @@ Single database for everything -- structured data + vector embeddings with full 
 2. **Session summary** (300-500 words): Themes, insights, cognitive patterns, action items
 3. **Weekly rollup**: Patterns across sessions, progress on goals
 4. **Monthly synthesis**: Long-term patterns, growth areas, recurring concerns
-5. **User profile** (~2K tokens): Core traits, persistent patterns, long-term goals (always in context)
+5. **User profile** (~3K tokens): Core traits, persistent patterns, long-term goals (always in context)
 
 ---
 
@@ -327,15 +327,16 @@ Decision: Start with **BAAI/bge-m3** self-hosted for zero API cost at personal s
 | **Claude Sonnet 4** | Primary conversation engine, session summaries, CBT guidance | Prompt caching: 1-hour cache, min 1024 tokens on static system prompt + user context |
 | **Claude Haiku** | Lightweight tasks: text emotion classification, quick categorization | Lower cost per token for simple classification |
 
-### Context Budget Per Session (~4,000 tokens)
+### Context Budget Per Session (~120,000 tokens)
 
 | Component | Tokens |
 |---|---|
-| System prompt (therapeutic framework) | ~500 |
-| User profile / core memory | ~500 |
-| Most recent session summary | ~300 |
-| Retrieved relevant past context (3-5 chunks) | ~1,500 |
-| Current conversation history | ~1,200 |
+| System prompt (therapeutic framework) | ~2,000 |
+| User profile / core memory | ~3,000 |
+| Session summaries (recent 3-5) | ~3,000 |
+| Retrieved relevant past context (10-15 chunks) | ~12,000 |
+| Current conversation history | ~96,000 |
+| Response reserve | ~4,000 |
 
 ### Therapeutic Frameworks (via Claude Skills)
 
@@ -386,7 +387,7 @@ services:
 |---|---|---|
 | **Unit / Integration** | Vitest | Backend services, shared validators, React components, hooks |
 | **E2E** | Playwright | Full browser flows: chat UI, emotion detection, session replay |
-| **API** | Vitest + supertest/hono testing helpers | Route handlers, WebSocket handlers |
+| **API** | Vitest + supertest/hono testing helpers | Route handlers, SSE streaming handlers |
 
 ---
 
@@ -411,7 +412,7 @@ services:
 |---|---|---|
 | Full TypeScript vs Python backend | **Full TypeScript** | One language, Claude Agent SDK is native TS, end-to-end type safety with Drizzle + shared package |
 | Claude API vs Agent SDK | **Agent SDK** | Programmatic session control, MCP for DB access, hooks for safety, resume for continuity |
-| FastAPI vs Hono | **Hono** | Full TS stack, ultra-fast, Web Standards, great WebSocket support |
+| FastAPI vs Hono | **Hono** | Full TS stack, ultra-fast, Web Standards, built-in SSE streaming via `streamSSE` |
 | SQLAlchemy vs Drizzle | **Drizzle** | TypeScript-native, type-safe, lightweight, pgvector support |
 | Separate vector DB vs pgvector | **pgvector in PostgreSQL** | Single DB, ACID transactions, combined temporal + vector queries |
 | Monorepo vs multi-repo | **Turborepo monorepo** | Shared types, single CI, incremental builds |
