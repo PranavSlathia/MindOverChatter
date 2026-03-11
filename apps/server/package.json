@@ -15,14 +15,13 @@
     "drizzle-orm": "latest",
     "postgres": "latest",
     "zod": "latest",
-    "ws": "latest",
     "@moc/shared": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "latest",
     "typescript": "latest",
     "tsx": "latest",
     "drizzle-kit": "latest",
-    "vitest": "latest",
-    "@types/ws": "latest"
+    "vitest": "latest"
   }
 }
