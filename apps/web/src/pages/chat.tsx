@@ -5,6 +5,7 @@ import { ChatHeader } from "@/components/chat/chat-header.js";
 import { CrisisBanner, MessageBubble, StreamingBubble } from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
 import { api } from "@/lib/api.js";
+import { useEmotionStore } from "@/stores/emotion-store.js";
 import { useSessionStore } from "@/stores/session-store.js";
 
 export function ChatPage() {
@@ -31,6 +32,8 @@ export function ChatPage() {
     completeAssessment,
     reset,
   } = useSessionStore();
+
+  const setEmotionFromSSE = useEmotionStore((s) => s.setEmotion);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -190,6 +193,30 @@ export function ChatPage() {
         }
       });
 
+      es.addEventListener("emotion.ai_detected", (event) => {
+        try {
+          const data = JSON.parse(event.data) as {
+            emotionLabel: string;
+            confidence: number;
+            channel: string;
+          };
+          if (data.emotionLabel) {
+            setEmotionFromSSE(data.emotionLabel, {
+              happy: 0,
+              sad: 0,
+              angry: 0,
+              fearful: 0,
+              disgusted: 0,
+              surprised: 0,
+              neutral: 0,
+              [data.emotionLabel]: data.confidence ?? 1,
+            });
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      });
+
       es.onerror = () => {
         setConnected(false);
       };
@@ -207,6 +234,7 @@ export function ChatPage() {
       setSessionSummary,
       startAssessment,
       completeAssessment,
+      setEmotionFromSSE,
     ],
   );
 

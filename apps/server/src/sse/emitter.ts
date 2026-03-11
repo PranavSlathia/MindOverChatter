@@ -10,7 +10,8 @@ export type SSEEventData =
   | { event: "session.crisis"; data: { message: string; helplines: ReadonlyArray<{ readonly name: string; readonly number: string; readonly country: string }> } }
   | { event: "session.ended"; data: { summary?: string } }
   | { event: "assessment.start"; data: { assessmentType: string } }
-  | { event: "assessment.complete"; data: { assessmentId: string; severity: string; nextScreener: string | null } };
+  | { event: "assessment.complete"; data: { assessmentId: string; severity: string; nextScreener: string | null } }
+  | { event: "emotion.ai_detected"; data: { emotionLabel: string; confidence: number; channel: string } };
 
 export type SSECallback = (event: SSEEventData) => void;
 

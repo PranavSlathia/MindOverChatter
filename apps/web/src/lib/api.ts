@@ -26,6 +26,48 @@ export interface SubmitAssessmentResponse {
   nextScreener: string | null;
 }
 
+export interface SubmitEmotionBody {
+  sessionId: string;
+  channel: string;
+  emotionLabel: string;
+  confidence: number;
+  signalWeight: number;
+  rawScores?: Record<string, number>;
+}
+
+export interface SubmitEmotionResponse {
+  id: string;
+  createdAt: string;
+}
+
+export interface CreateMoodLogBody {
+  sessionId?: string;
+  valence: number;
+  arousal: number;
+  source: string;
+}
+
+export interface CreateMoodLogResponse {
+  id: string;
+  valence: number;
+  arousal: number;
+  source: string;
+  createdAt: string;
+}
+
+export interface MoodLogEntry {
+  id: string;
+  valence: number;
+  arousal: number;
+  source: string;
+  sessionId: string | null;
+  createdAt: string;
+}
+
+export interface GetMoodLogsResponse {
+  entries: MoodLogEntry[];
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -69,4 +111,21 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => handleResponse<SubmitAssessmentResponse>(r)),
+
+  submitEmotion: (body: SubmitEmotionBody): Promise<SubmitEmotionResponse> =>
+    fetch(`${API_BASE}/api/emotions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => handleResponse<SubmitEmotionResponse>(r)),
+
+  createMoodLog: (body: CreateMoodLogBody): Promise<CreateMoodLogResponse> =>
+    fetch(`${API_BASE}/api/mood-logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => handleResponse<CreateMoodLogResponse>(r)),
+
+  getMoodLogs: (): Promise<GetMoodLogsResponse> =>
+    fetch(`${API_BASE}/api/mood-logs`).then((r) => handleResponse<GetMoodLogsResponse>(r)),
 };

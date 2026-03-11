@@ -38,7 +38,25 @@
 - Fallback crisis response uses `HELPLINES` constant from `@moc/shared`
 - `beforeunload` uses `navigator.sendBeacon()` for best-effort session end
 
+## Human.js Integration
+
+- Dynamic import (`await import("@vladmandic/human")`) to avoid ~1.5MB in main bundle
+- Config: face + emotion only, all other models disabled (body, hand, iris, mesh, object, gesture, segmentation)
+- Models loaded from CDN: `https://cdn.jsdelivr.net/npm/@vladmandic/human/models/`
+- Detection interval: 5 seconds (wellness context, not real-time)
+- Hidden `<video>` element created programmatically (not in DOM tree)
+- WebGL backend preferred
+- `EmotionScores` interface needs `{ ...scores }` spread to satisfy `Record<string, number>` for API types
+- Camera resolution: 320x240 (low res, sufficient for emotion)
+
+## Recharts Integration
+
+- recharts v3 installed, statically imported (included in main bundle ~724KB)
+- Theme colors used directly as hex strings in chart config (not CSS variables -- Recharts needs hex)
+- `ResponsiveContainer` wraps all charts
+
 ## Performance Notes
 
 - Zustand store actions are stable references (safe in useEffect deps)
 - Scroll effect uses state values as deps to trigger re-scroll (biome-ignore required)
+- Human.js code-split into separate chunk (~1.5MB gzipped ~423KB) via dynamic import

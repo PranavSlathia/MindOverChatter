@@ -2,17 +2,26 @@ import { Link } from "react-router";
 
 export function HomePage() {
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center space-y-6">
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="space-y-6 text-center">
         <h1 className="text-4xl font-semibold text-primary">MindOverChatter</h1>
         <p className="text-lg text-foreground/70">Your Wellness Companion</p>
-        <Link
-          to="/chat"
-          className="inline-block rounded-lg bg-primary px-8 py-3 text-base font-medium text-white transition-opacity hover:opacity-90"
-          aria-label="Start chatting"
-        >
-          Start Chatting
-        </Link>
+        <div className="flex flex-col items-center gap-3">
+          <Link
+            to="/chat"
+            className="inline-block rounded-lg bg-primary px-8 py-3 text-base font-medium text-white transition-opacity hover:opacity-90"
+            aria-label="Start chatting"
+          >
+            Start Chatting
+          </Link>
+          <Link
+            to="/mood"
+            className="text-sm font-medium text-foreground/50 transition-colors hover:text-primary"
+            aria-label="Track your mood"
+          >
+            Mood Tracker
+          </Link>
+        </div>
       </div>
     </div>
   );

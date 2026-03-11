@@ -29,6 +29,19 @@
 - Biome linter: use dot notation (not bracket) on `Record<string, unknown>`
 - Pre-existing: `@types/node` missing from server package (build fails for all Node.js API usage)
 
+## Emotion Service
+
+- Uses librosa ONLY (no SenseVoice) — rule-based prosody heuristics
+- Prosody features: pitch (pyin), energy (RMS), speaking rate (onset detection), 13 MFCCs
+- Emotion labels: excited, angry, anxious, sad, calm, neutral
+- Confidence range: 0.3-0.7 (conservative for rule-based)
+- `soundfile` required as explicit dep (librosa uses it for audio I/O)
+- Dockerfile needs `libsndfile1` system package for soundfile to work
+- `librosa.pyin` can be slow on first call (~10s) — 60s Docker start_period is appropriate
+- Audio validation: MIME type + file extension fallback
+- Min duration: 0.5s for meaningful analysis
+- NaN/Inf sanitization needed before JSON serialization (numpy edge cases)
+
 ## Therapeutic Notes
 
 <!-- Therapeutic framework refinements -->

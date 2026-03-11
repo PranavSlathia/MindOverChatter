@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+import { EmotionToggle } from "@/components/emotion/emotion-toggle.js";
 import { cn } from "@/lib/utils.js";
 
 interface ChatHeaderProps {
@@ -26,6 +28,16 @@ export function ChatHeader({ status, onEndSession }: ChatHeaderProps) {
       </div>
 
       <div className="flex items-center gap-4">
+        {status === "active" && <EmotionToggle />}
+
+        <Link
+          to="/mood"
+          className="rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
+          aria-label="Mood tracker"
+        >
+          Mood
+        </Link>
+
         <output
           className="flex items-center gap-1.5"
           aria-label={`Session status: ${config.label}`}
