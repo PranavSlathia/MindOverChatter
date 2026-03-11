@@ -336,6 +336,7 @@ Recharts                  DATABASE                   PYTHON SERVICES
 | whisper-service | 8001 | Neura |
 | emotion-service | 8002 | Neura |
 | tts-service | 8003 | Neura |
+| memory-service (Mem0) | 8004 | Neura |
 
 ### Monorepo Structure
 
@@ -349,7 +350,8 @@ moc/
 ├── services/
 │   ├── whisper/       # STT (Neura)
 │   ├── emotion/       # Voice emotion (Neura)
-│   └── tts/           # Text-to-speech (Neura)
+│   ├── tts/           # Text-to-speech (Neura)
+│   └── memory/        # Mem0 memory service (Neura)
 ├── .claude/           # Agent orchestration
 └── docker-compose.yml
 ```
