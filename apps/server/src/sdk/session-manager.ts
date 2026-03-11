@@ -37,7 +37,7 @@ interface Session {
 // ── Constants ───────────────────────────────────────────────────
 
 /** Timeout for a conversation response (ms). Sonnet may take a while. */
-const RESPONSE_TIMEOUT_MS = 30_000;
+const RESPONSE_TIMEOUT_MS = 60_000;
 
 /** Model to use for conversation. Lazy-read to avoid importing env.ts at module level (breaks test isolation). */
 function getClaudeModel(): string {
@@ -198,16 +198,37 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
       }
     };
 
+    // Strip CLAUDECODE from env to avoid "nested session" guard when
+    // the server is launched from within a Claude Code terminal.
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    console.log(`[claude-spawn] Spawning claude (model=${getClaudeModel()}, prompt=${prompt.length} chars)`);
+
     const child = spawn("claude", [
       "--model",
       getClaudeModel(),
       "--print",
+      "--verbose",
       "--max-turns",
       "1",
       "--output-format",
       "stream-json",
-      prompt,
-    ]);
+      "--include-partial-messages",
+    ], {
+      env: cleanEnv,
+      // Run from /tmp to avoid loading project CLAUDE.md/hooks —
+      // the full system prompt is already assembled in the stdin pipe.
+      cwd: "/tmp",
+    });
+
+    // Pipe the prompt via stdin (avoids ARG_MAX limits with large prompts)
+    child.stdin.write(prompt);
+    child.stdin.end();
+
+    child.on("spawn", () => {
+      console.log(`[claude-spawn] Process started (pid=${child.pid})`);
+    });
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -219,6 +240,8 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
 
     // Buffer for incomplete JSON lines
     let lineBuffer = "";
+    // Per-spawn state for tracking incremental assistant text
+    const assistantState = { lastTextLen: 0 };
 
     child.stdout.on("data", (data: Buffer) => {
       const text = data.toString();
@@ -242,6 +265,7 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
             (text) => {
               fullResponse += text;
             },
+            assistantState,
           );
         } catch {
           // Not valid JSON — might be raw text output from the binary.
@@ -255,7 +279,9 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
     });
 
     child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      console.error(`[claude-spawn] stderr: ${chunk.trim()}`);
     });
 
     child.on("error", (err) => {
@@ -289,6 +315,7 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
             (text) => {
               fullResponse += text;
             },
+            assistantState,
           );
         } catch {
           // Raw text in the buffer — only use if we have no response yet
@@ -316,18 +343,26 @@ function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void):
 /**
  * Extracts text content from a stream-json event object.
  *
- * The claude CLI stream-json format emits several event types:
+ * The claude CLI `--print --verbose --output-format stream-json` emits:
+ * - "system" events (hooks, init) — ignored
+ * - "assistant" with message.content[] for partial/full messages
+ *   (with --include-partial-messages, these arrive incrementally)
  * - "content_block_delta" with delta.text for incremental content
- * - "assistant" with content array for the full message
- * - "result" with the final aggregated response
+ * - "result" with result (string) for the final aggregated response
+ * - "rate_limit_event" — ignored
+ *
+ * We track the last-seen text length from assistant events to compute
+ * the incremental delta when partial messages arrive.
  */
 function extractTextFromEvent(
   event: Record<string, unknown>,
   onChunk: (chunk: string) => void,
   getAccumulated: () => string,
   appendText: (text: string) => void,
+  assistantState: { lastTextLen: number },
 ): void {
   if (event.type === "content_block_delta") {
+    // Incremental delta event
     const delta = event.delta as Record<string, unknown> | undefined;
     if (delta && typeof delta.text === "string") {
       const chunk = delta.text;
@@ -335,11 +370,13 @@ function extractTextFromEvent(
       onChunk(chunk);
     }
   } else if (event.type === "assistant") {
-    const content = event.content as unknown;
-    if (typeof content === "string" && !getAccumulated()) {
-      appendText(content);
-      onChunk(content);
-    } else if (Array.isArray(content) && !getAccumulated()) {
+    // assistant event: { type: "assistant", message: { content: [{type: "text", text: "..."}] } }
+    // With --include-partial-messages, these arrive incrementally with growing text
+    const message = event.message as Record<string, unknown> | undefined;
+    const content = message?.content as unknown;
+    if (Array.isArray(content)) {
+      // Extract full text from all text blocks
+      let fullText = "";
       for (const block of content) {
         if (
           typeof block === "object" &&
@@ -349,20 +386,26 @@ function extractTextFromEvent(
           "text" in block &&
           typeof (block as Record<string, unknown>).text === "string"
         ) {
-          const text = (block as Record<string, unknown>).text as string;
-          appendText(text);
-          onChunk(text);
+          fullText += (block as Record<string, unknown>).text as string;
         }
+      }
+      // Compute the incremental delta since last assistant event
+      if (fullText.length > assistantState.lastTextLen) {
+        const newChunk = fullText.slice(assistantState.lastTextLen);
+        assistantState.lastTextLen = fullText.length;
+        appendText(newChunk);
+        onChunk(newChunk);
       }
     }
   } else if (event.type === "result") {
-    const result = event.result as Record<string, unknown> | undefined;
-    if (result && typeof result.text === "string" && !getAccumulated()) {
-      const text = result.text as string;
-      appendText(text);
-      onChunk(text);
+    // result event: { type: "result", result: "full response string" }
+    const resultText = event.result;
+    if (typeof resultText === "string" && resultText.trim() && !getAccumulated()) {
+      appendText(resultText.trim());
+      onChunk(resultText.trim());
     }
   }
+  // system, rate_limit_event, etc. — ignored
 }
 
 // ── Public API ──────────────────────────────────────────────────
