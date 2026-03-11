@@ -89,7 +89,7 @@ const app = new Hono()
           ),
         )
         .orderBy(desc(memories.createdAt))
-        .limit(fetchLimit),
+        .limit(10), // Hard cap: memories are already shown in MemoryClusters; don't crowd out moods
 
       // Assessments
       db
@@ -641,9 +641,9 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
       console.error("[journey] Failed to generate formulation:", err);
     }
 
-    // Fallback if generation failed
+    // Fallback if generation failed — return without caching so the next request retries
     if (!formulation) {
-      formulation = {
+      return c.json({
         formulation: {
           presentingTheme: "",
           roots: [] as Array<{ content: string; sourceType: string; confidence: number }>,
@@ -662,7 +662,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
         dataConfidence,
         moodTrend,
         cachedAt: new Date().toISOString(),
-      };
+      });
     }
 
     formulationCache = { data: formulation, cachedAt: new Date() };
