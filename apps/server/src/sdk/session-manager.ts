@@ -4,10 +4,13 @@
 // the full prompt (system + history + new message) for each call.
 //
 // Phase 2: text conversation. Phase 3: memory context injection.
+// Phase 4A: skill loading + context injection.
 // Crisis detection is handled by the route layer BEFORE calling sendMessage.
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -27,6 +30,8 @@ interface Session {
   messages: ConversationMessage[];
   createdAt: number;
   initialMemories?: MemoryContextItem[];
+  skillContent: string[];
+  contextInjections: string[];
 }
 
 // ── Constants ───────────────────────────────────────────────────
@@ -77,22 +82,29 @@ const sessions = new Map<string, Session>();
 // ── Prompt Assembly ─────────────────────────────────────────────
 
 /**
- * Builds the full prompt to send to the claude binary.
- * Includes system prompt, conversation history, and the new user message.
- */
-/**
  * Wraps content in delimiters to prevent prompt injection.
  * The delimiter pattern uses a unique boundary that is extremely unlikely
  * to appear in natural user text, preventing role-spoofing attacks.
+ *
+ * Exported for testing.
  */
-function delimit(label: string, content: string): string {
+export function delimit(label: string, content: string): string {
   return `---BEGIN ${label}---\n${content}\n---END ${label}---`;
 }
 
-function assemblePrompt(
+/**
+ * Builds the full prompt to send to the claude binary.
+ * Includes system prompt, memories, skills, context injections,
+ * conversation history, and the new user message.
+ *
+ * Exported for testing.
+ */
+export function assemblePrompt(
   history: ConversationMessage[],
   userMessage: string,
   memories?: MemoryContextItem[],
+  skillContent?: string[],
+  contextInjections?: string[],
 ): string {
   const parts: string[] = [SYSTEM_PROMPT, ""];
 
@@ -109,10 +121,33 @@ function assemblePrompt(
     for (let i = 0; i < memories.length; i++) {
       const mem = memories[i]!;
       parts.push(
-        delimit(`MEMORY_${i}`, `[type: ${mem.memoryType}, confidence: ${mem.confidence.toFixed(2)}] ${mem.content}`),
+        delimit(
+          `MEMORY_${i}`,
+          `[type: ${mem.memoryType}, confidence: ${mem.confidence.toFixed(2)}] ${mem.content}`,
+        ),
       );
     }
     parts.push("=== End Memory Context ===");
+    parts.push("");
+  }
+
+  // Inject skill content (loaded once at startup, included in every prompt)
+  if (skillContent && skillContent.length > 0) {
+    parts.push("=== Therapeutic Skills ===");
+    for (let i = 0; i < skillContent.length; i++) {
+      parts.push(delimit(`SKILL_${i}`, skillContent[i]!));
+    }
+    parts.push("=== End Therapeutic Skills ===");
+    parts.push("");
+  }
+
+  // Inject context blocks (dynamic, added during the session lifecycle)
+  if (contextInjections && contextInjections.length > 0) {
+    parts.push("=== Context Injections ===");
+    for (let i = 0; i < contextInjections.length; i++) {
+      parts.push(delimit(`CONTEXT_INJECTION_${i}`, contextInjections[i]!));
+    }
+    parts.push("=== End Context Injections ===");
     parts.push("");
   }
 
@@ -335,9 +370,13 @@ function extractTextFromEvent(
 /**
  * Create a new SDK session. Returns an internal session tracking ID.
  * The session maintains an in-memory conversation history for context.
+ *
+ * @param initialMemories - Memory context items to include in prompts
+ * @param skillContent - Pre-loaded skill file contents (from loadSkillFiles)
  */
 export async function createSdkSession(
   initialMemories?: MemoryContextItem[],
+  skillContent?: string[],
 ): Promise<string> {
   const id = randomUUID();
   sessions.set(id, {
@@ -345,6 +384,8 @@ export async function createSdkSession(
     messages: [],
     createdAt: Date.now(),
     initialMemories,
+    skillContent: skillContent ?? [],
+    contextInjections: [],
   });
   return id;
 }
@@ -372,8 +413,14 @@ export async function sendMessage(
     throw new Error(`SDK session not found: ${sdkSessionId}`);
   }
 
-  // Build the full prompt with system prompt + memories + history + new message
-  const prompt = assemblePrompt(session.messages, userMessage, session.initialMemories);
+  // Build the full prompt with system prompt + memories + skills + injections + history + new message
+  const prompt = assemblePrompt(
+    session.messages,
+    userMessage,
+    session.initialMemories,
+    session.skillContent,
+    session.contextInjections,
+  );
 
   // Spawn claude and stream the response
   const fullResponse = await spawnClaudeStreaming(prompt, onChunk);
@@ -415,4 +462,84 @@ export function getSessionMessageCount(sdkSessionId: string): number {
  */
 export function isSessionActive(sdkSessionId: string): boolean {
   return sessions.has(sdkSessionId);
+}
+
+/**
+ * Inject a context block into a session's prompt assembly.
+ * Context blocks appear after memory context and skill content,
+ * but before conversation history.
+ *
+ * This is synchronous — it modifies in-memory state only.
+ * If the session does not exist, this is a silent no-op.
+ */
+export function injectSessionContext(sdkSessionId: string, contextBlock: string): void {
+  const session = sessions.get(sdkSessionId);
+  if (!session) return;
+  session.contextInjections.push(contextBlock);
+}
+
+// ── Skill Loading ─────────────────────────────────────────────
+
+/** Cached skill file contents — loaded once at startup. */
+let cachedSkills: string[] | null = null;
+
+/**
+ * Default skills directory resolved relative to the project root.
+ * The project root is assumed to be 4 levels up from this file:
+ * apps/server/src/sdk/session-manager.ts -> project root
+ */
+const DEFAULT_SKILLS_DIR = resolve(
+  new URL(".", import.meta.url).pathname,
+  "../../../../.claude/skills",
+);
+
+/**
+ * Load therapeutic skill files from disk. Files matching
+ * `probing-*.md` and `assessment-flow.md` are read and cached.
+ *
+ * This is designed to run ONCE at server startup. Subsequent calls
+ * return the cached result.
+ *
+ * @param skillsDir - Override directory path (useful for testing)
+ * @returns Array of skill file contents
+ */
+export function loadSkillFiles(skillsDir?: string): string[] {
+  if (cachedSkills !== null) return cachedSkills;
+
+  const dir = skillsDir ?? DEFAULT_SKILLS_DIR;
+  const skills: string[] = [];
+
+  if (!existsSync(dir)) {
+    console.warn(`[session-manager] Skills directory not found: ${dir}`);
+    cachedSkills = skills;
+    return skills;
+  }
+
+  try {
+    const entries = readdirSync(dir);
+    const targetFiles = entries.filter(
+      (f) => (f.startsWith("probing-") && f.endsWith(".md")) || f === "assessment-flow.md",
+    );
+
+    for (const file of targetFiles) {
+      try {
+        const content = readFileSync(join(dir, file), "utf-8");
+        skills.push(content);
+      } catch (err) {
+        console.warn(`[session-manager] Failed to read skill file ${file}:`, err);
+      }
+    }
+  } catch (err) {
+    console.warn(`[session-manager] Failed to read skills directory:`, err);
+  }
+
+  cachedSkills = skills;
+  return skills;
+}
+
+/**
+ * Reset the cached skills. Only intended for testing.
+ */
+export function resetSkillCache(): void {
+  cachedSkills = null;
 }

@@ -45,7 +45,9 @@ export type SSEEventType =
   | "session.ended"
   | "session.crisis"
   | "emotion.ai_detected"
-  | "assessment.due";
+  | "assessment.due"
+  | "assessment.start"
+  | "assessment.complete";
 
 // ── Summary Types ──────────────────────────────────────────────
 

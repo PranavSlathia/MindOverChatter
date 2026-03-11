@@ -11,7 +11,8 @@ import { eq } from "drizzle-orm";
 import { SendMessageSchema, EndSessionSchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
-import { sessions, messages, userProfiles } from "../db/schema/index";
+import { sessions, messages } from "../db/schema/index";
+import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
 import type { SSEEventData } from "../sse/emitter.js";
@@ -19,46 +20,13 @@ import {
   createSdkSession,
   sendMessage as sdkSendMessage,
   endSdkSession,
+  loadSkillFiles,
 } from "../sdk/session-manager.js";
 import {
   searchMemories,
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-/**
- * Get or create the single user profile.
- * Single-user app — no auth, always one user.
- */
-/** Cached user ID to avoid repeated DB lookups after first call. */
-let cachedUserId: string | null = null;
-
-async function getOrCreateUser() {
-  if (cachedUserId) {
-    const [existing] = await db
-      .select()
-      .from(userProfiles)
-      .where(eq(userProfiles.id, cachedUserId))
-      .limit(1);
-    if (existing) return existing;
-    cachedUserId = null;
-  }
-
-  const existing = await db.select().from(userProfiles).limit(1);
-  if (existing[0]) {
-    cachedUserId = existing[0].id;
-    return existing[0];
-  }
-
-  const [created] = await db
-    .insert(userProfiles)
-    .values({ displayName: "User" })
-    .returning();
-  cachedUserId = created!.id;
-  return created!;
-}
 
 // ── Route Definitions ────────────────────────────────────────────
 
@@ -92,9 +60,10 @@ const app = new Hono()
       confidence: m.confidence,
     }));
 
-    // Create an SDK session with memory context
+    // Create an SDK session with memory context and therapeutic skills
     const sdkSessionId = await createSdkSession(
       mappedMemories.length > 0 ? mappedMemories : undefined,
+      loadSkillFiles(),
     );
 
     const [session] = await db
@@ -353,10 +322,16 @@ const app = new Hono()
 
 // ── Background AI Streaming ──────────────────────────────────────
 
+/** Regex to detect and strip [ASSESSMENT_READY:type] markers from AI output. */
+const ASSESSMENT_MARKER_RE = /\[ASSESSMENT_READY:(phq9|gad7)\]/g;
+
 /**
  * Calls the SDK session manager to get an AI response, streaming
  * chunks to SSE subscribers as they arrive, then persists the
  * complete response as an assistant message.
+ *
+ * If the AI includes an [ASSESSMENT_READY:type] marker, it is stripped
+ * before persistence/SSE and an assessment.start event is emitted.
  */
 async function streamAiResponse(
   sessionId: string,
@@ -381,10 +356,17 @@ async function streamAiResponse(
     return;
   }
 
-  // Persist the complete AI response
+  // Strip [ASSESSMENT_READY:type] markers before persistence/SSE
+  const assessmentMarkers: string[] = [];
+  const cleanText = fullText.replace(ASSESSMENT_MARKER_RE, (match, type: string) => {
+    assessmentMarkers.push(type);
+    return "";
+  }).trim();
+
+  // Persist the cleaned AI response (no markers)
   const [assistantMsg] = await db
     .insert(messages)
-    .values({ sessionId, role: "assistant", content: fullText })
+    .values({ sessionId, role: "assistant", content: cleanText })
     .returning();
 
   // Signal completion
@@ -393,10 +375,18 @@ async function streamAiResponse(
     data: { messageId: assistantMsg!.id },
   });
 
+  // Emit assessment.start for each detected marker
+  for (const assessmentType of assessmentMarkers) {
+    sessionEmitter.emit(sessionId, {
+      event: "assessment.start",
+      data: { assessmentType },
+    });
+  }
+
   // Fire-and-forget: extract memories from the conversation turn
   addMemoriesAsync(userId, sessionId, userMessageId, [
     { role: "user", content: userMessage },
-    { role: "assistant", content: fullText },
+    { role: "assistant", content: cleanText },
   ]);
 }
 

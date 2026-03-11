@@ -2,13 +2,15 @@
 // Simple in-memory pub/sub for streaming AI responses to SSE clients.
 // Single-user app — no Redis needed. One EventEmitter per session.
 
-/** Payload shape for each SSE event type used in Phase 2 */
+/** Payload shape for each SSE event type */
 export type SSEEventData =
   | { event: "ai.chunk"; data: { content: string } }
   | { event: "ai.response_complete"; data: { messageId: string } }
   | { event: "ai.error"; data: { error: string } }
   | { event: "session.crisis"; data: { message: string; helplines: ReadonlyArray<{ readonly name: string; readonly number: string; readonly country: string }> } }
-  | { event: "session.ended"; data: { summary?: string } };
+  | { event: "session.ended"; data: { summary?: string } }
+  | { event: "assessment.start"; data: { assessmentType: string } }
+  | { event: "assessment.complete"; data: { assessmentId: string; severity: string; nextScreener: string | null } };
 
 export type SSECallback = (event: SSEEventData) => void;
 

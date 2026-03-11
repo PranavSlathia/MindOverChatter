@@ -15,7 +15,19 @@
 
 ## SDK Patterns
 
-<!-- Claude Agent SDK integration patterns -->
+- Session manager: `apps/server/src/sdk/session-manager.ts`
+- Uses local `claude` CLI binary via `child_process.spawn` (NOT an SDK library)
+- Streaming via `--output-format stream-json` (newline-delimited JSON events)
+- stream-json event types: `content_block_delta` (incremental), `assistant` (full message), `result` (final)
+- Model from `process.env.CLAUDE_MODEL` (defaults to "sonnet")
+- Response timeout: 30s (conversation), vs 5s for crisis classifier (haiku)
+- In-memory session store: `Map<string, Session>` with conversation history
+- Prompt assembly: system prompt + history dialogue + new user message
+- System prompt: MUST say "wellness companion", NEVER "therapist"
+- Crisis detection runs in the route layer BEFORE calling `sendMessage`
+- The haiku-classifier.ts uses the same spawn pattern but for classification
+- Biome linter: use dot notation (not bracket) on `Record<string, unknown>`
+- Pre-existing: `@types/node` missing from server package (build fails for all Node.js API usage)
 
 ## Therapeutic Notes
 

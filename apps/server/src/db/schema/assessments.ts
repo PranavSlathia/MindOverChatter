@@ -10,7 +10,16 @@ import {
 import { sessions } from "./sessions";
 import { userProfiles } from "./user-profiles";
 
-export const assessmentTypeEnum = pgEnum("assessment_type", ["phq9", "gad7"]);
+export const assessmentTypeEnum = pgEnum("assessment_type", [
+  "phq9",
+  "gad7",
+  "iss_sleep",
+  "panic_screener",
+  "trauma_gating",
+  "functioning",
+  "substance_use",
+  "relationship",
+]);
 
 export const assessmentSeverityEnum = pgEnum("assessment_severity", [
   "minimal",
@@ -32,6 +41,12 @@ export const assessments = pgTable("assessments", {
   answers: jsonb("answers").notNull(), // Array of 0-3 per question
   totalScore: integer("total_score").notNull(), // PHQ-9: 0-27, GAD-7: 0-21
   severity: assessmentSeverityEnum("severity").notNull(),
+  screenerResults: jsonb("screener_results"), // Phase 4-B: populated by formulation engine with sub-screener synthesis
+  // Drizzle requires a lazy thunk with `any` for self-referential FKs
+  parentAssessmentId: uuid("parent_assessment_id").references(
+    (): any => assessments.id,
+    { onDelete: "set null" },
+  ),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
