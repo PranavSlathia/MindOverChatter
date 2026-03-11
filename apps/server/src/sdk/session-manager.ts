@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 
 // ── Types ───────────────────────────────────────────────────────
 
-interface ConversationMessage {
+export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
 }
@@ -182,7 +182,7 @@ export function assemblePrompt(
  *
  * Returns the accumulated full response text.
  */
-function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void): Promise<string> {
+export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     let fullResponse = "";
     let stderr = "";
@@ -477,18 +477,19 @@ export async function sendMessage(
 
 /**
  * End and clean up an SDK session.
- * Removes the session and its conversation history from memory.
- *
- * In future phases, this will trigger summary generation and memory extraction.
+ * Returns the session's conversation history before deleting it from memory.
+ * If the session does not exist, returns an empty array (idempotent).
  */
-export async function endSdkSession(sdkSessionId: string): Promise<void> {
+export async function endSdkSession(sdkSessionId: string): Promise<ConversationMessage[]> {
   const session = sessions.get(sdkSessionId);
   if (!session) {
     // Idempotent — ending a non-existent session is a no-op
-    return;
+    return [];
   }
 
+  const history = [...session.messages];
   sessions.delete(sdkSessionId);
+  return history;
 }
 
 /**

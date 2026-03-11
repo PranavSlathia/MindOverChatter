@@ -106,6 +106,61 @@ export async function searchMemories(
   }
 }
 
+// ── Get All Memories (BLOCKING) ──────────────────────────────────
+
+/**
+ * Retrieve ALL memories for a user from Mem0. Returns [] on ANY failure.
+ * Used at session start to give the AI full context about the user.
+ */
+export async function getAllMemories(
+  userId: string,
+): Promise<MemorySearchResult[]> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+
+    const response = await fetch(`${env.MEMORY_SERVICE_URL}/memories/${userId}`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      console.error(
+        `Memory get_all failed: HTTP ${String(response.status)} from ${env.MEMORY_SERVICE_URL}/memories/${userId}`,
+      );
+      return [];
+    }
+
+    const data = (await response.json()) as {
+      memories?: Array<{
+        id: string;
+        content: string;
+        memory_type: string;
+        confidence: number;
+        created_at: string;
+      }>;
+    };
+    if (!Array.isArray(data.memories)) {
+      return [];
+    }
+
+    return data.memories.map((m) => ({
+      id: m.id,
+      content: m.content,
+      memoryType: m.memory_type,
+      confidence: m.confidence,
+      relevance: 1.0, // All memories are relevant when loading full context
+      createdAt: m.created_at,
+    }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Memory get_all error: ${message}`);
+    return [];
+  }
+}
+
 // ── Add Memories (FIRE-AND-FORGET) ──────────────────────────────
 
 /**

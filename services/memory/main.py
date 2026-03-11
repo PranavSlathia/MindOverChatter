@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -80,7 +81,16 @@ Rules:
 - Prefer the user's own words when possible
 - safety_critical memories should have confidence >= 0.8 (only extract when clearly stated)
 
-Output each memory with its type and confidence."""
+IMPORTANT: You MUST prefix each extracted memory with its type tag in square brackets.
+Format: "[TYPE:memory_type_here] The actual memory content."
+Example: "[TYPE:goal] Wants to reduce anxiety and sleep better."
+Example: "[TYPE:relationship] Has a sister named Priya who lives in Delhi."
+Example: "[TYPE:symptom_episode] Has been experiencing constant sadness for 2-3 months."
+Example: "[TYPE:coping_strategy] Uses dry herb vaping to manage stress."
+Example: "[TYPE:safety_critical] Has history of self-harm, last episode was 2 years ago."
+Do NOT include the type tag anywhere else in the memory text.
+
+Output each memory with its type tag prefix and confidence."""
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +108,12 @@ def _build_mem0_config() -> dict:
     db_user = os.getenv("DB_USER", "moc")
     db_password = os.getenv("DB_PASSWORD")
     db_name = os.getenv("DB_NAME", "moc")
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    groq_api_key = os.getenv("GROQ_API_KEY")
 
     if not db_password:
         raise ValueError("DB_PASSWORD environment variable is required")
-    if not anthropic_api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+    if not groq_api_key:
+        raise ValueError("GROQ_API_KEY environment variable is required")
 
     return {
         "vector_store": {
@@ -115,20 +125,22 @@ def _build_mem0_config() -> dict:
                 "password": db_password,
                 "dbname": db_name,
                 "collection_name": "mem0_vectors",
-                "embedding_model_dims": 1024,
+                "embedding_model_dims": 384,
             },
         },
         "llm": {
-            "provider": "anthropic",
+            "provider": "groq",
             "config": {
-                "model": "claude-haiku-4-5-20251001",
-                "api_key": anthropic_api_key,
+                "model": "llama-3.3-70b-versatile",
+                "temperature": 0.1,
+                "api_key": groq_api_key,
             },
         },
         "embedder": {
             "provider": "huggingface",
             "config": {
-                "model": "BAAI/bge-m3",
+                "model": "BAAI/bge-small-en-v1.5",
+                "embedding_dims": 384,
             },
         },
         "custom_prompt": CUSTOM_EXTRACTION_PROMPT,
@@ -233,12 +245,34 @@ class SearchMemoryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _parse_memory_type(metadata: dict | None) -> str:
-    """Extract memory_type from Mem0 metadata, defaulting to profile_fact."""
-    if metadata and "memory_type" in metadata:
-        mtype = metadata["memory_type"]
-        if mtype in VALID_MEMORY_TYPES:
+    """Extract memory_type from Mem0 metadata, defaulting to profile_fact.
+
+    Accepts both snake_case (memory_type) from Python callers and
+    camelCase (memoryType) from TypeScript callers.
+    """
+    if metadata:
+        mtype = metadata.get("memory_type") or metadata.get("memoryType")
+        if mtype and mtype in VALID_MEMORY_TYPES:
             return mtype
     return "profile_fact"
+
+
+_TYPE_PREFIX_RE = re.compile(r"^\[TYPE:(\w+)\]\s*")
+
+
+def _parse_type_prefix(content: str) -> tuple[str, str]:
+    """Parse [TYPE:typename] prefix from memory content.
+
+    Returns (memory_type, cleaned_content).
+    Falls back to profile_fact if no valid prefix found.
+    """
+    match = _TYPE_PREFIX_RE.match(content)
+    if match:
+        mtype = match.group(1)
+        cleaned = content[match.end():]
+        if mtype in VALID_MEMORY_TYPES:
+            return mtype, cleaned
+    return "profile_fact", content
 
 
 def _parse_confidence(metadata: dict | None) -> float:
@@ -304,6 +338,175 @@ def _normalize_search_result(result: Any) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Memory type classification (rules + Groq fallback)
+# ---------------------------------------------------------------------------
+
+
+def _classify_by_rules(content: str) -> str | None:
+    """Deterministic rule-based memory type classification.
+
+    Returns type if confident, None if unsure (fall through to Groq).
+    """
+    lower = content.lower()
+
+    # Safety critical — high priority, check first
+    if any(w in lower for w in [
+        "self-harm", "self harm", "suicide", "suicidal", "crisis",
+        "medication", "overdose", "cutting", "hurt myself", "end my life",
+    ]):
+        return "safety_critical"
+
+    # Symptoms/episodes
+    if any(w in lower for w in [
+        "feeling sad", "feeling low", "sadness", "anxiety", "depression",
+        "numbness", "insomnia", "sleep", "appetite", "fatigue", "anhedonia",
+        "withdrawn", "foggy", "concentration", "panic", "restless",
+        "hopeless", "worthless", "irritable", "mood swings",
+    ]):
+        return "symptom_episode"
+
+    # Triggers
+    if any(w in lower for w in [
+        "trigger", "whenever", "every time", "makes me", "causes me",
+        "stresses me", "comparison", "pressure", "reminds me of",
+    ]):
+        return "recurring_trigger"
+
+    # Coping strategies
+    if any(w in lower for w in [
+        "helps me", "coping", "manage stress", "relax", "calms me",
+        "works for me", "vaping", "exercise", "meditation", "journaling",
+        "breathing", "walk", "music helps",
+    ]):
+        return "coping_strategy"
+
+    # Relationships
+    if any(w in lower for w in [
+        "mother", "father", "sister", "brother", "friend", "partner",
+        "wife", "husband", "parents", "family", "girlfriend", "boyfriend",
+        "colleague", "boss", "therapist", "doctor",
+    ]):
+        return "relationship"
+
+    # Life events
+    if any(w in lower for w in [
+        "moved to", "graduated", "got married", "started job", "lost job",
+        "traveled", "trip to", "period in", "diagnosed", "broke up",
+        "passed away", "born in", "relocated",
+    ]):
+        return "life_event"
+
+    # Goals
+    if any(w in lower for w in [
+        "want to", "goal", "working toward", "hope to", "planning to",
+        "trying to", "aim to", "wish to", "aspire",
+    ]):
+        return "goal"
+
+    # Wins
+    if any(w in lower for w in [
+        "proud", "accomplished", "achievement", "better today",
+        "breakthrough", "progress", "feel good", "managed to",
+        "succeeded", "overcame",
+    ]):
+        return "win"
+
+    return None  # Fall through to Groq
+
+
+async def _classify_memory_type(content: str) -> str:
+    """Use Groq to classify a memory into one of the 10 types.
+
+    Returns the classified type, or 'profile_fact' if classification fails.
+    """
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        return "profile_fact"
+
+    import httpx  # noqa: PLC0415
+
+    prompt = f"""Classify this memory into exactly ONE of these types:
+- profile_fact: Biographical info (name, age, job, location)
+- relationship: People in user's life and dynamics
+- goal: Things user wants to achieve
+- coping_strategy: Things that help manage stress/emotions
+- recurring_trigger: Situations that consistently cause distress
+- life_event: Significant past/present/planned events
+- symptom_episode: Mental health symptoms or episodes
+- unresolved_thread: Topics not fully explored
+- safety_critical: Self-harm, crisis history, medications, safety
+- win: Positive achievements, progress, breakthroughs
+
+Memory: "{content}"
+
+Respond with ONLY the type name, nothing else."""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 20,
+                    "temperature": 0,
+                },
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                raw = (
+                    data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                    .lower()
+                )
+                if raw in VALID_MEMORY_TYPES:
+                    return raw
+                logger.warning("Groq returned unknown memory type: %s", raw)
+    except Exception as exc:
+        logger.warning("Groq memory classification failed: %s", exc)
+
+    return "profile_fact"
+
+
+async def _reclassify_if_needed(memories_added: list[AddedMemory]) -> None:
+    """Re-classify memories that defaulted to profile_fact using rules + Groq.
+
+    Mutates the memory_type field in-place on the AddedMemory objects.
+    """
+    for mem in memories_added:
+        if mem.memory_type != "profile_fact":
+            continue
+
+        # Try deterministic rules first (fast, no network)
+        ruled = _classify_by_rules(mem.content)
+        if ruled:
+            logger.info(
+                "Rule-based reclassification: '%s...' -> %s",
+                mem.content[:50],
+                ruled,
+            )
+            mem.memory_type = ruled
+            continue
+
+        # Fall back to Groq classification
+        classified = await _classify_memory_type(mem.content)
+        if classified != "profile_fact":
+            logger.info(
+                "Groq reclassification: '%s...' -> %s",
+                mem.content[:50],
+                classified,
+            )
+            mem.memory_type = classified
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -355,8 +558,14 @@ async def add_memories(request: AddMemoryRequest):
             continue
 
         memory_id = entry.get("id", "")
-        content = entry.get("memory", entry.get("text", entry.get("content", "")))
+        raw_content = entry.get("memory", entry.get("text", entry.get("content", "")))
         metadata = entry.get("metadata", {}) or {}
+
+        # Parse [TYPE:xxx] prefix from content (primary), fall back to metadata
+        memory_type, clean_content = _parse_type_prefix(raw_content)
+        if memory_type == "profile_fact" and raw_content == clean_content:
+            # No prefix found — try metadata as fallback
+            memory_type = _parse_memory_type(metadata)
 
         # Determine supersedes_id for UPDATE events
         supersedes_id: str | None = None
@@ -375,12 +584,15 @@ async def add_memories(request: AddMemoryRequest):
             AddedMemory(
                 id=memory_id,
                 supersedes_id=supersedes_id,
-                content=content,
-                memory_type=_parse_memory_type(metadata),
+                content=clean_content,
+                memory_type=memory_type,
                 confidence=_parse_confidence(metadata),
                 event=event,
             )
         )
+
+    # Re-classify memories that defaulted to profile_fact (rules first, then Groq)
+    await _reclassify_if_needed(memories_added)
 
     return AddMemoryResponse(memories_added=memories_added)
 
@@ -408,13 +620,17 @@ async def search_memories(request: SearchMemoryRequest):
 
     for entry in raw_memories:
         metadata = entry.get("metadata", {}) or {}
-        memory_type = _parse_memory_type(metadata)
+        raw_content = entry.get("memory", entry.get("text", entry.get("content", "")))
+
+        # Parse [TYPE:xxx] prefix from stored content, fall back to metadata
+        memory_type, clean_content = _parse_type_prefix(raw_content)
+        if memory_type == "profile_fact" and raw_content == clean_content:
+            memory_type = _parse_memory_type(metadata)
 
         # Apply memory_types filter if provided
         if request.memory_types and memory_type not in request.memory_types:
             continue
 
-        content = entry.get("memory", entry.get("text", entry.get("content", "")))
         relevance = entry.get("score", entry.get("relevance", 0.0))
         created_at = entry.get("created_at", entry.get("created_at", ""))
 
@@ -427,7 +643,7 @@ async def search_memories(request: SearchMemoryRequest):
         memories.append(
             RetrievedMemory(
                 id=entry.get("id", ""),
-                content=content,
+                content=clean_content,
                 memory_type=memory_type,
                 confidence=_parse_confidence(metadata),
                 relevance=float(relevance) if relevance else 0.0,
@@ -454,7 +670,13 @@ async def get_all_memories(user_id: str):
 
     for entry in raw_memories:
         metadata = entry.get("metadata", {}) or {}
-        content = entry.get("memory", entry.get("text", entry.get("content", "")))
+        raw_content = entry.get("memory", entry.get("text", entry.get("content", "")))
+
+        # Parse [TYPE:xxx] prefix from stored content, fall back to metadata
+        memory_type, clean_content = _parse_type_prefix(raw_content)
+        if memory_type == "profile_fact" and raw_content == clean_content:
+            memory_type = _parse_memory_type(metadata)
+
         created_at = entry.get("created_at", "")
         if isinstance(created_at, datetime):
             created_at = created_at.isoformat()
@@ -463,8 +685,8 @@ async def get_all_memories(user_id: str):
 
         memories.append({
             "id": entry.get("id", ""),
-            "content": content,
-            "memory_type": _parse_memory_type(metadata),
+            "content": clean_content,
+            "memory_type": memory_type,
             "confidence": _parse_confidence(metadata),
             "created_at": str(created_at),
             "metadata": metadata,
@@ -533,3 +755,63 @@ async def delete_memory(memory_id: str):
         raise HTTPException(status_code=500, detail=f"Memory deletion failed: {exc}") from exc
 
     return {"deleted": True, "memory_id": memory_id}
+
+
+@app.post("/memories/reclassify/{user_id}")
+async def reclassify_memories(user_id: str):
+    """Reclassify all profile_fact memories for a user using rules + Groq.
+
+    Used for backfilling existing memories after the typing fix.
+    Reads all memories from Mem0, identifies those stuck as profile_fact,
+    and attempts reclassification via rules (fast) then Groq (slow).
+    """
+    mem = _require_mem0()
+
+    try:
+        result = mem.get_all(user_id=user_id)
+    except Exception as exc:
+        logger.error("Mem0 get_all() failed during reclassify: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Memory retrieval failed: {exc}") from exc
+
+    raw_memories = _normalize_search_result(result)
+    reclassified: list[dict] = []
+
+    for entry in raw_memories:
+        raw_content = entry.get("memory", entry.get("text", entry.get("content", "")))
+        memory_type, clean_content = _parse_type_prefix(raw_content)
+
+        # Only reclassify memories that have no TYPE prefix and defaulted to profile_fact
+        if memory_type != "profile_fact" or raw_content != clean_content:
+            continue
+
+        # Also check metadata — if metadata already has a valid type, skip
+        metadata = entry.get("metadata", {}) or {}
+        meta_type = _parse_memory_type(metadata)
+        if meta_type != "profile_fact":
+            continue
+
+        # Try rules first (fast, deterministic)
+        new_type = _classify_by_rules(clean_content)
+        if not new_type:
+            # Fall back to Groq classification
+            new_type = await _classify_memory_type(clean_content)
+
+        if new_type and new_type != "profile_fact":
+            # Update the memory content with the type prefix so future reads work
+            try:
+                mem.update(memory_id=entry["id"], data=f"[TYPE:{new_type}] {clean_content}")
+                reclassified.append({
+                    "id": entry["id"],
+                    "content": clean_content,
+                    "old_type": "profile_fact",
+                    "new_type": new_type,
+                })
+                logger.info(
+                    "Reclassified memory %s: profile_fact -> %s",
+                    entry.get("id"),
+                    new_type,
+                )
+            except Exception as exc:
+                logger.warning("Failed to reclassify memory %s: %s", entry.get("id"), exc)
+
+    return {"reclassified": len(reclassified), "details": reclassified}

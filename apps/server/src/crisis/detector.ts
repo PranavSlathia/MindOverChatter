@@ -48,7 +48,8 @@ function isHaikuCrisis(riskLevel: HaikuRiskLevel): boolean {
  *   Stage 2 (haiku):   LLM classification for ambiguous/subtle cases (~1-5s).
  *
  * Routing logic:
- *   - HIGH keyword match → immediate crisis response (skip Stage 2)
+ *   - HIGH keyword match (non-negated) → immediate crisis response (skip Stage 2)
+ *   - HIGH keyword match (negated) → run Stage 2 for nuanced classification
  *   - MEDIUM keyword match → run Stage 2 for confirmation
  *   - No keyword match but subtle signals → run Stage 2
  *   - No signals at all → safe, return immediately
@@ -65,19 +66,26 @@ export async function detectCrisis(message: string): Promise<CrisisResult> {
   const keywordResult = detectKeywords(message);
 
   // HIGH severity keyword → immediate crisis response, no waiting for Stage 2
+  // UNLESS the keyword is negated (e.g., "I do not want to kill myself"),
+  // in which case we fall through to Stage 2 (Haiku) for nuanced classification.
   if (keywordResult.detected && keywordResult.severity === "high") {
-    return {
-      isCrisis: true,
-      severity: keywordResult.severity,
-      matchedPhrases: keywordResult.matchedPhrases,
-      stages: ["keyword"],
-      response: getCrisisResponse("high"),
-      haikuResult: null,
-    };
+    if (!keywordResult.isNegated) {
+      // Non-negated HIGH → immediate crisis (unchanged behavior)
+      return {
+        isCrisis: true,
+        severity: keywordResult.severity,
+        matchedPhrases: keywordResult.matchedPhrases,
+        stages: ["keyword"],
+        response: getCrisisResponse("high"),
+        haikuResult: null,
+      };
+    }
+    // Negated HIGH → fall through to Stage 2 for nuanced assessment
   }
 
   // Determine if we need Stage 2
-  const shouldClassify = keywordResult.detected || needsClassification(message);
+  const shouldClassify =
+    keywordResult.detected || needsClassification(message);
 
   if (!shouldClassify) {
     // No risk signals detected — safe

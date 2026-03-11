@@ -16,7 +16,7 @@ const STATUS_CONFIG: Record<ChatHeaderProps["status"], { label: string; dotClass
 
 export function ChatHeader({ status, onEndSession }: ChatHeaderProps) {
   const config = STATUS_CONFIG[status];
-  const canEnd = status === "active";
+  const canEnd = status === "active" || status === "crisis_escalated";
 
   return (
     <header className="flex items-center justify-between border-b border-foreground/10 bg-background px-4 py-3 shadow-sm">

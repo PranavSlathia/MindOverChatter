@@ -12,6 +12,8 @@ export interface KeywordResult {
   severity: KeywordSeverity;
   matchedPhrases: string[];
   stage: "keyword";
+  /** true if ALL high-severity matched phrases appear in a negated context */
+  isNegated: boolean;
 }
 
 /** Risk level from Stage 2: Haiku LLM classification */

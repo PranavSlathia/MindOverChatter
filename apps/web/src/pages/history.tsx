@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import type { SessionMessage, SessionSummary } from "@/lib/api.js";
 import { api } from "@/lib/api.js";
 import { cn } from "@/lib/utils.js";
@@ -54,13 +54,17 @@ const STATUS_STYLES: Record<string, { label: string; dotClass: string }> = {
 
 interface SessionCardProps {
   session: SessionSummary;
+  onContinue: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
 }
 
-function SessionCard({ session }: SessionCardProps) {
+function SessionCard({ session, onContinue, onDelete }: SessionCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const statusConfig = STATUS_STYLES[session.status] ?? {
     label: session.status,
@@ -136,6 +140,60 @@ function SessionCard({ session }: SessionCardProps) {
         </span>
       </button>
 
+      {/* Action buttons */}
+      <div className="flex items-center gap-2 border-t border-foreground/5 px-5 py-2.5">
+        <button
+          type="button"
+          onClick={() => onContinue(session.id)}
+          className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
+          aria-label={`Continue session from ${formatDate(session.startedAt)}`}
+        >
+          Continue
+        </button>
+
+        {confirmDelete ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-xs text-foreground/50">Delete?</span>
+            <button
+              type="button"
+              onClick={async () => {
+                setDeleting(true);
+                try {
+                  await api.deleteSession(session.id);
+                  onDelete(session.id);
+                } catch (err) {
+                  console.error("Failed to delete session:", err);
+                  setDeleting(false);
+                  setConfirmDelete(false);
+                }
+              }}
+              disabled={deleting}
+              className="rounded-md bg-destructive px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              aria-label="Confirm delete"
+            >
+              {deleting ? "..." : "Yes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              className="rounded-md border border-foreground/15 px-2.5 py-1 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5"
+              aria-label="Cancel delete"
+            >
+              No
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/50 transition-colors hover:border-destructive/30 hover:text-destructive"
+            aria-label={`Delete session from ${formatDate(session.startedAt)}`}
+          >
+            Delete
+          </button>
+        )}
+      </div>
+
       {expanded && (
         <div className="border-t border-foreground/5 px-5 py-4">
           {loadingMessages && (
@@ -197,12 +255,24 @@ function SessionCard({ session }: SessionCardProps) {
 }
 
 export function HistoryPage() {
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  const handleContinue = useCallback(
+    (sessionId: string) => {
+      navigate(`/chat/${sessionId}`);
+    },
+    [navigate],
+  );
+
+  const handleDelete = useCallback((sessionId: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  }, []);
 
   // Initial fetch
   useEffect(() => {
@@ -317,7 +387,12 @@ export function HistoryPage() {
         {!isLoading && !loadError && sessions.length > 0 && (
           <div className="flex flex-col gap-3">
             {sessions.map((session) => (
-              <SessionCard key={session.id} session={session} />
+              <SessionCard
+                key={session.id}
+                session={session}
+                onContinue={handleContinue}
+                onDelete={handleDelete}
+              />
             ))}
 
             {/* Load more */}

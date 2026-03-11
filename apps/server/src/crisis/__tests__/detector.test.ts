@@ -65,6 +65,63 @@ describe("detector (crisis pipeline orchestrator)", () => {
     });
   });
 
+  // ── Negated HIGH keyword → routes through haiku ──────────
+  describe("negated HIGH keyword → routes through haiku", () => {
+    it("calls haiku for negated high severity keywords", async () => {
+      mockClassify.mockResolvedValue(haikuResult("none"));
+      const result = await detectCrisis("I do not want to kill myself");
+      expect(mockClassify).toHaveBeenCalled(); // Haiku WAS called
+      expect(result.isCrisis).toBe(false); // Haiku said "none" → not crisis
+    });
+
+    it("returns not crisis when haiku says 'low' for negated high", async () => {
+      mockClassify.mockResolvedValue(haikuResult("low"));
+      const result = await detectCrisis("I don't want to kill myself");
+      expect(mockClassify).toHaveBeenCalled();
+      expect(result.isCrisis).toBe(false);
+    });
+
+    it("still triggers crisis if haiku says crisis despite negation", async () => {
+      mockClassify.mockResolvedValue(haikuResult("crisis"));
+      const result = await detectCrisis(
+        "I don't want to kill myself... actually maybe I do",
+      );
+      expect(result.isCrisis).toBe(true); // Haiku overrides negation
+    });
+
+    it("still triggers crisis if haiku says elevated despite negation", async () => {
+      mockClassify.mockResolvedValue(haikuResult("elevated"));
+      const result = await detectCrisis("I'm not suicidal but I feel terrible");
+      expect(result.isCrisis).toBe(true);
+    });
+
+    it("non-negated HIGH still skips haiku", async () => {
+      const result = await detectCrisis("I want to kill myself");
+      expect(mockClassify).not.toHaveBeenCalled();
+      expect(result.isCrisis).toBe(true);
+    });
+
+    it("negated high + haiku fails → err on caution (crisis)", async () => {
+      mockClassify.mockResolvedValue(null);
+      const result = await detectCrisis("I'm not suicidal at all");
+      // When haiku fails on negated high, err on caution
+      expect(result.isCrisis).toBe(true);
+    });
+
+    it("negated Hinglish high → routes through haiku", async () => {
+      mockClassify.mockResolvedValue(haikuResult("none"));
+      const result = await detectCrisis("khudkushi nahi karunga");
+      expect(mockClassify).toHaveBeenCalled();
+      expect(result.isCrisis).toBe(false);
+    });
+
+    it("includes haiku result in stages when negated high goes through", async () => {
+      mockClassify.mockResolvedValue(haikuResult("none"));
+      const result = await detectCrisis("I do not want to kill myself");
+      expect(result.stages).toContain("haiku");
+    });
+  });
+
   // ── MEDIUM keyword + haiku confirms → crisis ──────────────
   describe("MEDIUM keyword + haiku confirms → crisis", () => {
     it("returns crisis when haiku says 'crisis'", async () => {

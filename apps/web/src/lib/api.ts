@@ -185,6 +185,26 @@ export const api = {
     return response.blob();
   },
 
+  /** Delete a session. Backend route being implemented in parallel — uses plain fetch. */
+  deleteSession: async (sessionId: string): Promise<{ deleted: boolean }> => {
+    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+      method: "DELETE",
+    });
+    return handleResponse<{ deleted: boolean }>(response);
+  },
+
+  /** Resume a session. Backend route being implemented in parallel — uses plain fetch. */
+  resumeSession: async (
+    sessionId: string,
+  ): Promise<{ sessionId: string; status: string; startedAt: string }> => {
+    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return handleResponse<{ sessionId: string; status: string; startedAt: string }>(response);
+  },
+
   getUserProfile: async (): Promise<UserProfile> => {
     const res = await client.api.user.$get();
     await throwIfError(res);

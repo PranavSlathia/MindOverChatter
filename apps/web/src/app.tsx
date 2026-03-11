@@ -12,6 +12,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat/:sessionId" element={<ChatPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/mood" element={<MoodPage />} />
           <Route path="/profile" element={<ProfilePage />} />

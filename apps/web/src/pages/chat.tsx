@@ -1,5 +1,6 @@
 import { HELPLINES } from "@moc/shared";
 import { useCallback, useEffect, useRef } from "react";
+import { useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
 import { CrisisBanner, MessageBubble, StreamingBubble } from "@/components/chat/message-bubble.js";
@@ -9,6 +10,8 @@ import { useEmotionStore } from "@/stores/emotion-store.js";
 import { useSessionStore } from "@/stores/session-store.js";
 
 export function ChatPage() {
+  const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
+
   const {
     sessionId,
     status,
@@ -22,6 +25,7 @@ export function ChatPage() {
     setSessionId,
     setStatus,
     addMessage,
+    setMessages,
     setConnected,
     setStreaming,
     appendStreamingContent,
@@ -245,37 +249,76 @@ export function ChatPage() {
     ],
   );
 
-  // Create session on mount
+  // Create or resume session on mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: urlSessionId drives init, store actions are stable
   useEffect(() => {
     let cancelled = false;
 
-    async function startSession() {
-      try {
-        const result = await api.createSession();
-        if (cancelled) return;
-        setSessionId(result.sessionId);
-        setStatus("active");
-        connectSSE(result.sessionId);
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Failed to create session:", err);
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content:
-            "Unable to start a session. Please make sure the server is running and try refreshing the page.",
-          createdAt: new Date().toISOString(),
-        });
+    // Reset store when navigating to a new/different session
+    reset();
+
+    async function initSession() {
+      if (urlSessionId) {
+        // Resume an existing session
+        try {
+          const result = await api.resumeSession(urlSessionId);
+          if (cancelled) return;
+          setSessionId(result.sessionId);
+          setStatus("active");
+
+          // Load existing messages
+          const messagesResult = await api.getSessionMessages(urlSessionId);
+          if (cancelled) return;
+          setMessages(
+            messagesResult.messages.map((m) => ({
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              createdAt: m.createdAt,
+            })),
+          );
+
+          connectSSE(result.sessionId);
+        } catch (err) {
+          if (cancelled) return;
+          console.error("Failed to resume session:", err);
+          addMessage({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              "Unable to resume this session. It may have been deleted or the server is unavailable.",
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        // Create a new session
+        try {
+          const result = await api.createSession();
+          if (cancelled) return;
+          setSessionId(result.sessionId);
+          setStatus("active");
+          connectSSE(result.sessionId);
+        } catch (err) {
+          if (cancelled) return;
+          console.error("Failed to create session:", err);
+          addMessage({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              "Unable to start a session. Please make sure the server is running and try refreshing the page.",
+            createdAt: new Date().toISOString(),
+          });
+        }
       }
     }
 
-    startSession();
+    initSession();
 
     return () => {
       cancelled = true;
       eventSourceRef.current?.close();
     };
-  }, [setSessionId, setStatus, connectSSE, addMessage]);
+  }, [urlSessionId]);
 
   // Beforeunload: best-effort session end via beacon
   useEffect(() => {
@@ -358,7 +401,7 @@ export function ChatPage() {
       });
   }, [reset, setSessionId, setStatus, connectSSE, addMessage]);
 
-  const inputDisabled = isStreaming || status === "completed" || status === "crisis_escalated";
+  const inputDisabled = isStreaming || status === "completed";
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -420,9 +463,7 @@ export function ChatPage() {
         placeholder={
           status === "completed"
             ? "Session has ended"
-            : status === "crisis_escalated"
-              ? "Please reach out to a helpline above"
-              : "Type a message..."
+            : "Type a message..."
         }
       />
     </div>

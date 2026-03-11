@@ -404,6 +404,129 @@ describe("keyword-detector", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // NEGATION HANDLING
+  // ═══════════════════════════════════════════════════════════════
+  describe("negation handling", () => {
+    // ── English negation → isNegated: true ─────────────────────
+    it("marks 'I do not want to kill myself' as negated", () => {
+      const result = detectKeywords("I do not want to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+      expect(result.severity).toBe("high");
+    });
+
+    it("marks 'I don't want to kill myself' as negated", () => {
+      const result = detectKeywords("I don't want to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'It's not like I want to die' as negated", () => {
+      const result = detectKeywords("It's not like I want to die");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'not going to kill myself' as negated", () => {
+      const result = detectKeywords("not going to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'I'm not suicidal' as negated", () => {
+      const result = detectKeywords("I'm not suicidal");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'I would never hurt myself' as negated", () => {
+      const result = detectKeywords("I would never hurt myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'I have no desire to end my life' as negated", () => {
+      const result = detectKeywords("I have no desire to end my life");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'I'm not thinking about suicide' as negated", () => {
+      const result = detectKeywords("I'm not thinking about suicide");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'never wanted to kill myself' as negated", () => {
+      const result = detectKeywords("never wanted to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    // ── Hinglish negation → isNegated: true ────────────────────
+    it("marks 'marna nahi chahta hun' as negated", () => {
+      const result = detectKeywords("marna nahi chahta hun");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    it("marks 'khudkushi nahi karunga' as negated", () => {
+      const result = detectKeywords("khudkushi nahi karunga");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(true);
+    });
+
+    // ── NON-negated → isNegated: false ─────────────────────────
+    it("'I want to kill myself' is NOT negated", () => {
+      const result = detectKeywords("I want to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false);
+      expect(result.severity).toBe("high");
+    });
+
+    it("'suicide' is NOT negated", () => {
+      const result = detectKeywords("suicide");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false);
+    });
+
+    it("'I want to die' is NOT negated", () => {
+      const result = detectKeywords("I want to die");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false);
+    });
+
+    it("'mar jaunga' is NOT negated", () => {
+      const result = detectKeywords("mar jaunga");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false);
+    });
+
+    // ── Distant negation should NOT suppress → isNegated: false ─
+    it("distant negation: 'I'm not feeling well and I want to kill myself' is NOT negated", () => {
+      const result = detectKeywords("I'm not feeling well and I want to kill myself");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false);
+    });
+
+    // ── Mixed: one negated + one not → isNegated: false ────────
+    it("mixed: 'I don't want to kill myself but I want to die' is NOT fully negated", () => {
+      const result = detectKeywords("I don't want to kill myself but I want to die");
+      expect(result.detected).toBe(true);
+      expect(result.isNegated).toBe(false); // "want to die" is not negated
+    });
+
+    // ── Non-high severity: isNegated always false ──────────────
+    it("medium severity: 'I don't want to kill someone' has isNegated false (medium, not high)", () => {
+      const result = detectKeywords("I don't want to kill someone");
+      expect(result.detected).toBe(true);
+      expect(result.severity).toBe("medium");
+      // isNegated only applies to high-severity matches
+      expect(result.isNegated).toBe(false);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // SPECIFIC REQUESTED EDGE CASES
   // ═══════════════════════════════════════════════════════════════
   describe("specifically requested edge cases", () => {

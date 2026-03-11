@@ -42,6 +42,7 @@ interface SessionState {
   setSessionId: (id: string | null) => void;
   setStatus: (status: SessionState["status"]) => void;
   addMessage: (message: Message) => void;
+  setMessages: (messages: Message[]) => void;
   updateMessage: (id: string, content: string) => void;
   setConnected: (connected: boolean) => void;
   setStreaming: (streaming: boolean) => void;
@@ -72,6 +73,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setSessionId: (id) => set({ sessionId: id }),
   setStatus: (status) => set({ status }),
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+  setMessages: (messages) => set({ messages }),
   updateMessage: (id, content) =>
     set((state) => ({
       messages: state.messages.map((m) => (m.id === id ? { ...m, content } : m)),

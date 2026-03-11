@@ -132,7 +132,7 @@ const app = new Hono()
       sessionId,
       assessment!.id, // Use assessment ID as the source message ID for provenance
       [{ role: "assistant", content: formulationText }],
-      { memoryType: "symptom_episode" },
+      { memory_type: "symptom_episode" },
     );
 
     // totalScore is for internal tracking only — NEVER render in UI as a diagnostic indicator

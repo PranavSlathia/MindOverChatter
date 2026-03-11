@@ -1,10 +1,12 @@
 // ── Session Routes ──────────────────────────────────────────────
-// GET  /              — List all sessions (paginated)
-// POST /              — Create a new session
-// GET  /:id/messages  — Get all messages for a session
-// POST /:id/messages  — Send a user message (crisis check + AI response)
-// GET  /:id/events    — SSE stream for real-time AI chunks
-// POST /:id/end       — End a session
+// GET    /              — List all sessions (paginated)
+// POST   /              — Create a new session
+// GET    /:id/messages  — Get all messages for a session
+// POST   /:id/messages  — Send a user message (crisis check + AI response)
+// GET    /:id/events    — SSE stream for real-time AI chunks
+// POST   /:id/end       — End a session
+// DELETE /:id           — Delete a session
+// POST   /:id/resume    — Resume a completed or disconnected session
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -13,7 +15,8 @@ import { eq, and, desc, asc } from "drizzle-orm";
 import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
-import { sessions, messages, sessionSummaries } from "../db/schema/index";
+import { env } from "../env.js";
+import { sessions, messages, sessionSummaries, assessments } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
@@ -23,9 +26,13 @@ import {
   sendMessage as sdkSendMessage,
   endSdkSession,
   loadSkillFiles,
+  injectSessionContext,
+  isSessionActive,
+  spawnClaudeStreaming,
 } from "../sdk/session-manager.js";
+import type { ConversationMessage } from "../sdk/session-manager.js";
 import {
-  searchMemories,
+  getAllMemories,
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
@@ -79,23 +86,8 @@ const app = new Hono()
   .post("/", async (c) => {
     const user = await getOrCreateUser();
 
-    // Retrieve memories for session context (BLOCKING — returns [] on failure)
-    // Two parallel searches: general context + explicit safety_critical
-    const [generalMemories, safetyMemories] = await Promise.all([
-      searchMemories(user.id, "user context and therapeutic goals"),
-      searchMemories(user.id, "safety concerns, crisis history, medications", 5, ["safety_critical"]),
-    ]);
-
-    // Merge and deduplicate (safety_critical may overlap with general results)
-    const seenIds = new Set<string>();
-    const allMemories: typeof generalMemories = [];
-    // Safety-critical first (highest priority)
-    for (const m of safetyMemories) {
-      if (!seenIds.has(m.id)) { seenIds.add(m.id); allMemories.push(m); }
-    }
-    for (const m of generalMemories) {
-      if (!seenIds.has(m.id)) { seenIds.add(m.id); allMemories.push(m); }
-    }
+    // Retrieve ALL memories for full user context (BLOCKING — returns [] on failure)
+    const allMemories = await getAllMemories(user.id);
 
     const mappedMemories = allMemories.map((m) => ({
       content: m.content,
@@ -108,6 +100,25 @@ const app = new Hono()
       mappedMemories.length > 0 ? mappedMemories : undefined,
       loadSkillFiles(),
     );
+
+    // Inject user profile context so the AI knows the user's name, traits, patterns, and goals
+    const profileParts: string[] = [];
+    if (user.displayName) profileParts.push(`Name: ${user.displayName}`);
+    if (user.coreTraits && Array.isArray(user.coreTraits) && (user.coreTraits as string[]).length > 0) {
+      profileParts.push(`Core traits (self-described): ${(user.coreTraits as string[]).join(", ")}`);
+    }
+    if (user.patterns && Array.isArray(user.patterns) && (user.patterns as string[]).length > 0) {
+      profileParts.push(`Behavioral patterns (self-described): ${(user.patterns as string[]).join(", ")}`);
+    }
+    if (user.goals && Array.isArray(user.goals) && (user.goals as string[]).length > 0) {
+      profileParts.push(`Goals: ${(user.goals as string[]).join(", ")}`);
+    }
+    if (profileParts.length > 0) {
+      injectSessionContext(
+        sdkSessionId,
+        `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
+      );
+    }
 
     const [session] = await db
       .insert(sessions)
@@ -196,7 +207,7 @@ const app = new Hono()
       );
     }
 
-    if (session.status !== "active") {
+    if (session.status !== "active" && session.status !== "crisis_escalated") {
       return c.json(
         { error: ERROR_CODES.SESSION_ENDED, message: "Session is not active" },
         409,
@@ -303,12 +314,6 @@ const app = new Hono()
     }
 
     return streamSSE(c, async (stream) => {
-      // Send a connection confirmation event
-      await stream.writeSSE({
-        event: "session.started",
-        data: JSON.stringify({ sessionId, status: session.status }),
-      });
-
       // Create a promise that resolves when the client disconnects
       let cleanup: (() => void) | null = null;
 
@@ -360,7 +365,7 @@ const app = new Hono()
       );
     }
 
-    if (session.status !== "active") {
+    if (session.status !== "active" && session.status !== "crisis_escalated") {
       return c.json(
         { error: ERROR_CODES.SESSION_ENDED, message: "Session is not active" },
         409,
@@ -369,11 +374,14 @@ const app = new Hono()
 
     const endedAt = new Date();
 
-    // End the SDK session (fire-and-forget — don't block the response)
+    // End the SDK session and capture conversation history for summary
+    let conversationHistory: ConversationMessage[] = [];
     if (session.sdkSessionId) {
-      endSdkSession(session.sdkSessionId).catch((err) => {
+      try {
+        conversationHistory = await endSdkSession(session.sdkSessionId);
+      } catch (err) {
         console.error(`Failed to end SDK session ${session.sdkSessionId}:`, err);
-      });
+      }
     }
 
     // Update session in DB
@@ -386,29 +394,196 @@ const app = new Hono()
       })
       .where(eq(sessions.id, sessionId));
 
-    // Fire-and-forget: notify memory service about session end
-    // Reason is restricted to known values to prevent injection through persistent memory
-    const ALLOWED_REASONS = ["user_ended", "timeout", "inactivity", "beforeunload"] as const;
-    const rawReason = c.req.valid("json").reason ?? "user_ended";
-    const safeReason = ALLOWED_REASONS.includes(rawReason as typeof ALLOWED_REASONS[number])
-      ? rawReason
-      : "user_ended";
-    summarizeSessionAsync(
-      session.userId,
-      sessionId,
-      `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}`,
-    );
-
-    // Notify SSE subscribers that the session ended
+    // Notify SSE subscribers that the session ended (immediate — UI shows "ended" right away)
     sessionEmitter.emit(sessionId, {
       event: "session.ended",
       data: {},
     });
 
+    // Sanitize session-end reason to prevent injection through persistent memory
+    const ALLOWED_REASONS = ["user_ended", "timeout", "inactivity", "beforeunload"] as const;
+    const rawReason = c.req.valid("json").reason ?? "user_ended";
+    const safeReason = ALLOWED_REASONS.includes(rawReason as typeof ALLOWED_REASONS[number])
+      ? rawReason
+      : "user_ended";
+
+    // Fire-and-forget: generate AI summary, persist to DB, notify Mem0, emit SSE with summary
+    if (conversationHistory.length > 0) {
+      generateAndPersistSummary(
+        session.userId,
+        sessionId,
+        conversationHistory,
+      ).catch((err) => {
+        console.error(`Summary generation error for session ${sessionId}:`, err);
+        // Fallback: send a basic summary to Mem0 so it at least knows the session ended
+        summarizeSessionAsync(
+          session.userId,
+          sessionId,
+          `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}`,
+        );
+      });
+    } else {
+      // No conversation history — just notify Mem0 with a basic message
+      summarizeSessionAsync(
+        session.userId,
+        sessionId,
+        `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}. No conversation took place.`,
+      );
+    }
+
     return c.json({
       sessionId: session.id,
       status: "completed" as const,
       endedAt: endedAt.toISOString(),
+    });
+  })
+
+  // ── DELETE /:id — Delete Session ──────────────────────────────
+  .delete("/:id", async (c) => {
+    const sessionId = c.req.param("id");
+    const user = await getOrCreateUser();
+
+    // Validate session exists AND belongs to the current user
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+      .limit(1);
+
+    if (!session) {
+      return c.json(
+        { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
+        404,
+      );
+    }
+
+    // Clean up the SDK session if active
+    if (session.sdkSessionId) {
+      endSdkSession(session.sdkSessionId).catch((err) => {
+        console.error(`Failed to end SDK session ${session.sdkSessionId} during delete:`, err);
+      });
+    }
+
+    // Delete the session from the database.
+    // FK cascade behavior:
+    //   messages         -> onDelete: cascade   (auto-deleted)
+    //   emotion_readings -> onDelete: cascade   (auto-deleted)
+    //   assessments      -> onDelete: set null   (sessionId nulled, record preserved)
+    //   session_summaries -> onDelete: set null  (sessionId nulled, record preserved)
+    //   mood_logs        -> onDelete: set null   (sessionId nulled, record preserved)
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+
+    return c.json({ deleted: true });
+  })
+
+  // ── POST /:id/resume — Resume Session ─────────────────────────
+  .post("/:id/resume", async (c) => {
+    const sessionId = c.req.param("id");
+    const user = await getOrCreateUser();
+
+    // Validate session exists AND belongs to the current user
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+      .limit(1);
+
+    if (!session) {
+      return c.json(
+        { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
+        404,
+      );
+    }
+
+    // If session is active and already has a live SDK session, just return success
+    if (
+      session.status === "active" &&
+      session.sdkSessionId &&
+      isSessionActive(session.sdkSessionId)
+    ) {
+      return c.json({
+        sessionId: session.id,
+        status: session.status,
+        startedAt: session.startedAt.toISOString(),
+        resumed: false,
+      });
+    }
+
+    // If session is completed, reactivate it
+    if (session.status === "completed") {
+      await db
+        .update(sessions)
+        .set({ status: "active", endedAt: null, lastActivityAt: new Date() })
+        .where(eq(sessions.id, sessionId));
+    }
+
+    // Retrieve ALL memories for full user context (same pattern as POST /)
+    const allMemories = await getAllMemories(user.id);
+
+    const mappedMemories = allMemories.map((m) => ({
+      content: m.content,
+      memoryType: m.memoryType,
+      confidence: m.confidence,
+    }));
+
+    // Create a fresh SDK session with memory context and therapeutic skills
+    const sdkSessionId = await createSdkSession(
+      mappedMemories.length > 0 ? mappedMemories : undefined,
+      loadSkillFiles(),
+    );
+
+    // Inject user profile context (same pattern as POST /)
+    const profileParts: string[] = [];
+    if (user.displayName) profileParts.push(`Name: ${user.displayName}`);
+    if (user.coreTraits && Array.isArray(user.coreTraits) && (user.coreTraits as string[]).length > 0) {
+      profileParts.push(`Core traits (self-described): ${(user.coreTraits as string[]).join(", ")}`);
+    }
+    if (user.patterns && Array.isArray(user.patterns) && (user.patterns as string[]).length > 0) {
+      profileParts.push(`Behavioral patterns (self-described): ${(user.patterns as string[]).join(", ")}`);
+    }
+    if (user.goals && Array.isArray(user.goals) && (user.goals as string[]).length > 0) {
+      profileParts.push(`Goals: ${(user.goals as string[]).join(", ")}`);
+    }
+    if (profileParts.length > 0) {
+      injectSessionContext(
+        sdkSessionId,
+        `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
+      );
+    }
+
+    // Load existing conversation history from the database
+    const historyRows = await db
+      .select({
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+
+    // Inject the conversation history as a context block so Claude has continuity
+    if (historyRows.length > 0) {
+      const historyLines = historyRows.map(
+        (m) => `[${m.role.toUpperCase()}]: ${m.content}`,
+      );
+      injectSessionContext(
+        sdkSessionId,
+        `=== Previous Conversation History (Resumed Session) ===\nThis session is being resumed. Below is the conversation that took place before the session was interrupted. Continue naturally from where you left off.\n\n${historyLines.join("\n\n")}\n=== End Previous Conversation History ===`,
+      );
+    }
+
+    // Update the session's sdkSessionId in the database
+    await db
+      .update(sessions)
+      .set({ sdkSessionId, lastActivityAt: new Date() })
+      .where(eq(sessions.id, sessionId));
+
+    return c.json({
+      sessionId: session.id,
+      status: "active" as const,
+      startedAt: session.startedAt.toISOString(),
+      resumed: true,
     });
   });
 
@@ -480,6 +655,336 @@ async function streamAiResponse(
     { role: "user", content: userMessage },
     { role: "assistant", content: cleanText },
   ]);
+
+  // Always check assessment eligibility — deterministic detector is the primary trigger.
+  // The [ASSESSMENT_READY:...] markers from Claude are a bonus secondary path.
+  // The completedTypes guard inside checkAssessmentEligibility prevents duplicate suggestions.
+  checkAssessmentEligibility(sessionId, userId).catch((err) => {
+    console.error("Assessment eligibility check failed:", err);
+  });
+}
+
+// ── Assessment Signal Detection ──────────────────────────────────
+
+interface AssessmentSignals {
+  phq9Score: number;
+  gad7Score: number;
+  evidenceMessages: number;
+}
+
+/**
+ * Deterministic signal detector for assessment candidacy.
+ * Scans recent messages for clinical indicators.
+ */
+function detectAssessmentSignals(
+  recentMessages: Array<{ role: string; content: string }>,
+): AssessmentSignals {
+  const userMessages = recentMessages.filter((m) => m.role === "user");
+
+  const phq9Indicators = [
+    /(?:sad|sadness|low mood|feeling down|feeling blue|depressed|empty|hollow|numb)/i,
+    /(?:no interest|lost interest|don't enjoy|anhedonia|nothing excites|don't care)/i,
+    /(?:can't sleep|insomnia|sleep too much|sleeping all day|trouble sleeping|not sleeping)/i,
+    /(?:no energy|tired|fatigue|exhausted|drained|no motivation)/i,
+    /(?:appetite|not eating|eating too much|lost appetite|no hunger)/i,
+    /(?:worthless|guilt|guilty|blame myself|failure|useless|burden)/i,
+    /(?:can't concentrate|focus|foggy|brain fog|memory|forgetful|distracted)/i,
+    /(?:slow|sluggish|restless|agitated|fidgety|can't sit still)/i,
+    /(?:withdraw|isolated|pulling away|avoiding|stopped going out|don't meet)/i,
+    /(?:months?|weeks?|long time|for a while|been going on)/i,
+  ];
+
+  const gad7Indicators = [
+    /(?:worry|worrying|worried|anxious|anxiety|nervous|tense)/i,
+    /(?:can't stop thinking|overthink|racing thoughts|mind won't stop)/i,
+    /(?:can't relax|restless|on edge|keyed up|wound up)/i,
+    /(?:irritable|annoyed easily|snappy|angry|frustrated)/i,
+    /(?:afraid|scared|fear|dread|panic|something awful)/i,
+    /(?:heart racing|sweating|trembling|shaking|dizzy|nauseous)/i,
+    /(?:can't control|out of control|helpless|overwhelmed)/i,
+  ];
+
+  let phq9Score = 0;
+  let gad7Score = 0;
+  let phq9MsgCount = 0;
+  let gad7MsgCount = 0;
+
+  for (const msg of userMessages) {
+    let msgHasPhq9 = false;
+    let msgHasGad7 = false;
+
+    for (const pattern of phq9Indicators) {
+      if (pattern.test(msg.content)) {
+        phq9Score++;
+        msgHasPhq9 = true;
+      }
+    }
+    for (const pattern of gad7Indicators) {
+      if (pattern.test(msg.content)) {
+        gad7Score++;
+        msgHasGad7 = true;
+      }
+    }
+
+    if (msgHasPhq9) phq9MsgCount++;
+    if (msgHasGad7) gad7MsgCount++;
+  }
+
+  return { phq9Score, gad7Score, evidenceMessages: Math.max(phq9MsgCount, gad7MsgCount) };
+}
+
+// ── Assessment Eligibility (Groq fallback prompt) ────────────────
+
+const ASSESSMENT_ELIGIBILITY_PROMPT = `You are a clinical screening assistant for a mental wellness app.
+Analyze the conversation and determine if a standardized assessment should be suggested.
+
+Available assessments:
+- phq9: Depression screening (PHQ-9). Suggest when user shows depressive symptoms like sadness, loss of interest, sleep/appetite changes, fatigue, guilt, concentration issues, or withdrawal.
+- gad7: Anxiety screening (GAD-7). Suggest when user shows anxiety symptoms like excessive worry, racing thoughts, restlessness, irritability, fear, or physical anxiety symptoms.
+
+Rules:
+- Only suggest ONE assessment at a time
+- Do NOT suggest if insufficient evidence (< 2 indicators). Duration mentions strengthen the case.
+- Prefer phq9 over gad7 if both are equally indicated
+
+Respond with JSON: { "suggest": boolean, "type": "phq9" | "gad7" | null, "reason": string }`;
+
+/**
+ * Two-tier assessment candidacy detection:
+ *   1. Deterministic signal detection — fast keyword matching on all user messages.
+ *   2. Groq LLM fallback — for subtler cases requiring GROQ_API_KEY.
+ */
+async function checkAssessmentEligibility(
+  sessionId: string,
+  userId: string,
+): Promise<void> {
+  const userMessages = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "user")));
+
+  if (userMessages.length < 4) return;
+  if (userMessages.length % 3 !== 1) return; // Check every 3rd message (4th, 7th, 10th...)
+
+  const [session] = await db
+    .select({ id: sessions.id, status: sessions.status })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+
+  if (!session || session.status === "crisis_escalated" || session.status === "completed") return;
+
+  const existingAssessments = await db
+    .select({ assessmentType: assessments.type })
+    .from(assessments)
+    .where(eq(assessments.sessionId, sessionId));
+
+  const completedTypes: Set<string> = new Set(existingAssessments.map((a) => a.assessmentType));
+
+  // Get ALL messages for signal detection
+  const allMessages = await db
+    .select({ role: messages.role, content: messages.content })
+    .from(messages)
+    .where(eq(messages.sessionId, sessionId))
+    .orderBy(asc(messages.createdAt));
+
+  // Step 1: Deterministic signal detection
+  const signals = detectAssessmentSignals(allMessages);
+
+  if (signals.evidenceMessages >= 2) {
+    if (signals.phq9Score >= 3 && !completedTypes.has("phq9")) {
+      sessionEmitter.emit(sessionId, {
+        event: "assessment.start",
+        data: { assessmentType: "phq9" },
+      });
+      return;
+    }
+    if (signals.gad7Score >= 3 && !completedTypes.has("gad7")) {
+      sessionEmitter.emit(sessionId, {
+        event: "assessment.start",
+        data: { assessmentType: "gad7" },
+      });
+      return;
+    }
+  }
+
+  // Step 2: Groq fallback for subtler cases
+  if (!env.GROQ_API_KEY) return;
+  if (userMessages.length < 6) return;
+
+  const recentMessages = await db
+    .select({ role: messages.role, content: messages.content })
+    .from(messages)
+    .where(eq(messages.sessionId, sessionId))
+    .orderBy(desc(messages.createdAt))
+    .limit(8);
+
+  const formatted = recentMessages
+    .reverse()
+    .map((m) => `${m.role}: ${m.content}`)
+    .join("\n\n");
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: ASSESSMENT_ELIGIBILITY_PROMPT },
+        { role: "user", content: formatted },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 150,
+      temperature: 0,
+    }),
+  });
+
+  if (!response.ok) return;
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const raw = data.choices?.[0]?.message?.content ?? "{}";
+
+  let result: { suggest?: boolean; type?: string; reason?: string };
+  try {
+    result = JSON.parse(raw) as typeof result;
+  } catch {
+    return;
+  }
+
+  const validTypes = new Set(["phq9", "gad7"]);
+  if (result.suggest && result.type && validTypes.has(result.type) && !completedTypes.has(result.type)) {
+    sessionEmitter.emit(sessionId, {
+      event: "assessment.start",
+      data: { assessmentType: result.type as "phq9" | "gad7" },
+    });
+  }
+}
+
+// ── Session Summary Generation ──────────────────────────────────
+
+/**
+ * Summarization prompt for generating session summaries.
+ * CRITICAL: Uses "wellness companion" framing, NEVER "therapist" or clinical language.
+ */
+const SUMMARY_PROMPT = `You are a summarization assistant for MindOverChatter, an AI wellness companion (NOT a therapist).
+
+Given a conversation between a user and their wellness companion, generate a structured summary in JSON format.
+
+Your response must be ONLY valid JSON with this exact structure:
+{
+  "content": "A 2-4 sentence narrative summary of what was discussed and any insights gained. Use warm, non-clinical language. Focus on the user's experience and progress.",
+  "themes": ["theme1", "theme2"],
+  "cognitive_patterns": ["pattern1", "pattern2"],
+  "action_items": ["item1", "item2"]
+}
+
+Rules:
+- "content": 2-4 sentences. Warm, empathetic tone. Describe what the user explored, not clinical observations.
+- "themes": 1-5 short topic labels (e.g., "work stress", "family relationships", "sleep concerns", "self-compassion").
+- "cognitive_patterns": 0-4 thinking patterns observed (e.g., "all-or-nothing thinking", "catastrophizing", "mind reading", "should statements"). Only include patterns clearly present in the conversation. Use everyday language, not DSM terminology.
+- "action_items": 0-3 concrete next steps or intentions the user expressed or agreed to explore. If none, use an empty array.
+
+NEVER:
+- Diagnose conditions
+- Use clinical/DSM terminology
+- Refer to the user as a "patient" or "client"
+- Include information not present in the conversation
+- Generate more than the requested fields`;
+
+/**
+ * Generate an AI-powered session summary, persist it to the database,
+ * send it to Mem0, and emit it via SSE.
+ *
+ * This function is designed to be called fire-and-forget with .catch().
+ * It will throw on failure so the caller can apply fallback logic.
+ */
+async function generateAndPersistSummary(
+  userId: string,
+  sessionId: string,
+  history: ConversationMessage[],
+): Promise<void> {
+  // Format conversation history for the summarization prompt
+  const conversationText = history
+    .map((msg) => `[${msg.role.toUpperCase()}]: ${msg.content}`)
+    .join("\n\n");
+
+  const fullPrompt = `${SUMMARY_PROMPT}\n\nConversation:\n${conversationText}`;
+
+  // Spawn Claude to generate the summary (collect full output, no SSE streaming)
+  console.log(`[summary] Generating summary for session ${sessionId} (${history.length} messages)`);
+  const rawResponse = await spawnClaudeStreaming(fullPrompt, () => {
+    // No-op callback — we just want the accumulated text, not streaming chunks
+  });
+
+  if (!rawResponse.trim()) {
+    throw new Error("Summary generation returned empty response");
+  }
+
+  // Parse the JSON response — Claude may wrap it in markdown code fences
+  let jsonStr = rawResponse.trim();
+
+  // Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+  const codeFenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeFenceMatch) {
+    jsonStr = codeFenceMatch[1]!.trim();
+  }
+
+  let parsed: {
+    content?: string;
+    themes?: string[];
+    cognitive_patterns?: string[];
+    action_items?: string[];
+  };
+
+  try {
+    parsed = JSON.parse(jsonStr) as typeof parsed;
+  } catch {
+    console.error(`[summary] Failed to parse summary JSON for session ${sessionId}:`, jsonStr);
+    throw new Error("Summary generation returned invalid JSON");
+  }
+
+  // Validate required fields
+  const content = parsed.content;
+  if (!content || typeof content !== "string") {
+    throw new Error("Summary missing 'content' field");
+  }
+
+  const themes = Array.isArray(parsed.themes)
+    ? parsed.themes.filter((t): t is string => typeof t === "string")
+    : [];
+  const cognitivePatterns = Array.isArray(parsed.cognitive_patterns)
+    ? parsed.cognitive_patterns.filter((p): p is string => typeof p === "string")
+    : [];
+  const actionItems = Array.isArray(parsed.action_items)
+    ? parsed.action_items.filter((a): a is string => typeof a === "string")
+    : [];
+
+  // Persist to session_summaries table
+  await db.insert(sessionSummaries).values({
+    userId,
+    sessionId,
+    level: "session",
+    content,
+    themes: themes.length > 0 ? themes : null,
+    cognitivePatterns: cognitivePatterns.length > 0 ? cognitivePatterns : null,
+    actionItems: actionItems.length > 0 ? actionItems : null,
+  });
+
+  console.log(`[summary] Persisted session summary for session ${sessionId}`);
+
+  // Send the real summary to Mem0 (replaces the old timestamp-only string)
+  summarizeSessionAsync(userId, sessionId, content);
+
+  // Emit a second SSE event with the summary so the UI can display it
+  // (the initial session.ended was already sent immediately)
+  sessionEmitter.emit(sessionId, {
+    event: "session.ended",
+    data: { summary: content },
+  });
 }
 
 // ── Export ────────────────────────────────────────────────────────
