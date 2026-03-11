@@ -3,10 +3,14 @@ import { Link } from "react-router";
 import { InnerLandscape, NextSteps } from "@/components/journey/insights-section.js";
 import { MoodTrajectory } from "@/components/journey/mood-trajectory.js";
 import { SessionTimeline } from "@/components/journey/session-timeline.js";
-import type { TimelineAssessment, TimelineMood, TimelineSession } from "@/stores/journey-store.js";
+import { api } from "@/lib/api.js";
+import type {
+  JourneyInsights,
+  TimelineAssessment,
+  TimelineMood,
+  TimelineSession,
+} from "@/stores/journey-store.js";
 import { useJourneyStore } from "@/stores/journey-store.js";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 export function JourneyPage() {
   const {
@@ -30,21 +34,15 @@ export function JourneyPage() {
       setError(null);
 
       try {
-        const [timelineRes, insightsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/journey/timeline?limit=50`),
-          fetch(`${API_BASE}/api/journey/insights`),
+        const [timelineData, insightsData] = await Promise.all([
+          api.getJourneyTimeline(50),
+          api.getJourneyInsights(),
         ]);
 
-        if (timelineRes.ok) {
-          const data = await timelineRes.json();
-          setTimeline(data.items);
-        }
+        setTimeline(timelineData.items);
         setLoadingTimeline(false);
 
-        if (insightsRes.ok) {
-          const data = await insightsRes.json();
-          setInsights(data);
-        }
+        setInsights(insightsData as JourneyInsights);
         setLoadingInsights(false);
       } catch {
         setError("Failed to load journey data. Please try again.");

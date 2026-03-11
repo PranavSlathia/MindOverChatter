@@ -12,9 +12,24 @@ import { db } from "../db/index.js";
 import { assessments, memories, moodLogs, sessionSummaries, sessions } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
 
+// ── Insights Shape ───────────────────────────────────────────────
+
+interface InsightsData {
+  clinicalUnderstanding: string;
+  userReflection: string;
+  actionItems: string[];
+  patterns: {
+    recurring_triggers: Array<{ id: string; content: string }>;
+    unresolved_threads: Array<{ id: string; content: string }>;
+    wins: Array<{ id: string; content: string }>;
+  };
+  moodTrend: { direction: "improving" | "stable" | "declining"; period: string };
+  cachedAt: string;
+}
+
 // ── Insights Cache ───────────────────────────────────────────────
 // In-memory cache with 1-hour TTL. Invalidated on new session end.
-let insightsCache: { data: unknown; cachedAt: Date } | null = null;
+let insightsCache: { data: InsightsData; cachedAt: Date } | null = null;
 const INSIGHTS_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export function invalidateInsightsCache() {

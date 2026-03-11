@@ -80,6 +80,26 @@ type EndSessionSuccess = InferResponseType<
 type SubmitAssessmentSuccess = InferResponseType<typeof client.api.assessments.$post, 201>;
 type SubmitEmotionSuccess = InferResponseType<typeof client.api.emotions.$post, 201>;
 type CreateMoodLogSuccess = InferResponseType<(typeof client.api)["mood-logs"]["$post"], 201>;
+type DeleteSessionSuccess = InferResponseType<
+  (typeof client.api.sessions)[":id"]["$delete"],
+  200
+>;
+type ResumeSessionSuccess = InferResponseType<
+  (typeof client.api.sessions)[":id"]["resume"]["$post"],
+  200
+>;
+type GetJourneyTimelineSuccess = InferResponseType<
+  typeof client.api.journey.timeline.$get,
+  200
+>;
+type GetJourneyInsightsSuccess = InferResponseType<
+  typeof client.api.journey.insights.$get,
+  200
+>;
+type GetJourneyAssessmentsSuccess = InferResponseType<
+  typeof client.api.journey.assessments.$get,
+  200
+>;
 
 // ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
@@ -185,24 +205,20 @@ export const api = {
     return response.blob();
   },
 
-  /** Delete a session. Backend route being implemented in parallel — uses plain fetch. */
-  deleteSession: async (sessionId: string): Promise<{ deleted: boolean }> => {
-    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
-      method: "DELETE",
+  deleteSession: async (sessionId: string): Promise<DeleteSessionSuccess> => {
+    const res = await client.api.sessions[":id"].$delete({
+      param: { id: sessionId },
     });
-    return handleResponse<{ deleted: boolean }>(response);
+    await throwIfError(res);
+    return (await res.json()) as DeleteSessionSuccess;
   },
 
-  /** Resume a session. Backend route being implemented in parallel — uses plain fetch. */
-  resumeSession: async (
-    sessionId: string,
-  ): Promise<{ sessionId: string; status: string; startedAt: string }> => {
-    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/resume`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+  resumeSession: async (sessionId: string): Promise<ResumeSessionSuccess> => {
+    const res = await client.api.sessions[":id"].resume.$post({
+      param: { id: sessionId },
     });
-    return handleResponse<{ sessionId: string; status: string; startedAt: string }>(response);
+    await throwIfError(res);
+    return (await res.json()) as ResumeSessionSuccess;
   },
 
   getUserProfile: async (): Promise<UserProfile> => {
@@ -222,5 +238,27 @@ export const api = {
     const res = await client.api.user.$patch({ json: body });
     await throwIfError(res);
     return (await res.json()) as UserProfile;
+  },
+
+  getJourneyTimeline: async (limit = 50, offset = 0): Promise<GetJourneyTimelineSuccess> => {
+    const res = await client.api.journey.timeline.$get({
+      query: { limit: String(limit), offset: String(offset) },
+    });
+    await throwIfError(res);
+    return (await res.json()) as GetJourneyTimelineSuccess;
+  },
+
+  getJourneyInsights: async (): Promise<GetJourneyInsightsSuccess> => {
+    const res = await client.api.journey.insights.$get();
+    await throwIfError(res);
+    return (await res.json()) as GetJourneyInsightsSuccess;
+  },
+
+  getJourneyAssessments: async (limit = 20, offset = 0): Promise<GetJourneyAssessmentsSuccess> => {
+    const res = await client.api.journey.assessments.$get({
+      query: { limit: String(limit), offset: String(offset) },
+    });
+    await throwIfError(res);
+    return (await res.json()) as GetJourneyAssessmentsSuccess;
   },
 };
