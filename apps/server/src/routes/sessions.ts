@@ -20,6 +20,11 @@ import {
   sendMessage as sdkSendMessage,
   endSdkSession,
 } from "../sdk/session-manager.js";
+import {
+  searchMemories,
+  addMemoriesAsync,
+  summarizeSessionAsync,
+} from "../services/memory-client.js";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -63,8 +68,18 @@ const app = new Hono()
   .post("/", async (c) => {
     const user = await getOrCreateUser();
 
-    // Create an SDK session (stub until Neura delivers real integration)
-    const sdkSessionId = await createSdkSession();
+    // Retrieve memories for session context (BLOCKING — returns [] on failure)
+    const rawMemories = await searchMemories(user.id, "user context and therapeutic goals");
+    const mappedMemories = rawMemories.map((m) => ({
+      content: m.content,
+      memoryType: m.memoryType,
+      confidence: m.confidence,
+    }));
+
+    // Create an SDK session with memory context
+    const sdkSessionId = await createSdkSession(
+      mappedMemories.length > 0 ? mappedMemories : undefined,
+    );
 
     const [session] = await db
       .insert(sessions)
@@ -181,7 +196,7 @@ const app = new Hono()
     }
 
     // Kick off streaming in the background — do not await
-    streamAiResponse(sessionId, sdkSessionId, text).catch((err) => {
+    streamAiResponse(sessionId, sdkSessionId, text, userMsg!.id, session.userId).catch((err) => {
       console.error(`AI streaming error for session ${sessionId}:`, err);
       sessionEmitter.emit(sessionId, {
         event: "ai.error",
@@ -294,6 +309,19 @@ const app = new Hono()
       })
       .where(eq(sessions.id, sessionId));
 
+    // Fire-and-forget: notify memory service about session end
+    // Reason is restricted to known values to prevent injection through persistent memory
+    const ALLOWED_REASONS = ["user_ended", "timeout", "inactivity", "beforeunload"] as const;
+    const rawReason = c.req.valid("json").reason ?? "user_ended";
+    const safeReason = ALLOWED_REASONS.includes(rawReason as typeof ALLOWED_REASONS[number])
+      ? rawReason
+      : "user_ended";
+    summarizeSessionAsync(
+      session.userId,
+      sessionId,
+      `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}`,
+    );
+
     // Notify SSE subscribers that the session ended
     sessionEmitter.emit(sessionId, {
       event: "session.ended",
@@ -318,6 +346,8 @@ async function streamAiResponse(
   sessionId: string,
   sdkSessionId: string,
   userMessage: string,
+  userMessageId: string,
+  userId: string,
 ): Promise<void> {
   const fullText = await sdkSendMessage(sdkSessionId, userMessage, (chunk) => {
     sessionEmitter.emit(sessionId, {
@@ -346,6 +376,12 @@ async function streamAiResponse(
     event: "ai.response_complete",
     data: { messageId: assistantMsg!.id },
   });
+
+  // Fire-and-forget: extract memories from the conversation turn
+  addMemoriesAsync(userId, sessionId, userMessageId, [
+    { role: "user", content: userMessage },
+    { role: "assistant", content: fullText },
+  ]);
 }
 
 // ── Export ────────────────────────────────────────────────────────

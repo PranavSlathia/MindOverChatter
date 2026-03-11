@@ -120,7 +120,13 @@ services:
     ports:
       - "8004:8004"
     environment:
-      - DATABASE_URL=postgresql://moc:password@db:5432/moc
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=moc
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_NAME=moc
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HF_HOME=/app/models
     depends_on:
       db:
         condition: service_healthy

@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
+    "mem0ai>=0.1.29,<0.2",
+    "psycopg2-binary>=2.9.9",
 ]
 
 [dependency-groups]

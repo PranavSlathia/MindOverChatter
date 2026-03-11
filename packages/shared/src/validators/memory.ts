@@ -34,6 +34,30 @@ export const MemorySchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+// ── Memory Service Response Validators ────────────────────────
+
+export const MemorySearchResultSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  memoryType: MemoryTypeSchema,
+  confidence: z.number().min(0).max(1),
+  relevance: z.number().min(0).max(1),
+  createdAt: z.string(),
+});
+
+export const MemoryAddedResultSchema = z.object({
+  id: z.string(),
+  supersededId: z.string().nullable(),
+  content: z.string(),
+  memoryType: MemoryTypeSchema,
+  confidence: z.number().min(0).max(1),
+  event: z.enum(["ADD", "UPDATE", "DELETE", "NONE"]),
+});
+
+// ── Inferred Types ──────────────────────────────────────────────
+
 export type MemoryType = z.infer<typeof MemoryTypeSchema>;
 export type SearchMemories = z.infer<typeof SearchMemoriesSchema>;
 export type Memory = z.infer<typeof MemorySchema>;
+export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
+export type MemoryAddedResult = z.infer<typeof MemoryAddedResultSchema>;
