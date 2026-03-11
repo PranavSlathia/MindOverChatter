@@ -11,7 +11,7 @@ import { assessments, sessions } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { sessionEmitter } from "../sse/emitter.js";
 import { computeSeverity, getNextScreener } from "./assessment-scoring.js";
-import { buildAssessmentContextBlock, buildFormulationText } from "./assessment-context.js";
+import { buildAssessmentContextBlock, buildFormulationText, SEVERITY_DESCRIPTIONS } from "./assessment-context.js";
 import { injectSessionContext } from "../sdk/session-manager.js";
 import { addMemoriesAsync } from "../services/memory-client.js";
 import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
@@ -105,12 +105,12 @@ const app = new Hono()
       })
       .returning();
 
-    // Emit SSE event for assessment completion
+    // Emit SSE event for assessment completion (human-readable severity for frontend)
     sessionEmitter.emit(sessionId, {
       event: "assessment.complete",
       data: {
         assessmentId: assessment!.id,
-        severity,
+        severity: SEVERITY_DESCRIPTIONS[severity],
         nextScreener,
       },
     });
@@ -135,6 +135,7 @@ const app = new Hono()
       { memoryType: "symptom_episode" },
     );
 
+    // totalScore is for internal tracking only — NEVER render in UI as a diagnostic indicator
     return c.json(
       {
         assessmentId: assessment!.id,

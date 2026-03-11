@@ -116,7 +116,7 @@ describe("buildFormulationText", () => {
     const text = buildFormulationText("phq9", "moderate", "iss_sleep");
     expect(text).toContain("Internal formulation");
     expect(text).toContain("PHQ-9 mood check-in");
-    expect(text).toContain("Severity: moderate");
+    expect(text).toContain("Severity: a moderate level of difficulty");
     expect(text).toContain("sleep quality screening recommended");
   });
 
@@ -124,7 +124,7 @@ describe("buildFormulationText", () => {
     const text = buildFormulationText("gad7", "mild", null);
     expect(text).toContain("Internal formulation");
     expect(text).toContain("GAD-7 anxiety check-in");
-    expect(text).toContain("Severity: mild");
+    expect(text).toContain("Severity: a mild level of difficulty");
     expect(text).not.toContain("recommended");
   });
 

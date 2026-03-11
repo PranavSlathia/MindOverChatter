@@ -63,7 +63,8 @@ export function buildFormulationText(
   nextScreener: AssessmentType | null,
 ): string {
   const label = ASSESSMENT_TYPE_LABELS[type];
-  let text = `Internal formulation: User completed ${label}. Severity: ${severity}.`;
+  const severityDesc = SEVERITY_DESCRIPTIONS[severity];
+  let text = `Internal formulation: User completed ${label}. Severity: ${severityDesc}.`;
 
   if (nextScreener) {
     const nextLabel = ASSESSMENT_TYPE_LABELS[nextScreener];
