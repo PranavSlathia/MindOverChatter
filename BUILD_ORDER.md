@@ -15,7 +15,7 @@
 **Agent**: Forge
 **Goal**: Working database, shared types, Docker Compose with all 7 services booting (even if services return 501)
 
-- Drizzle schema: `users`, `sessions`, `messages`, `memories`, `mood_logs`, `assessments`, `audit_log`
+- Drizzle schema: `user_profiles`, `sessions`, `messages`, `emotion_readings`, `mood_logs`, `assessments`, `memories`, `session_summaries`
 - pgvector extension enabled
 - Docker Compose: all 7 services with health checks
 - Shared Zod validators in `packages/shared`

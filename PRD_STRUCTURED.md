@@ -221,7 +221,7 @@ An AI-powered therapeutic journaling companion for Indian users, built as a mult
 
 #### 4.10 Session Lifecycle & End Triggers
 
-Sessions are bounded conversations. A session starts when the user sends their first message and ends via one of these triggers:
+Sessions are bounded conversations. A session is created via `POST /api/sessions` (which initializes the SDK context and loads memories), then the user sends messages via `POST /api/sessions/:id/messages`. A session ends via one of these triggers:
 
 1. **Explicit end**: User clicks "End Session" button in the UI → `POST /api/sessions/:id/end`
 2. **Inactivity timeout**: No user message for 30 minutes → server-side timer triggers end
