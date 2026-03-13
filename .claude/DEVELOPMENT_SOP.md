@@ -52,13 +52,19 @@ This document defines the standard development procedures for MindOverChatter, e
 
 ## 5. AI/SDK Changes (Neura)
 
-1. Session lifecycle: create → query (streaming) → end (summarize)
-2. Crisis detection: PreToolUse hook, runs on EVERY message
-3. Memory extraction: PostToolUse hook
-4. Context budget: ~120,000 tokens per session
-5. Skills: `.claude/skills/*.md` files
-6. Python services: FastAPI + uv, health endpoint required
-7. **Any crisis change → Vigil testing MANDATORY**
+1. Session lifecycle: `runOnStart` → query (streaming, with mid-session mode shifts) → `runOnEnd`
+2. **Hook registry**: all SOPs registered via `registerOnStart/registerOnEnd` in `hooks/session-hooks.ts`. `assertHookContract()` validates at startup. Never add imperative session-end logic to `sessions.ts` — add a hook instead.
+3. **onStart hooks** (sequential, all awaited): `memory-blocks-injection`, `therapy-plan-injection`
+4. **onEnd hooks**: `session-summary` (critical — user waits), then `formulation`, `therapy-plan`, `therapeutic-calibration` (background fire-and-forget)
+5. **Session mode**: initialised from therapy plan's `recommended_session_mode` at session start. `detectModeShift()` runs on every message (no LLM). Mode shift injects a context block into the SDK session.
+6. **Therapy plan versioning**: uses `pg_advisory_xact_lock(2, hashtext(userId))` + `UNIQUE(user_id, version)`. Never manually insert — always call `generateAndPersistTherapyPlan()`.
+7. **Named memory blocks**: `seedEmptyBlocks()` at first session. Rewritten via `upsertBlock()` at session end. Char limits enforced (500 for user/*, 800 for calibration).
+8. **Calibration safety**: always run `sanitizeForPrompt()` on inputs to Claude. Always run `isSafeCalibration()` on output before `upsertBlock()`. Unsafe output is silently discarded (previous value preserved).
+9. Crisis detection: runs on EVERY message before any response. Hard-coded response only.
+10. Context budget: ~120,000 tokens per session
+11. Skills: `.claude/skills/*.md` files
+12. Python services: FastAPI + uv, health endpoint required
+13. **Any crisis change → Vigil testing MANDATORY**
 
 ---
 

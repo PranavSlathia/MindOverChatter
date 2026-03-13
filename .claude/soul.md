@@ -177,9 +177,14 @@ working code. Each owns a distinct technology domain.
 **Neura owns:**
 - Claude Agent SDK integration (`apps/server/src/sdk/`)
 - Session manager (create, resume, end SDK sessions)
-- Hook registry (PreToolUse crisis detection, PostToolUse memory extraction)
+- Session lifecycle hook registry (`sdk/session-lifecycle.ts`) — `registerOnStart/registerOnEnd`, `runOnStart/runOnEnd`, `assertHookContract`
+- Concrete session hooks (`hooks/session-hooks.ts`) — memory-blocks-injection, therapy-plan-injection, session-summary, formulation, therapy-plan, therapeutic-calibration
+- 5-mode session system (`sdk/mode-blocks.ts`, `services/mode-detector.ts`) — detectModeShift, formatModeShiftBlock
+- Named memory blocks service (`services/memory-block-service.ts`) — upsertBlock, seedEmptyBlocks, char limit enforcement
+- Calibration safety (`hooks/calibration-safety.ts`) — sanitizeForPrompt, isSafeCalibration blocklist
+- Therapy plan service (`services/therapy-plan-service.ts`) — versioned generation with pg_advisory_xact_lock
+- Formulation service (`services/formulation-service.ts`) — algorithmic + Claude-generated wellbeing domains
 - Skill loader (therapeutic framework .md files)
-- MCP configuration (PostgreSQL MCP server)
 - Mem0 integration (memory extraction, retrieval, pgvector backend)
 - Python microservice development (`services/whisper/`, `services/emotion/`, `services/tts/`)
 - Therapeutic framework skills (CBT, MI-OARS, crisis protocol)
@@ -188,11 +193,15 @@ working code. Each owns a distinct technology domain.
 **Neura does NOT touch:** React components, Hono routes (unless SDK-specific), frontend state.
 
 **Key patterns Neura follows:**
-- Agent SDK session lifecycle: create -> query (streaming) -> end (summarize)
-- Crisis detection as PreToolUse hook (mandatory, non-negotiable)
-- Memory extraction as PostToolUse hook
+- Session lifecycle: `runOnStart` → query (streaming + mid-session mode shifts) → `runOnEnd`
+- **Never add imperative session logic to `sessions.ts`** — add a named hook to `session-hooks.ts` instead
+- `assertHookContract()` at server startup catches missing/misconfigured hooks before first request
+- onEnd order: `session-summary` (critical, awaited) → `formulation` → `therapy-plan` → `therapeutic-calibration` (all background)
+- Therapy plan versioning: `pg_advisory_xact_lock` + `UNIQUE(user_id, version)` — always call `generateAndPersistTherapyPlan()`, never raw insert
+- Calibration: always `sanitizeForPrompt()` inputs, always `isSafeCalibration()` on output before persistence
+- Crisis detection: runs on EVERY message, response is hard-coded never LLM-generated
 - Python services: FastAPI thin wrappers with uv dependency management
-- Skills as .claude/skills/*.md files loaded into SDK context
+- Skills as `.claude/skills/*.md` files loaded into SDK context
 - Context budget: ~120,000 tokens per session
 
 ---

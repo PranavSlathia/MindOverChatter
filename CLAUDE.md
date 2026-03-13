@@ -31,7 +31,7 @@ docker compose up -d      # Start all Docker services
 
 ## Schema Tables
 
-`user_profiles`, `sessions`, `messages`, `emotion_readings`, `mood_logs`, `assessments`, `memories`, `session_summaries`, `user_formulations`
+`user_profiles`, `sessions`, `messages`, `emotion_readings`, `mood_logs`, `assessments`, `memories`, `session_summaries`, `user_formulations`, `therapy_plans`, `memory_blocks`
 
 ## Key Architecture Decisions
 
@@ -43,6 +43,12 @@ docker compose up -d      # Start all Docker services
 - **Emotion signals are WEAK**: Face=0.3, Voice=0.5, Text=0.8 weight. Prompt follow-ups, never conclude state.
 - **Structured memory types**: profile_fact, relationship, goal, coping_strategy, recurring_trigger, life_event, symptom_episode, unresolved_thread, safety_critical, win
 - **Memory provenance**: Every memory has source_session_id, source_message_id, confidence, last_confirmed_at, superseded_by
+- **Session lifecycle hooks**: `registerOnStart/registerOnEnd` registry in `sdk/session-lifecycle.ts`. `assertHookContract()` runs at server startup and throws if any required hook is missing or has wrong priority. No SOP can be silently skipped.
+- **5-mode session system**: `follow_support | assess_map | deepen_history | challenge_pattern | consolidate_close`. Initialised from therapy plan at session start. Shifts mid-session via rule-based `detectModeShift()` (regex, no LLM). `follow_support` always beats `challenge_pattern`. Mode instructions injected into Claude context on shift.
+- **Named memory blocks**: 6 persistent text fields in `memory_blocks` table (`user/overview`, `user/goals`, `user/triggers`, `user/coping_strategies`, `user/relationships`, `companion/therapeutic_calibration`). Injected at session start, rewritten at session end.
+- **Therapeutic calibration**: Background hook after sessions with ≥4 turns. Claude rewrites `companion/therapeutic_calibration` block. Two-layer defence: `sanitizeForPrompt()` strips delimiters from inputs; `isSafeCalibration()` blocklist rejects unsafe output before persistence.
+- **Internal therapy plan**: Generated after every session end and every assessment. Versioned with `pg_advisory_xact_lock` + `UNIQUE(user_id, version)`. Never shown to user. Injected into system prompt at next session start via `therapy-plan-injection` onStart hook.
+- **onEnd hook order**: `session-summary` (critical, user waits) → `formulation` (background) → `therapy-plan` (background) → `therapeutic-calibration` (background)
 
 ## Therapeutic Safety (NON-NEGOTIABLE)
 

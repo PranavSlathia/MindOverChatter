@@ -12,72 +12,68 @@ Claude Agent SDK session lifecycle management for MindOverChatter's therapeutic 
 
 ## Session Lifecycle
 
-### 1. Create (Context Assembly)
+### 1. Create / Resume → `runOnStart`
 
-When a user starts or resumes a therapy session, the server assembles a context window before the first SDK call.
+`POST /api/sessions` (create) and `POST /api/sessions/:id/resume` both call `runOnStart({ userId, sdkSessionId })` after the SDK session is initialised. This runs two sequential hooks:
+
+**`memory-blocks-injection`** — loads all 6 named memory blocks from the `memory_blocks` table and injects them as a delimited block into the Claude context:
+- `user/overview`, `user/goals`, `user/triggers`, `user/coping_strategies`, `user/relationships` (500 chars each)
+- `companion/therapeutic_calibration` (800 chars) — self-updating communication style notes
+
+**`therapy-plan-injection`** — loads the latest `therapy_plans` row, formats it as an internal clinical block (mode instructions + directive authority + unexplored areas + natural callbacks), and injects it. Also calls `setSessionMode()` to initialise the in-memory mode tracker from `recommended_session_mode`.
 
 **Context budget (~120,000 tokens total):**
 
 | Component | Approx Tokens | Source |
 |---|---|---|
 | System prompt | ~2,000 | Static therapeutic persona + rules |
-| User profile | ~3,000 | Demographics, preferences, language, therapy goals |
+| Named memory blocks (6) | ~1,500 | `memory_blocks` table — persistent across sessions |
+| Therapy plan (internal) | ~2,000 | `therapy_plans` table — injected as clinical notes |
 | Session summaries (recent 3-5) | ~3,000 | Compressed summaries from previous sessions |
-| Mem0 memories | ~12,000 | Retrieved semantic memories relevant to current context (10-15 chunks) |
+| Mem0 memories | ~12,000 | Semantic search retrieval (10-15 chunks) |
 | Conversation history | ~96,000 | Messages from current session |
 | Response reserve | ~4,000 | Reserved for Claude's response generation |
 
-The system prompt establishes the therapeutic persona, framing rules (wellness companion, not therapist), language preferences (English/Hindi/Hinglish), and safety protocols. Mem0 memories are retrieved via semantic search against the user's current message to surface relevant past context.
+### 2. Query (Streaming) + Mid-Session Mode Shifts
 
-### 2. Query (Streaming via Async Generator)
+Each message goes through:
+1. **Crisis detection** (deterministic keyword match → Haiku classifier)
+2. **Mode shift detection** — `detectModeShift(text, currentMode, directiveAuthority)` — pure regex, no LLM, runs on every message
+3. If mode shift detected: `injectSessionContext(sdkSessionId, formatModeShiftBlock(newMode))` + `setSessionMode(sdkSessionId, newMode)`
+4. `streamAiResponse()` — SDK streaming, events forwarded as SSE
 
-The SDK conversation uses async generator streaming. Each `query()` call yields streaming events that are transformed and forwarded to the client.
+**5 session modes:**
 
-```ts
-const stream = conversation.query(userMessage);
+| Mode | When | Behavioural instruction |
+|------|------|------------------------|
+| `follow_support` | Distress / overwhelm | Follow, reflect, don't redirect. Presence is the intervention. |
+| `assess_map` | Stable, picture incomplete | Open curious questions. Map situation and impact. |
+| `deepen_history` | Engaged, ready | Explore roots and earlier experiences at user's pace. |
+| `challenge_pattern` | Insight readiness signals | Gentle reframes via "I wonder…" / "What if…" — invite, never lecture. |
+| `consolidate_close` | Goals largely established | Name progress, close open threads, orient toward what's next. |
 
-for await (const event of stream) {
-  switch (event.type) {
-    case "text_delta":
-      // Forward as SSE event: ai.chunk
-      await streamSSE.writeSSE({ event: "ai.chunk", data: JSON.stringify({ delta: event.text }) });
-      break;
-    case "thinking_delta":
-      // Forward as SSE event: ai.thinking
-      await streamSSE.writeSSE({ event: "ai.thinking", data: JSON.stringify({ delta: event.text }) });
-      break;
-    case "result":
-      // Forward as SSE event: ai.response_complete
-      await streamSSE.writeSSE({ event: "ai.response_complete", data: JSON.stringify({ message: event.text }) });
-      break;
-  }
-}
-```
+`follow_support` always overrides `challenge_pattern`. Once in `follow_support`, session won't shift to `challenge_pattern` until mode resets. `directive_authority: "low"` in the therapy plan clamps challenge-type shifts regardless of message content.
 
-### 3. End (Summarize + Update Memory)
+### 3. End → `runOnEnd`
 
-When the session ends (user exits or timeout), the server:
+`POST /api/sessions/:id/end` emits `session.ending` SSE event, then calls `runOnEnd(ctx)`, then emits `session.ended`. The SSE ordering ensures the UI shows the closing state only after all critical work is done.
 
-1. Generates a session summary using a separate SDK call with a summarization prompt
-2. Extracts key facts and emotional themes for Mem0 storage
-3. Stores the summary in the sessions table for next-session context
-4. Updates the user's mood trajectory and session metadata
+**onEnd hook execution order:**
 
-## Hook Architecture
+| Hook | Priority | Behaviour |
+|------|----------|-----------|
+| `session-summary` | **critical** | Awaited before `runOnEnd` returns. Claude call → structured JSON → `session_summaries` table. User waits (~5-15s). |
+| `formulation` | background | Fire-and-forget after critical hooks. Regenerates wellbeing formulation from all evidence. |
+| `therapy-plan` | background | Runs after formulation. `pg_advisory_xact_lock` prevents races. New version appended (never overwritten). |
+| `therapeutic-calibration` | background | Only fires if session had ≥4 turns. Rewrites `companion/therapeutic_calibration` memory block. Safety-gated before persistence. |
 
-Hooks run on every tool use within the SDK conversation, providing safety and extraction layers.
+**assertHookContract** runs at server startup (`index.ts`) and throws synchronously if any required hook is missing or has wrong priority. A misconfigured hook registry is caught before the first request, not at runtime.
 
-### PreToolUse Hook: Crisis Detection
+## Calibration Safety
 
-Runs BEFORE any tool execution. Scans the user's message for crisis indicators. If detected, halts normal flow and returns the hard-coded crisis response immediately. See the `therapeutic-safety` skill for the full crisis detection pipeline.
-
-### PostToolUse Hooks
-
-Run AFTER tool execution completes:
-
-- **Emotion Extraction:** Classifies the emotional tone of the user's message (joy, sadness, anger, anxiety, neutral, etc.) and logs it to the session timeline.
-- **Fact Extraction:** Identifies new personal facts, preferences, or life events mentioned by the user and stores them in Mem0 for long-term memory.
-- **Audit Logging:** Records every tool invocation, input/output, and timing to the audit log table for compliance and debugging.
+Two-layer prompt injection defence in `hooks/calibration-safety.ts`:
+- `sanitizeForPrompt(text)` — strips `---BEGIN/---END` delimiters and `===` headers from both the existing calibration notes and session transcript before interpolation
+- `isSafeCalibration(text)` — blocklist of 20 targeted regex patterns (safety bypass directives, therapist identity claims, clinical diagnostic terms, crisis-adjacent content). Unsafe output is silently discarded; previous block value is preserved.
 
 ## MCP Configuration
 

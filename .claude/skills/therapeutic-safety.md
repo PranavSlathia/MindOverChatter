@@ -195,6 +195,10 @@ For every release or significant prompt change, verify:
 - [ ] Framing rules are present in the system prompt
 - [ ] No response claims to be a therapist or diagnoses conditions
 - [ ] Professional help recommendation triggers are active
-- [ ] Audit log captures all tool invocations and safety events
 - [ ] Hinglish crisis detection tested with native speaker review
 - [ ] Session timeout triggers graceful summary and memory save
+- [ ] `assertHookContract()` passes at server startup (all 4 onEnd hooks registered with correct priorities)
+- [ ] Calibration hook: `sanitizeForPrompt()` applied to both inputs before Claude call
+- [ ] Calibration hook: `isSafeCalibration()` gates output before `upsertBlock()` — unsafe output never persisted
+- [ ] Therapy plan is marked internal-only — never surfaced to user as diagnosis or treatment plan
+- [ ] Session mode system: `follow_support` always overrides `challenge_pattern` — distress never escalated into insight-challenging mode
