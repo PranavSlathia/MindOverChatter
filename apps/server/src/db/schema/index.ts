@@ -8,3 +8,5 @@ export * from "./assessments";
 export * from "./memories";
 export * from "./session-summaries";
 export * from "./user-formulations";
+export * from "./therapy-plans";
+export * from "./memory-blocks";

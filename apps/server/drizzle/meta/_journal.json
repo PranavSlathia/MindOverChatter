@@ -71,6 +71,27 @@
       "when": 1773397673862,
       "tag": "0009_ivfflat_vector_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773408300093,
+      "tag": "0010_broad_dazzler",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773413696556,
+      "tag": "0011_colossal_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1773414720317,
+      "tag": "0012_amusing_darkstar",
+      "breakpoints": true
     }
   ]
 }

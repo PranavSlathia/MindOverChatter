@@ -4,6 +4,21 @@ import { env } from "./env.js";
 import { app } from "./routes/index.js";
 import { startOrphanSweep } from "./session/orphan-sweep.js";
 import { startFormulationScheduler } from "./services/formulation-service.js";
+import { registerSessionHooks } from "./hooks/session-hooks.js";
+import { assertHookContract } from "./sdk/session-lifecycle.js";
+import { spawnClaudeStreaming } from "./sdk/session-manager.js";
+
+registerSessionHooks();
+// Fail fast if any required SOP hook is missing or has the wrong execution class
+assertHookContract({
+  onStart: ["memory-blocks-injection", "therapy-plan-injection"],
+  onEnd: [
+    { name: "session-summary", priority: "critical" },
+    { name: "formulation", priority: "background" },
+    { name: "therapy-plan", priority: "background" },
+    { name: "therapeutic-calibration", priority: "background" },
+  ],
+});
 
 // ── Claude CLI auth check ────────────────────────────────────────
 // Verify the local `claude` CLI is installed and authenticated
@@ -42,6 +57,24 @@ const stopSweep = startOrphanSweep();
 
 // Start background formulation regeneration (runs every 2 hours)
 startFormulationScheduler();
+
+// Fire-and-forget: prime OS page cache for claude binary so first real
+// session response has lower latency. 2s delay ensures the server is
+// fully ready before the warm-up spawn starts.
+setTimeout(() => {
+  console.log("[pre-warm] Starting Claude CLI warm-up...");
+  const start = Date.now();
+  spawnClaudeStreaming("Respond with: OK", () => {})
+    .then(() => {
+      console.log(`[pre-warm] Claude CLI warm-up complete (${Date.now() - start}ms)`);
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        "[pre-warm] Warm-up failed (non-fatal):",
+        err instanceof Error ? err.message : err,
+      );
+    });
+}, 2000);
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
