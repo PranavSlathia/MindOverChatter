@@ -20,3 +20,6 @@ __pycache__/
 
 # Dev scripts
 tmux-dev.sh
+
+# Research reports (contain session data — never commit)
+apps/server/src/research/reports/

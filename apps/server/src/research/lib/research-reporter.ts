@@ -4,19 +4,17 @@
 //
 // NOTE: research/reports/ is gitignored per Rule 4 in research/README.md.
 
-import { writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExperimentAResult } from "../experiments/experiment-a-calibration.js";
 import type { ExperimentBResult } from "../experiments/experiment-b-hypotheses.js";
 import type { DirectionComplianceResult } from "../experiments/experiment-c-direction.js";
+import type { ExperimentDResult } from "../experiments/experiment-d-replay.js";
 
 // ── Reports directory ─────────────────────────────────────────────
 
-const REPORTS_DIR = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../reports",
-);
+const REPORTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../reports");
 
 function ensureReportsDir(): void {
   mkdirSync(REPORTS_DIR, { recursive: true });
@@ -89,7 +87,7 @@ Safety passed: ${result.safetyPassed ? "YES" : "NO"}
 
 ## Proposed Calibration Content
 
-${result.proposedContent.trim() !== "" ? "```\n" + result.proposedContent + "\n```" : "_No content proposed (gate did not reach Claude call or Claude returned empty response)._"}
+${result.proposedContent.trim() !== "" ? `\`\`\`\n${result.proposedContent}\n\`\`\`` : "_No content proposed (gate did not reach Claude call or Claude returned empty response)._"}
 
 ## Recommendation
 
@@ -182,7 +180,10 @@ ${deltaRows}
 
 // ── Experiment C ─────────────────────────────────────────────────
 
-export function formatReportC(result: DirectionComplianceResult): { json: object; markdown: string } {
+export function formatReportC(result: DirectionComplianceResult): {
+  json: object;
+  markdown: string;
+} {
   const json = {
     experiment: "c",
     experiment_version: "1.0.0",
@@ -200,9 +201,10 @@ export function formatReportC(result: DirectionComplianceResult): { json: object
     data_gaps: result.dataGaps,
   };
 
-  const directiveList = result.activeDirectives.length > 0
-    ? result.activeDirectives.map((d) => `- ${d}`).join("\n")
-    : "_No directives found in therapeutic-direction.md._";
+  const directiveList =
+    result.activeDirectives.length > 0
+      ? result.activeDirectives.map((d) => `- ${d}`).join("\n")
+      : "_No directives found in therapeutic-direction.md._";
 
   const gapList = result.dataGaps.map((g) => `- ${g}`).join("\n");
 
@@ -230,11 +232,154 @@ ${directiveList}
 
 ${gapList}
 
-_Note: Compliance scores are heuristic proxies. A score of 0.5 indicates baseline (no alignment signal). 0.75 indicates mode alignment only. 1.0 indicates both mode alignment and directive keyword match in summary._
+_Note: Compliance scores are heuristic proxies. A score of 0.5 indicates baseline (no alignment signal). 0.75 indicates either mode alignment OR directive keyword match in session summary themes/action items (whichever contributed the +0.25). 1.0 indicates both mode alignment AND directive keyword match._
 `;
 
   ensureReportsDir();
   const filename = `${formatDateYMD(result.ranAt)}_experiment-c_${result.runId.slice(0, 8)}.md`;
+  const filepath = resolve(REPORTS_DIR, filename);
+  writeFileSync(filepath, markdown, "utf-8");
+
+  return { json, markdown };
+}
+
+// ── Experiment D ─────────────────────────────────────────────────
+
+export function formatReportD(result: ExperimentDResult): { json: object; markdown: string } {
+  const trajectoryObj = result.gate3PhqGadTrajectory as Record<string, unknown> | null;
+  const trajectoryDirection =
+    trajectoryObj && typeof trajectoryObj.direction === "string"
+      ? trajectoryObj.direction
+      : "unknown";
+
+  const candidateScoreDisplay = result.gate2Score !== null ? result.gate2Score.toFixed(1) : "N/A";
+
+  const baselineScoreDisplay = (() => {
+    // Only include baseline scores from turns that passed Gate 1.
+    // Gate 1 failures indicate unsafe behaviour — including their Gate 2
+    // scores would contaminate the baseline mean.
+    const baselineTotals = result.turnScores
+      .filter((ts) => ts.gate1Checks.passed)
+      .map((ts) => ts.baselineGate2Score)
+      .filter((s): s is number => s !== null);
+    if (baselineTotals.length === 0) return "N/A";
+    const mean = baselineTotals.reduce((a, b) => a + b, 0) / baselineTotals.length;
+    return mean.toFixed(1);
+  })();
+
+  const recommendation = (() => {
+    if (result.gateDecision === "insufficient_sessions") {
+      return "WAIT — insufficient session data. Run more sessions before evaluating direction files.";
+    }
+    if (result.gateDecision === "discard") {
+      if (!result.gate1Passed) {
+        return "DISCARD — candidate failed safety Gate 1. Do not promote. Fix safety violations first.";
+      }
+      return `DISCARD — candidate scored ${candidateScoreDisplay} vs baseline ${baselineScoreDisplay}. Gate 2 threshold not met.`;
+    }
+    return `PROMOTE — candidate scores ${candidateScoreDisplay} vs baseline ${baselineScoreDisplay}. Review diff before editing .claude/skills/therapeutic-direction.md.`;
+  })();
+
+  const json = {
+    experiment: "d",
+    experiment_version: "1.0.0",
+    run_id: result.runId,
+    ran_at: result.ranAt.toISOString(),
+    direction_versions: {
+      baseline: result.baselineDirectionVersion,
+      candidate: result.candidateDirectionVersion,
+    },
+    sessions_used: result.sessionsUsed,
+    golden_case_count: result.goldenCaseCount,
+    total_turns_evaluated: result.totalTurnsEvaluated,
+    gate1: {
+      passed: result.gate1Passed,
+      fail_reason: result.gate1FailReason,
+    },
+    gate2: {
+      score: result.gate2Score,
+      passed: result.gate2Passed,
+      breakdown: result.gate2Breakdown,
+      baseline_score: baselineScoreDisplay === "N/A" ? null : Number(baselineScoreDisplay),
+    },
+    gate3: {
+      trajectory_direction: trajectoryDirection,
+      flagged_for_review: result.gate3FlaggedForReview,
+    },
+    gate_decision: result.gateDecision,
+    gate_reason: result.gateReason,
+    recommendation,
+    promote_command: `POST /api/research/promote {"runId": "${result.runId}", "experiment": "d"}`,
+  };
+
+  const breakdownRows = result.gate2Breakdown
+    ? [
+        `| warmth_pacing | ${result.gate2Breakdown.warmth_pacing.toFixed(1)} / 20 |`,
+        `| appropriate_steering | ${result.gate2Breakdown.appropriate_steering.toFixed(1)} / 20 |`,
+        `| depth_without_over_interpretation | ${result.gate2Breakdown.depth_without_over_interpretation.toFixed(1)} / 20 |`,
+        `| resistance_rupture_handling | ${result.gate2Breakdown.resistance_rupture_handling.toFixed(1)} / 20 |`,
+        `| specificity | ${result.gate2Breakdown.specificity.toFixed(1)} / 20 |`,
+      ].join("\n")
+    : "_No Gate 2 scores computed._";
+
+  const markdown = `# Experiment D — Offline Replay Harness
+
+**Run ID**: \`${result.runId}\`
+**Ran at**: ${result.ranAt.toISOString()}
+**User ID**: \`${result.userId}\`
+**Baseline version**: \`${result.baselineDirectionVersion}\`
+**Candidate version**: \`${result.candidateDirectionVersion}\`
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Sessions used | ${result.sessionsUsed} |
+| Golden cases | ${result.goldenCaseCount} |
+| Turns evaluated | ${result.totalTurnsEvaluated} |
+
+## Gate 1 — Safety
+
+| Field | Value |
+|-------|-------|
+| Passed | ${result.gate1Passed ? "YES" : "NO"} |
+| Fail reason | ${result.gate1FailReason ?? "—"} |
+
+## Gate 2 — Quality Scoring
+
+| Field | Value |
+|-------|-------|
+| Candidate score | ${candidateScoreDisplay} / 100 |
+| Baseline score | ${baselineScoreDisplay} / 100 |
+| Passed | ${result.gate2Passed === null ? "N/A" : result.gate2Passed ? "YES" : "NO"} |
+
+### Score Breakdown (mean over ${result.totalTurnsEvaluated} turns)
+
+| Dimension | Score |
+|-----------|-------|
+${breakdownRows}
+
+## Gate 3 — Outcome Trajectory
+
+| Field | Value |
+|-------|-------|
+| Trajectory direction | ${trajectoryDirection} |
+| Flagged for review | ${result.gate3FlaggedForReview ? "YES" : "no"} |
+${result.gate3Note ? `| Note | ${result.gate3Note} |` : ""}
+
+## Final Decision
+
+**${result.gateDecision.toUpperCase()}** — ${result.gateReason}
+
+## Recommendation
+
+**${recommendation}**
+
+${result.gateDecision === "keep" ? `\`\`\`\nPOST /api/research/promote\n${JSON.stringify({ runId: result.runId, experiment: "d" }, null, 2)}\n\`\`\`` : ""}
+`;
+
+  ensureReportsDir();
+  const filename = `${formatDateYMD(result.ranAt)}_experiment-d_${result.runId.slice(0, 8)}.md`;
   const filepath = resolve(REPORTS_DIR, filename);
   writeFileSync(filepath, markdown, "utf-8");
 

@@ -3,21 +3,30 @@
 // All functions accept a db instance injected from the caller so they
 // are testable in isolation and carry no implicit DB connection.
 
-import { desc, eq, and } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "../../db/schema/index";
 import {
-  memoryBlocks,
   assessments,
-  therapyPlans,
+  memoryBlocks,
+  messages,
+  moodLogs,
   sessionSummaries,
   sessions,
-  moodLogs,
+  therapyPlans,
 } from "../../db/schema/index";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
 // ── Row types ────────────────────────────────────────────────────
+
+export interface SessionMessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: Date;
+  sessionId: string;
+}
 
 export interface AssessmentRow {
   id: string;
@@ -30,8 +39,18 @@ export interface AssessmentRow {
 export interface TherapyPlanRow {
   id: string;
   version: number;
-  workingHypotheses: Array<{ hypothesis: string; confidence: number; evidence: string; internal_only: boolean }>;
-  therapeuticGoals: Array<{ goal: string; description: string; progress: string; visible_label: string }>;
+  workingHypotheses: Array<{
+    hypothesis: string;
+    confidence: number;
+    evidence: string;
+    internal_only: boolean;
+  }>;
+  therapeuticGoals: Array<{
+    goal: string;
+    description: string;
+    progress: string;
+    visible_label: string;
+  }>;
   recommendedSessionMode: string | null;
   createdAt: Date;
 }
@@ -163,9 +182,7 @@ export async function getTherapyPlanHistory(
       workingHypotheses: hypotheses,
       therapeuticGoals: goals,
       recommendedSessionMode:
-        typeof plan.recommended_session_mode === "string"
-          ? plan.recommended_session_mode
-          : null,
+        typeof plan.recommended_session_mode === "string" ? plan.recommended_session_mode : null,
       createdAt: r.createdAt,
     };
   });
@@ -195,12 +212,7 @@ export async function getSessionSummariesWithSessions(
     })
     .from(sessionSummaries)
     .innerJoin(sessions, eq(sessionSummaries.sessionId, sessions.id))
-    .where(
-      and(
-        eq(sessionSummaries.userId, userId),
-        eq(sessionSummaries.level, "session"),
-      ),
-    )
+    .where(and(eq(sessionSummaries.userId, userId), eq(sessionSummaries.level, "session")))
     .orderBy(desc(sessions.startedAt))
     .limit(limit);
 
@@ -220,11 +232,7 @@ export async function getSessionSummariesWithSessions(
 /**
  * Returns the most recent N mood logs for the user ordered by createdAt DESC.
  */
-export async function getMoodLogs(
-  db: Db,
-  userId: string,
-  limit = 20,
-): Promise<MoodLogRow[]> {
+export async function getMoodLogs(db: Db, userId: string, limit = 20): Promise<MoodLogRow[]> {
   const rows = await db
     .select({
       id: moodLogs.id,
@@ -248,15 +256,38 @@ export async function getMoodLogs(
 }
 
 /**
+ * Returns all messages for a session in chronological order (oldest first).
+ * Useful for turn sampling in the offline replay harness (Experiment D).
+ */
+export async function getSessionMessages(db: Db, sessionId: string): Promise<SessionMessageRow[]> {
+  const rows = await db
+    .select({
+      id: messages.id,
+      role: messages.role,
+      content: messages.content,
+      createdAt: messages.createdAt,
+      sessionId: messages.sessionId,
+    })
+    .from(messages)
+    .where(eq(messages.sessionId, sessionId))
+    .orderBy(asc(messages.createdAt));
+
+  return rows.map((r) => ({
+    id: r.id,
+    role: r.role as "user" | "assistant",
+    content: r.content,
+    createdAt: r.createdAt,
+    sessionId: r.sessionId,
+  }));
+}
+
+/**
  * Returns completed sessions for the user ordered by startedAt DESC.
  * Note: turnCount is not persisted in the sessions table; it is derived from
  * session_summaries existence as a proxy (0 or 1+). Mode is not persisted
  * per-session and is returned as null — use therapy plan recommendations as proxy.
  */
-export async function getSessionsWithMode(
-  db: Db,
-  userId: string,
-): Promise<SessionRow[]> {
+export async function getSessionsWithMode(db: Db, userId: string): Promise<SessionRow[]> {
   const rows = await db
     .select({
       id: sessions.id,
@@ -265,12 +296,7 @@ export async function getSessionsWithMode(
       status: sessions.status,
     })
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.userId, userId),
-        eq(sessions.status, "completed"),
-      ),
-    )
+    .where(and(eq(sessions.userId, userId), eq(sessions.status, "completed")))
     .orderBy(desc(sessions.startedAt));
 
   return rows.map((r) => ({

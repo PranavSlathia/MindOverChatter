@@ -15,7 +15,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "../../db/index.js";
 import { researchDirectionCompliance } from "../db/schema/index.js";
-import type { SessionRow, SessionSummaryWithSession, TherapyPlanRow } from "../lib/read-only-queries.js";
+import type {
+  SessionRow,
+  SessionSummaryWithSession,
+  TherapyPlanRow,
+} from "../lib/read-only-queries.js";
 import {
   getSessionSummariesWithSessions,
   getSessionsWithMode,
@@ -30,10 +34,7 @@ const EXPERIMENT_VERSION = "1.0.0";
 // Resolved relative to the monorepo root (4 levels up from this file:
 // apps/server/src/research/experiments/ → root).
 
-const SKILLS_DIR = resolve(
-  new URL(".", import.meta.url).pathname,
-  "../../../../../.claude/skills",
-);
+const SKILLS_DIR = resolve(new URL(".", import.meta.url).pathname, "../../../../../.claude/skills");
 
 const DIRECTION_FILE = resolve(SKILLS_DIR, "therapeutic-direction.md");
 
@@ -161,10 +162,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
   }
 
   // Step 2 — hash content for version tracking
-  const directionVersion = createHash("sha256")
-    .update(directionContent)
-    .digest("hex")
-    .slice(0, 8);
+  const directionVersion = createHash("sha256").update(directionContent).digest("hex").slice(0, 8);
 
   // Step 3 — parse directives
   const activeDirectives = parseDirectives(directionContent);
@@ -177,9 +175,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
   ]);
 
   // Sort plans chronologically for findActivePlanForSession
-  const chronPlans = [...plans].sort(
-    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-  );
+  const chronPlans = [...plans].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
   // Build summary lookup by sessionId
   const summaryBySessionId = new Map<string, SessionSummaryWithSession>();
@@ -248,8 +244,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
   }
 
   const sessionsAnalyzed = completedSessions.length;
-  const meanComplianceScore =
-    sessionsAnalyzed > 0 ? totalComplianceScore / sessionsAnalyzed : 0;
+  const meanComplianceScore = sessionsAnalyzed > 0 ? totalComplianceScore / sessionsAnalyzed : 0;
 
   return {
     runId,

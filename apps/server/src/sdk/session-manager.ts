@@ -601,7 +601,7 @@ const DEFAULT_SKILLS_DIR = resolve(
 
 /**
  * Load therapeutic skill files from disk. Files matching
- * `probing-*.md` and `assessment-flow.md` are read and cached.
+ * `probing-*.md`, `assessment-flow.md`, and `therapeutic-direction.md` are read and cached.
  *
  * This is designed to run ONCE at server startup. Subsequent calls
  * return the cached result.
@@ -627,7 +627,10 @@ export function loadSkillFiles(skillsDir?: string): Map<string, string> {
   try {
     const entries = readdirSync(dir);
     const targetFiles = entries.filter(
-      (f) => (f.startsWith("probing-") && f.endsWith(".md")) || f === "assessment-flow.md",
+      (f) =>
+        (f.startsWith("probing-") && f.endsWith(".md")) ||
+        f === "assessment-flow.md" ||
+        f === "therapeutic-direction.md",
     );
 
     for (const file of targetFiles) {
@@ -650,10 +653,12 @@ export function loadSkillFiles(skillsDir?: string): Map<string, string> {
  * Select relevant skill file contents based on the user's formulation state.
  *
  * Rules:
- * - No formulation (new user) -> only assessment-flow.md
+ * - No formulation (new user) -> only assessment-flow.md + therapeutic-direction.md
  * - With formulation -> match domain signals & presenting theme to probing skills
  * - Always include assessment-flow.md
  * - Cap at 2 probing skills + assessment-flow (3 total max)
+ * - Always include therapeutic-direction.md last, wrapped with a mutable-direction header
+ *   so Claude can distinguish it from the immutable skill files above it.
  *
  * @param allSkills - Map from loadSkillFiles()
  * @param formulation - Latest formulation snapshot, or null for new users
@@ -669,9 +674,18 @@ export function selectRelevantSkills(
   // Always include assessment-flow if available
   const assessmentContent = allSkills.get("assessment-flow.md");
 
+  // therapeutic-direction.md is always injected last.
+  // It is wrapped in a distinct header to signal to Claude that this block is
+  // Operator-editable and supersedes any conflicting style guidance above it.
+  const rawDirection = allSkills.get("therapeutic-direction.md");
+  const directionContent = rawDirection
+    ? `=== CURRENT THERAPEUTIC DIRECTION (Operator-editable, read last) ===\n${rawDirection}\n=== END THERAPEUTIC DIRECTION ===`
+    : null;
+
   if (!formulation) {
-    // New user — only assessment-flow
-    return assessmentContent ? [assessmentContent] : [];
+    // New user — assessment-flow + direction only
+    const base = assessmentContent ? [assessmentContent] : [];
+    return directionContent ? [...base, directionContent] : base;
   }
 
   // ── Domain signal matching from activeStates ──────────────────
@@ -736,13 +750,14 @@ export function selectRelevantSkills(
   // ── Cap at 2 probing skills ───────────────────────────────────
   const probingFiles = [...selected].slice(0, 2);
 
-  // Build final content array
+  // Build final content array: probing → assessment-flow → therapeutic-direction
   const result: string[] = [];
   for (const filename of probingFiles) {
     const content = allSkills.get(filename);
     if (content) result.push(content);
   }
   if (assessmentContent) result.push(assessmentContent);
+  if (directionContent) result.push(directionContent);
 
   return result;
 }

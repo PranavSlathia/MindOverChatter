@@ -32,6 +32,17 @@
 - GET /api/user → 200, `{ id, createdAt, displayName (nullable) }`
 - GET /api/mood-logs → 200, `{ entries: [] }`
 
+### Research sandbox test patterns (established 2026-03-14)
+- Invariant tests: read source files via `readFileSync` + check `extractImportLines()` NOT full file
+  content. Comment strings like "INVARIANT: Does NOT import upsertBlock" will false-positive if you
+  search the whole file. Scope checks to import lines only.
+- `promote.ts` Guard 2 message uses "Already promoted" (capital A), not "already promoted".
+- vi.mock() factories are hoisted — variables used inside factories MUST be declared via `vi.hoisted()`
+  otherwise "Cannot access before initialization" ReferenceError.
+- Drizzle chainable mock for select: `.select().from().where().orderBy().limit()` — each must return
+  the next link in the chain. After `vi.clearAllMocks()`, restore the chain manually in afterEach.
+- Test files at: `apps/server/src/research/__tests__/`
+
 ## Edge Cases
 
 ### Assessments are NOT a separate route
@@ -53,3 +64,14 @@ UI baseline test confirms the mount point exists and the page is healthy.
 718 unit tests passing as of Phase 5. Crisis detection is covered at the unit level.
 E2E crisis path requires: Docker up + backend + live Claude CLI session.
 Current smoke suite establishes structural baseline; full crisis E2E is Phase 7 work.
+
+### Pre-existing failures as of 2026-03-14 (2 tests)
+`session-hooks-calibration.test.ts`: 2 tests fail — "does not call upsertBlock when
+spawnClaudeStreaming returns a string longer than 800 chars" and same for empty string.
+Both expect `spawnClaudeStreaming` called 2 times but get 3 calls. Pre-existing before
+research sandbox test suite was added.
+
+### Infrastructure fix: picomatch@4.0.3 scan.js corruption (2026-03-14)
+`vitest run` crashed with "scan is not a function". Cause: picomatch@4.0.3 `scan.js` was
+a zero-export object `{}` in pnpm store (corrupted extraction). Fix: `pnpm install --force`
+after `pnpm store prune`. This re-extracts all packages fresh. Not a code bug.

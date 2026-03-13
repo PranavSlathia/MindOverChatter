@@ -50,6 +50,36 @@ export function isSafeCalibration(text: string): boolean {
   return !CALIBRATION_BLOCKLIST.some((pattern) => pattern.test(text));
 }
 
+// ── Calibration refusal / meta-response detection ─────────────────
+// Claude occasionally refuses to generate calibration content or returns
+// a meta-commentary essay instead of calibration notes. These patterns
+// identify non-calibration output that must be discarded.
+// Used by both the evaluator (experiment-a-calibration.ts) and the
+// promotion guard (promote.ts) to enforce symmetric safety checks.
+
+const REFUSAL_PATTERNS: RegExp[] = [
+  /\bi cannot\b/i,
+  /\bi can't\b/i,
+  /\bi'm not able\b/i,
+  /\bi am not able\b/i,
+  /\bi'm unable\b/i,
+  /\bi am unable\b/i,
+  /\bi should not\b/i,
+  /\bi shouldn't\b/i,
+  /\bas an ai\b/i,
+  /\bi don't have access\b/i,
+  /\bi'm not going to\b/i,
+  /\bwould not be appropriate\b/i,
+  /\bi need to clarify\b/i,
+  /\bI must clarify\b/i,
+  /\bthis request\b/i,
+  /\bI must decline\b/i,
+];
+
+export function isRefusalCalibration(text: string): boolean {
+  return REFUSAL_PATTERNS.some((re) => re.test(text));
+}
+
 // ── User memory block safety blocklist ────────────────────────────
 // Guards the five user/* blocks (overview, goals, triggers, coping_strategies,
 // relationships). These blocks are injected into every session start context,

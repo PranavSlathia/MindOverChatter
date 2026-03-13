@@ -19,6 +19,37 @@
 - **0000_round_makkari.sql**: Phase 0 foundation. 8 tables, 8 enums, 11 FKs.
   - Tables: user_profiles, sessions, messages, emotion_readings, mood_logs, assessments, memories, session_summaries
   - All vector columns: `vector(1024)` for BAAI/bge-m3 embeddings
+- **0013_research_tables.sql**: Research isolated sandbox. 3 tables, check constraint on gate_decision.
+  - Tables: research_calibration_proposals, research_hypothesis_simulations, research_direction_compliance
+  - Generated programmatically via drizzle-kit/api (CLI requires TTY — see Migration Protocol below)
+
+## Research Sandbox Architecture
+
+- Schema directory: `apps/server/src/research/db/schema/` (separate from live schema)
+- Research barrel `research/db/schema/index.ts` must NEVER be imported by `apps/server/src/db/schema/index.ts`
+- `drizzle.config.ts` schema array: `["./src/db/schema/*.ts", "./src/research/db/schema/*.ts"]`
+- `apps/server/src/research/reports/` is gitignored (session data)
+- Validators: `packages/shared/src/validators/research.ts`
+- Invariant rules documented in `apps/server/src/research/README.md`
+
+## Migration Protocol (drizzle-kit CLI TTY issue)
+
+drizzle-kit 0.31.9 CLI writes output to `/dev/tty` directly (not stdout/stderr) and requires a real TTY. In a non-TTY environment (CI, Claude Code sandbox), use the programmatic API instead:
+
+```js
+// ESM only — drizzle-kit/api.mjs works, CJS api.js hangs
+import { generateDrizzleJson, generateMigration } from 'drizzle-kit/api.mjs';
+// Load schemas via tsx ESM hook: node --import apps/server/node_modules/tsx/dist/esm/index.mjs
+// Apply SQL via postgres.js (not pg — this project uses postgres.js, no pg package)
+import postgres from 'apps/server/node_modules/postgres/src/index.js';
+```
+
+Key pitfalls:
+- `drizzle-kit/api.js` (CJS) hangs when imported — use `api.mjs` (ESM) only
+- tsx ESM hook: `--import apps/server/node_modules/tsx/dist/esm/index.mjs`
+- tsx CJS hook: `apps/server/node_modules/tsx/dist/cjs/index.cjs` (but api.js hangs regardless)
+- `generateMigration` resolvers return immediately when `missingItems.length === 0` (add-only migrations)
+- No `pg` package in this project; use `postgres` (postgres.js) for raw SQL execution
 
 ## API Patterns
 

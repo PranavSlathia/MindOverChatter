@@ -9,6 +9,7 @@ import moodLogs from "./mood-logs.js";
 import sessions from "./sessions.js";
 import userProfile from "./user-profile.js";
 import voice from "./voice.js";
+import { research } from "../research/routes/research.js";
 
 const app = new Hono()
   .use("*", cors({
@@ -24,7 +25,9 @@ const app = new Hono()
   .route("/api/journey", journey)
   .route("/api/mood-logs", moodLogs)
   .route("/api/user", userProfile)
-  .route("/api", voice);
+  .route("/api", voice)
+  // Research sandbox — route guard inside research.ts enforces RESEARCH_ENABLED=true
+  .route("/api/research", research);
 
 export type AppType = typeof app;
 export { app };

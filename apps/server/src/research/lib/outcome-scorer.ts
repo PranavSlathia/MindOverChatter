@@ -126,7 +126,7 @@ export function scoreOutcome(assessments: AssessmentRow[]): OutcomeScore {
   const slope = linearSlope(normalizedScores);
 
   let direction: OutcomeDirection;
-  if (isNaN(slope)) {
+  if (Number.isNaN(slope)) {
     direction = "unknown";
   } else if (slope < -0.05) {
     direction = "improving";
@@ -141,7 +141,7 @@ export function scoreOutcome(assessments: AssessmentRow[]): OutcomeScore {
   const latestNormalized = latest ? normalizeScore(latest.type, latest.totalScore) : 0;
   const score = Math.max(0, Math.min(1, 1 - latestNormalized));
 
-  const slopeDisplay = isNaN(slope) ? "N/A" : slope.toFixed(4);
+  const slopeDisplay = Number.isNaN(slope) ? "N/A" : slope.toFixed(4);
   const reasoning =
     `${count} assessments analyzed. Latest: ${latest?.type ?? "unknown"} score ` +
     `${latest?.totalScore ?? 0} (normalized ${latestNormalized.toFixed(3)}). ` +

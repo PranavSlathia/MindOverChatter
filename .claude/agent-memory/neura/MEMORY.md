@@ -69,9 +69,32 @@
 - Service unavailability returns 503 with `*_UNAVAILABLE` error code
 - Service URLs from `env.ts`: `WHISPER_SERVICE_URL`, `TTS_SERVICE_URL`
 
+## Research Sandbox Patterns
+
+- Research module root: `apps/server/src/research/`
+- Invariants: NEVER import `upsertBlock` in research files except `promote.ts`; NEVER import `generateAndPersistTherapyPlan` or `generateAndPersistFormulation`
+- All experiment writes go to `research_*` tables only
+- Read-only queries in `research/lib/read-only-queries.ts` — accepts injected `db` instance
+- Sessions table has NO mode column and NO turnCount — mode is in-memory only, not persisted per-session
+- `spawnClaudeStreaming` already handles `cwd: '/tmp'` and strips `CLAUDECODE` — just call it directly
+- Biome auto-fix: run `npx biome check --write <files>` on new research files after writing
+- Phase 1 schema files have pre-existing biome format warnings — do NOT fix them (not my files)
+- CLI runner: `tsx apps/server/src/research/scripts/run-experiment.ts --experiment a|b|c|d|all --user <userId>`
+- Experiment D: `--candidate-file <path>` to test a draft direction file; omit for self-evaluation baseline run
+- Reports written to `research/reports/` (gitignored per Rule 4)
+- `promote.ts` handles a|b|c|d — A does live upsertBlock write, B/C/D only stamp `promotedAt/By` on the row
+- Experiment D (`research_replay_runs`): three-gate pipeline — Gate 1 (safety, Haiku), Gate 2 (quality scoring 0-100, Haiku), Gate 3 (PHQ/GAD trajectory, non-blocking flag only)
+- Gate 1 JSON parse failure → `{passed: false, failures: ["json_parse_error"]}` (assume failed, safe default)
+- Gate 2 JSON parse failure → `null` (gracefully excluded from score aggregation)
+- `sanitizeForPrompt()` called on BOTH baseline and candidate content before any prompt interpolation in experiment-d
+- `getSessionMessages()` in `read-only-queries.ts` — SELECT from messages WHERE sessionId ORDER BY createdAt ASC
+
 ## Therapeutic Notes
 
-<!-- Therapeutic framework refinements -->
+- `therapeutic-direction.md` is the Operator-editable "program.md" equivalent — mutable research surface for steering companion behaviour between sessions
+- Loaded by `loadSkillFiles()` (added to targetFiles filter) and injected last by `selectRelevantSkills()` with a distinct `=== CURRENT THERAPEUTIC DIRECTION ===` header
+- File must stay under 1200 characters total (injected into every session context); Operator edits Section 6 (Operator Notes) to log active experiments
+- Safety constraint: the file explicitly states it never overrides crisis detection or framing rules — those remain hardcoded
 
 ## Crisis Detection
 
