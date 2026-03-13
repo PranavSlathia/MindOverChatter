@@ -57,7 +57,7 @@ export function JourneyPage() {
         setInsights(insightsData as JourneyFormulation);
         setLoadingInsights(false);
 
-        setTherapyPlanGoals(therapyData.goals, therapyData.hasTherapyPlan);
+        setTherapyPlanGoals(therapyData.goals, therapyData.hasTherapyPlan, therapyData.lastUpdatedAt ?? null);
         setLoadingTherapyPlan(false);
       } catch {
         setError("Failed to load journey data. Please try again.");

@@ -20,6 +20,7 @@ export interface ActiveAssessment {
 
 export interface AssessmentResult {
   assessmentId: string;
+  /** Human-readable severity string (e.g. "Moderate Depression"), NOT the raw enum value. Comes from SEVERITY_DESCRIPTIONS map on the server. */
   severity: string;
   nextScreener: string | null;
 }
