@@ -1,0 +1,1 @@
+ALTER TABLE "therapy_plans" ADD CONSTRAINT "therapy_plans_user_id_version_unique" UNIQUE("user_id","version");

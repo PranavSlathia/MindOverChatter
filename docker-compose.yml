@@ -32,6 +32,7 @@ services:
     volumes:
       - audio-data:/app/volumes/audio
       - ~/.claude:/root/.claude:ro
+      - ~/.claude.json:/root/.claude.json:ro
     depends_on:
       db:
         condition: service_healthy

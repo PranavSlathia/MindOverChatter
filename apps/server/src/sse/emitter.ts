@@ -19,6 +19,7 @@ export type SSEEventData =
         }>;
       };
     }
+  | { event: "session.ending"; data: Record<string, never> }
   | { event: "session.ended"; data: Record<string, never> }
   | { event: "assessment.start"; data: { assessmentType: string } }
   | {

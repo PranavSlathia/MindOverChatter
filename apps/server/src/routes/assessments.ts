@@ -16,6 +16,7 @@ import { buildAssessmentContextBlock, buildFormulationText, SEVERITY_DESCRIPTION
 import { injectSessionContext } from "../sdk/session-manager.js";
 import { addMemoriesAsync } from "../services/memory-client.js";
 import { generateAndPersistFormulation } from "../services/formulation-service.js";
+import { generateAndPersistTherapyPlan } from "../services/therapy-plan-service.js";
 import type { AssessmentType, AssessmentSeverity } from "@moc/shared";
 
 const app = new Hono()
@@ -196,6 +197,13 @@ const app = new Hono()
     // Fire-and-forget: regenerate canonical formulation snapshot
     generateAndPersistFormulation(user.id, "assessment_submit").catch((err) => {
       console.error(`[assessments] Formulation generation error:`, err);
+    });
+
+    // Fire-and-forget: refresh therapy plan so session strategy reflects new assessment data.
+    // Triggered on every completion — not restricted to specific instruments or thresholds,
+    // because ISI, burnout, PTSD, and future instruments all carry meaningful strategy signals.
+    generateAndPersistTherapyPlan(user.id, "assessment_submit").catch((err) => {
+      console.error(`[assessments] Therapy plan generation error:`, err);
     });
 
     // totalScore is for internal tracking only — NEVER render in UI as a diagnostic indicator

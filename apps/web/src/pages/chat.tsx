@@ -1,6 +1,6 @@
 import { HELPLINES } from "@moc/shared";
 import { useCallback, useEffect, useRef } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { CBTThoughtRecordWidget } from "@/components/chat/cbt-thought-record-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
@@ -18,6 +18,7 @@ import { useSessionStore } from "@/stores/session-store.js";
 
 export function ChatPage() {
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
+  const navigate = useNavigate();
 
   const {
     sessionId,
@@ -25,6 +26,7 @@ export function ChatPage() {
     messages,
     isThinking,
     isStreaming,
+    isEnding,
     streamingContent,
     isCrisis,
     crisisResponse,
@@ -36,6 +38,7 @@ export function ChatPage() {
     setConnected,
     setThinking,
     setStreaming,
+    setEnding,
     appendStreamingContent,
     clearStreamingContent,
     setCrisis,
@@ -58,7 +61,7 @@ export function ChatPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional scroll triggers
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent, isCrisis, activeAssessment, isThinking]);
+  }, [messages, streamingContent, isCrisis, activeAssessment, isThinking, isEnding]);
 
   // Connect SSE for a given session
   const connectSSE = useCallback(
@@ -176,8 +179,15 @@ export function ChatPage() {
         clearStreamingContent();
       });
 
+      es.addEventListener("session.ending", () => {
+        // Server is running the critical summary hook — show "Wrapping up" UI
+        setEnding(true);
+      });
+
       es.addEventListener("session.ended", () => {
+        // Summary complete — transition to fully ended state
         setThinking(false);
+        setEnding(false);
         setStatus("completed");
       });
 
@@ -254,6 +264,7 @@ export function ChatPage() {
       setConnected,
       setThinking,
       setStreaming,
+      setEnding,
       appendStreamingContent,
       clearStreamingContent,
       addMessage,
@@ -308,7 +319,19 @@ export function ChatPage() {
           });
         }
       } else {
-        // Create a new session
+        // Check for an existing active session before creating a new one
+        try {
+          const recent = await api.getSessions(5, 0);
+          const active = recent.sessions.find((s) => s.status === "active");
+          if (active) {
+            if (!cancelled) navigate(`/chat/${active.id}`, { replace: true });
+            return;
+          }
+        } catch {
+          // Silently continue — if the check fails, just create a new session
+        }
+
+        // No active session found — create a new one
         try {
           const result = await api.createSession();
           if (cancelled) return;
@@ -392,9 +415,13 @@ export function ChatPage() {
       setStatus("completed");
     } catch (err) {
       console.error("Failed to end session:", err);
+    } finally {
+      // Rescue: if the SSE connection dropped before session.ended arrived,
+      // clear isEnding here so the UI never stays stuck on "Wrapping up…".
+      setEnding(false);
+      eventSourceRef.current?.close();
     }
-    eventSourceRef.current?.close();
-  }, [sessionId, setStatus]);
+  }, [sessionId, setStatus, setEnding]);
 
   const handleNewSession = useCallback(() => {
     eventSourceRef.current?.close();
@@ -418,7 +445,7 @@ export function ChatPage() {
       });
   }, [reset, setSessionId, setStatus, connectSSE, addMessage]);
 
-  const inputDisabled = isStreaming || status === "completed";
+  const inputDisabled = isStreaming || isEnding || status === "completed";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -454,6 +481,14 @@ export function ChatPage() {
             ))}
 
           {isCrisis && crisisResponse && <CrisisBanner crisisResponse={crisisResponse} />}
+
+          {/* Session ending — summary in progress */}
+          {isEnding && (
+            <div className="my-4 flex items-center justify-center gap-2 rounded-lg border border-foreground/10 bg-muted/30 px-4 py-3 text-sm text-foreground/50">
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-foreground/20 border-t-primary" />
+              Wrapping up your session…
+            </div>
+          )}
 
           {/* Session ended state */}
           {status === "completed" && (

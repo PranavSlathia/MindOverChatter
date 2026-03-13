@@ -1,5 +1,6 @@
 FROM node:22-slim AS base
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN npm install -g @anthropic-ai/claude-code@2.1.74
 WORKDIR /app
 
 FROM base AS deps

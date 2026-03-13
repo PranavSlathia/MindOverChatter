@@ -105,18 +105,28 @@ export interface JourneyFormulation {
   }>;
 }
 
+export interface TherapyPlanGoal {
+  visible_label: string;
+  progress: "nascent" | "building" | "established";
+}
+
 interface JourneyState {
   timeline: TimelineItem[];
   insights: JourneyFormulation | null;
   isLoadingTimeline: boolean;
   isLoadingInsights: boolean;
   error: string | null;
+  therapyPlanGoals: TherapyPlanGoal[];
+  hasTherapyPlan: boolean;
+  isLoadingTherapyPlan: boolean;
 
   setTimeline: (items: TimelineItem[]) => void;
   setInsights: (insights: JourneyFormulation) => void;
   setLoadingTimeline: (loading: boolean) => void;
   setLoadingInsights: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setTherapyPlanGoals: (goals: TherapyPlanGoal[], hasTherapyPlan: boolean) => void;
+  setLoadingTherapyPlan: (loading: boolean) => void;
 }
 
 export const useJourneyStore = create<JourneyState>((set) => ({
@@ -125,10 +135,15 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   isLoadingTimeline: false,
   isLoadingInsights: false,
   error: null,
+  therapyPlanGoals: [],
+  hasTherapyPlan: false,
+  isLoadingTherapyPlan: false,
 
   setTimeline: (items) => set({ timeline: items }),
   setInsights: (insights) => set({ insights }),
   setLoadingTimeline: (loading) => set({ isLoadingTimeline: loading }),
   setLoadingInsights: (loading) => set({ isLoadingInsights: loading }),
   setError: (error) => set({ error }),
+  setTherapyPlanGoals: (goals, hasTherapyPlan) => set({ therapyPlanGoals: goals, hasTherapyPlan }),
+  setLoadingTherapyPlan: (loading) => set({ isLoadingTherapyPlan: loading }),
 }));

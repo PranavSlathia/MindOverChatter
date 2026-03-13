@@ -11,7 +11,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, sql, or } from "drizzle-orm";
 import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
@@ -29,7 +29,9 @@ import {
   selectRelevantSkills,
   injectSessionContext,
   isSessionActive,
-  spawnClaudeStreaming,
+  getSessionMode,
+  setSessionMode,
+  getSessionAuthority,
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import {
@@ -38,8 +40,11 @@ import {
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
-import { generateAndPersistFormulation, getLatestFormulation } from "../services/formulation-service.js";
+import { getLatestFormulation } from "../services/formulation-service.js";
 import { classifyTextEmotion } from "../services/text-emotion-classifier.js";
+import { runOnStart, runOnEnd, clearEndedSession } from "../sdk/session-lifecycle.js";
+import { detectModeShift } from "../services/mode-detector.js";
+import { formatModeShiftBlock } from "../sdk/mode-blocks.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
@@ -73,7 +78,18 @@ const app = new Hono()
           eq(sessionSummaries.level, "session"),
         ),
       )
-      .where(eq(sessions.userId, user.id))
+      .where(
+        and(
+          eq(sessions.userId, user.id),
+          or(
+            // Always show active/crisis sessions regardless of message count
+            eq(sessions.status, "active"),
+            eq(sessions.status, "crisis_escalated"),
+            // Only show completed sessions that have at least 2 messages
+            sql`(SELECT COUNT(*) FROM messages WHERE messages.session_id = ${sessions.id}) >= 2`,
+          ),
+        ),
+      )
       .orderBy(desc(sessions.startedAt), desc(sessions.id))
       .limit(limit)
       .offset(offset);
@@ -188,6 +204,9 @@ const app = new Hono()
         );
       }
     }
+
+    // ── Run session start hooks (therapy plan injection, etc.) ────
+    await runOnStart({ userId: user.id, sdkSessionId });
 
     const [session] = await db
       .insert(sessions)
@@ -352,6 +371,17 @@ const app = new Hono()
       return c.json({ userMessageId: userMsg!.id, crisis: false });
     }
 
+    // ── Mode shift detection ──────────────────────────────────────
+    // Check if the message warrants a session mode shift (pure, fast, no LLM)
+    const currentMode = getSessionMode(sdkSessionId);
+    const authority = getSessionAuthority(sdkSessionId);
+    const targetMode = detectModeShift(text, currentMode, authority);
+    if (targetMode !== null) {
+      console.log(`[mode-shift] ${currentMode ?? "none"} → ${targetMode}`);
+      injectSessionContext(sdkSessionId, formatModeShiftBlock(targetMode));
+      setSessionMode(sdkSessionId, targetMode);
+    }
+
     // Notify SSE subscribers that the AI is processing
     sessionEmitter.emit(sessionId, {
       event: "ai.thinking",
@@ -459,6 +489,25 @@ const app = new Hono()
       }
     }
 
+    // Count DB messages — sessions with < 2 messages are ephemeral, delete them silently
+    const [msgCountResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId));
+    const dbMessageCount = msgCountResult?.count ?? 0;
+
+    if (dbMessageCount < 2) {
+      // No real conversation happened — delete the session and return cleanly
+      emittedAssessments.delete(sessionId);
+      await db.delete(sessions).where(eq(sessions.id, sessionId));
+      sessionEmitter.emit(sessionId, { event: "session.ended", data: {} });
+      return c.json({
+        sessionId: session.id,
+        status: "completed" as const,
+        endedAt: endedAt.toISOString(),
+      });
+    }
+
     // Update session in DB
     await db
       .update(sessions)
@@ -472,12 +521,6 @@ const app = new Hono()
     // Clean up assessment re-trigger guard for this session
     emittedAssessments.delete(sessionId);
 
-    // Notify SSE subscribers that the session ended (immediate — UI shows "ended" right away)
-    sessionEmitter.emit(sessionId, {
-      event: "session.ended",
-      data: {},
-    });
-
     // Sanitize session-end reason to prevent injection through persistent memory
     const ALLOWED_REASONS = ["user_ended", "timeout", "inactivity", "beforeunload"] as const;
     const rawReason = c.req.valid("json").reason ?? "user_ended";
@@ -485,29 +528,40 @@ const app = new Hono()
       ? rawReason
       : "user_ended";
 
-    // Fire-and-forget: generate AI summary, persist to DB, notify Mem0, emit SSE with summary
-    if (conversationHistory.length > 0) {
-      generateAndPersistSummary(
-        session.userId,
+    // Signal SSE subscribers that the summary is in progress.
+    // The client shows "Wrapping up your session..." during this window.
+    // session.ended is emitted AFTER runOnEnd so the UI doesn't collapse
+    // while the critical summary hook is still awaiting Claude.
+    sessionEmitter.emit(sessionId, {
+      event: "session.ending",
+      data: {},
+    });
+
+    // Await critical end hooks (summary), then background hooks fire-and-forget
+    try {
+      await runOnEnd({
+        userId: session.userId,
         sessionId,
         conversationHistory,
-      ).catch((err) => {
-        console.error(`Summary generation error for session ${sessionId}:`, err);
-        // Fallback: send a basic summary to Mem0 so it at least knows the session ended
-        summarizeSessionAsync(
-          session.userId,
-          sessionId,
-          `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}`,
-        );
+        safeReason,
       });
-    } else {
-      // No conversation history — just notify Mem0 with a basic message
+    } catch (err) {
+      console.error(`Session end hooks error for session ${sessionId}:`, err);
+      // Fallback: send a basic summary to Mem0 so it at least knows the session ended
       summarizeSessionAsync(
         session.userId,
         sessionId,
-        `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}. No conversation took place.`,
+        `Session ended at ${endedAt.toISOString()}. Reason: ${safeReason}`,
       );
     }
+
+    // Summary is done (or failed). Signal the client the session is fully closed.
+    // Emitting AFTER runOnEnd ensures the client only shows "Session ended"
+    // once the summary work is complete, not while it's still in progress.
+    sessionEmitter.emit(sessionId, {
+      event: "session.ended",
+      data: {},
+    });
 
     return c.json({
       sessionId: session.id,
@@ -684,6 +738,13 @@ const app = new Hono()
         );
       }
     }
+
+    // Clear the deduplication guard so this resumed session generates
+    // a fresh summary when it ends (the previous cycle already ran its hooks).
+    clearEndedSession(sessionId);
+
+    // ── Run session start hooks (therapy plan injection, etc.) ────
+    await runOnStart({ userId: user.id, sdkSessionId });
 
     // Load existing conversation history from the database
     const historyRows = await db
@@ -1060,135 +1121,6 @@ async function checkAssessmentEligibility(
       data: { assessmentType: result.type as "phq9" | "gad7" },
     });
   }
-}
-
-// ── Session Summary Generation ──────────────────────────────────
-
-/**
- * Summarization prompt for generating session summaries.
- * CRITICAL: Uses "wellness companion" framing, NEVER "therapist" or clinical language.
- */
-const SUMMARY_PROMPT = `You are a summarization assistant for MindOverChatter, an AI wellness companion (NOT a therapist).
-
-Given a conversation between a user and their wellness companion, generate a structured summary in JSON format.
-
-Your response must be ONLY valid JSON with this exact structure:
-{
-  "content": "A 2-4 sentence narrative summary of what was discussed and any insights gained. Use warm, non-clinical language. Focus on the user's experience and progress.",
-  "themes": ["theme1", "theme2"],
-  "cognitive_patterns": ["pattern1", "pattern2"],
-  "action_items": ["item1", "item2"]
-}
-
-Rules:
-- "content": 2-4 sentences. Warm, empathetic tone. Describe what the user explored, not clinical observations.
-- "themes": 1-5 short topic labels (e.g., "work stress", "family relationships", "sleep concerns", "self-compassion").
-- "cognitive_patterns": 0-4 thinking patterns observed (e.g., "all-or-nothing thinking", "catastrophizing", "mind reading", "should statements"). Only include patterns clearly present in the conversation. Use everyday language, not DSM terminology.
-- "action_items": 0-3 concrete next steps or intentions the user expressed or agreed to explore. If none, use an empty array.
-
-NEVER:
-- Diagnose conditions
-- Use clinical/DSM terminology
-- Refer to the user as a "patient" or "client"
-- Include information not present in the conversation
-- Generate more than the requested fields`;
-
-/**
- * Generate an AI-powered session summary, persist it to the database,
- * send it to Mem0, and emit it via SSE.
- *
- * This function is designed to be called fire-and-forget with .catch().
- * It will throw on failure so the caller can apply fallback logic.
- */
-async function generateAndPersistSummary(
-  userId: string,
-  sessionId: string,
-  history: ConversationMessage[],
-): Promise<void> {
-  // Format conversation history for the summarization prompt
-  const conversationText = history
-    .map((msg) => `[${msg.role.toUpperCase()}]: ${msg.content}`)
-    .join("\n\n");
-
-  const fullPrompt = `${SUMMARY_PROMPT}\n\nConversation:\n${conversationText}`;
-
-  // Spawn Claude to generate the summary (collect full output, no SSE streaming)
-  console.log(`[summary] Generating summary for session ${sessionId} (${history.length} messages)`);
-  const rawResponse = await spawnClaudeStreaming(fullPrompt, () => {
-    // No-op callback — we just want the accumulated text, not streaming chunks
-  });
-
-  if (!rawResponse.trim()) {
-    throw new Error("Summary generation returned empty response");
-  }
-
-  // Parse the JSON response — Claude may wrap it in markdown code fences
-  let jsonStr = rawResponse.trim();
-
-  // Strip markdown code fences if present (```json ... ``` or ``` ... ```)
-  const codeFenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeFenceMatch) {
-    jsonStr = codeFenceMatch[1]!.trim();
-  }
-
-  let parsed: {
-    content?: string;
-    themes?: string[];
-    cognitive_patterns?: string[];
-    action_items?: string[];
-  };
-
-  try {
-    parsed = JSON.parse(jsonStr) as typeof parsed;
-  } catch {
-    console.error(`[summary] Failed to parse summary JSON for session ${sessionId}:`, jsonStr);
-    throw new Error("Summary generation returned invalid JSON");
-  }
-
-  // Validate required fields
-  const content = parsed.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("Summary missing 'content' field");
-  }
-
-  const themes = Array.isArray(parsed.themes)
-    ? parsed.themes.filter((t): t is string => typeof t === "string")
-    : [];
-  const cognitivePatterns = Array.isArray(parsed.cognitive_patterns)
-    ? parsed.cognitive_patterns.filter((p): p is string => typeof p === "string")
-    : [];
-  const actionItems = Array.isArray(parsed.action_items)
-    ? parsed.action_items.filter((a): a is string => typeof a === "string")
-    : [];
-
-  // Fetch session timestamps for periodStart/periodEnd
-  const [sess] = await db
-    .select({ startedAt: sessions.startedAt, endedAt: sessions.endedAt })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId));
-
-  // Persist to session_summaries table
-  await db.insert(sessionSummaries).values({
-    userId,
-    sessionId,
-    level: "session",
-    content,
-    themes: themes.length > 0 ? themes : null,
-    cognitivePatterns: cognitivePatterns.length > 0 ? cognitivePatterns : null,
-    actionItems: actionItems.length > 0 ? actionItems : null,
-    periodStart: sess?.startedAt,
-    periodEnd: sess?.endedAt ?? new Date(),
-  });
-
-  console.log(`[summary] Persisted session summary for session ${sessionId}`);
-
-  // Send the real summary to Mem0 (replaces the old timestamp-only string)
-  summarizeSessionAsync(userId, sessionId, content);
-
-  // Fire-and-forget: regenerate canonical formulation snapshot
-  generateAndPersistFormulation(userId, "session_end").catch((err) => {
-    console.error(`[summary] Formulation generation error for session ${sessionId}:`, err);
-  });
 }
 
 // ── Export ────────────────────────────────────────────────────────

@@ -31,6 +31,8 @@ interface SessionState {
   isConnected: boolean;
   isThinking: boolean;
   isStreaming: boolean;
+  /** True while the server is running critical end-of-session hooks (summary generation). */
+  isEnding: boolean;
   streamingContent: string;
   isCrisis: boolean;
   crisisResponse: CrisisResponse | null;
@@ -48,6 +50,7 @@ interface SessionState {
   setConnected: (connected: boolean) => void;
   setThinking: (thinking: boolean) => void;
   setStreaming: (streaming: boolean) => void;
+  setEnding: (ending: boolean) => void;
   appendStreamingContent: (chunk: string) => void;
   clearStreamingContent: () => void;
   setCrisis: (response: CrisisResponse) => void;
@@ -66,6 +69,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   isConnected: false,
   isThinking: false,
   isStreaming: false,
+  isEnding: false,
   streamingContent: "",
   isCrisis: false,
   crisisResponse: null,
@@ -84,6 +88,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setConnected: (connected) => set({ isConnected: connected }),
   setThinking: (thinking) => set({ isThinking: thinking }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),
+  setEnding: (ending) => set({ isEnding: ending }),
   appendStreamingContent: (chunk) =>
     set((state) => ({ streamingContent: state.streamingContent + chunk })),
   clearStreamingContent: () => set({ streamingContent: "" }),
@@ -102,6 +107,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       isConnected: false,
       isThinking: false,
       isStreaming: false,
+      isEnding: false,
       streamingContent: "",
       isCrisis: false,
       crisisResponse: null,

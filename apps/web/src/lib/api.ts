@@ -94,6 +94,10 @@ type GetJourneyAssessmentsSuccess = InferResponseType<
   typeof client.api.journey.assessments.$get,
   200
 >;
+type GetTherapyPlanGoalsSuccess = InferResponseType<
+  (typeof client.api.journey)["therapy-plan"]["$get"],
+  200
+>;
 type GetHomeSummarySuccess = InferResponseType<typeof client.api.home.summary.$get, 200>;
 type GetServiceHealthSuccess = InferResponseType<typeof client.api.home.health.services.$get, 200>;
 type GetAssessmentLibrarySuccess = InferResponseType<typeof client.api.assessments.library.$get, 200>;
@@ -287,5 +291,11 @@ export const api = {
     });
     await throwIfError(res);
     return (await res.json()) as GetAssessmentHistorySuccess;
+  },
+
+  getTherapyPlanGoals: async (): Promise<GetTherapyPlanGoalsSuccess> => {
+    const res = await client.api.journey["therapy-plan"].$get();
+    await throwIfError(res);
+    return (await res.json()) as GetTherapyPlanGoalsSuccess;
   },
 };

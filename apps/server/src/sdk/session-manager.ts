@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { SessionMode } from "@moc/shared";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ interface Session {
   initialMemories?: MemoryContextItem[];
   skillContent: string[];
   contextInjections: string[];
+  currentMode: SessionMode | null;
+  directiveAuthority: "low" | "medium" | "high" | null;
 }
 
 // ── Constants ───────────────────────────────────────────────────
@@ -429,6 +432,8 @@ export async function createSdkSession(
     initialMemories,
     skillContent: skillContent ?? [],
     contextInjections: [],
+    currentMode: null,
+    directiveAuthority: null,
   });
   return id;
 }
@@ -513,13 +518,70 @@ export function isSessionActive(sdkSessionId: string): boolean {
  * Context blocks appear after memory context and skill content,
  * but before conversation history.
  *
- * This is synchronous — it modifies in-memory state only.
- * If the session does not exist, this is a silent no-op.
+ * A1: Validates the block is a non-empty string and within size limits.
+ * Logs a warning (not a throw) for operational visibility without crashing.
  */
 export function injectSessionContext(sdkSessionId: string, contextBlock: string): void {
+  // A1: runtime validation
+  if (!contextBlock || typeof contextBlock !== "string") {
+    console.warn("[session-manager] injectSessionContext: empty or invalid block — skipping");
+    return;
+  }
+  const MAX_INJECTION_CHARS = 50_000;
+  if (contextBlock.length > MAX_INJECTION_CHARS) {
+    console.warn(
+      `[session-manager] injectSessionContext: block too large (${contextBlock.length} chars > ${MAX_INJECTION_CHARS}) — truncating`,
+    );
+    contextBlock = contextBlock.slice(0, MAX_INJECTION_CHARS);
+  }
+  const session = sessions.get(sdkSessionId);
+  if (!session) {
+    console.warn(`[session-manager] injectSessionContext: session ${sdkSessionId} not found`);
+    return;
+  }
+  session.contextInjections.push(contextBlock);
+}
+
+/**
+ * Get the current session mode. Returns null if the session doesn't exist
+ * or no mode has been set.
+ */
+export function getSessionMode(sdkSessionId: string): SessionMode | null {
+  const session = sessions.get(sdkSessionId);
+  return session?.currentMode ?? null;
+}
+
+/**
+ * Set the current session mode. Silent no-op if session doesn't exist.
+ */
+export function setSessionMode(sdkSessionId: string, mode: SessionMode): void {
   const session = sessions.get(sdkSessionId);
   if (!session) return;
-  session.contextInjections.push(contextBlock);
+  session.currentMode = mode;
+}
+
+/**
+ * Get the directive authority level from the therapy plan.
+ * Returns null if the session doesn't exist or no plan was injected.
+ */
+export function getSessionAuthority(
+  sdkSessionId: string,
+): "low" | "medium" | "high" | null {
+  const session = sessions.get(sdkSessionId);
+  return session?.directiveAuthority ?? null;
+}
+
+/**
+ * Set the directive authority level (sourced from therapy plan).
+ * Silent no-op if session doesn't exist.
+ */
+export function setSessionAuthority(
+  sdkSessionId: string,
+  authority: "low" | "medium" | "high",
+): void {
+  const session = sessions.get(sdkSessionId);
+  if (!session) return;
+  session.directiveAuthority = authority;
 }
 
 // ── Skill Loading ─────────────────────────────────────────────

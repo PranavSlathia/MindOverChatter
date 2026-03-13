@@ -7,6 +7,7 @@ import { ReflectiveQuestions } from "@/components/journey/reflective-questions.j
 import { SessionTimeline } from "@/components/journey/session-timeline.js";
 import { ThemeOfToday } from "@/components/journey/theme-of-today.js";
 import { WhatMightHelp } from "@/components/journey/what-might-help.js";
+import { WorkingToward } from "@/components/journey/working-toward.js";
 import { api } from "@/lib/api.js";
 import type {
   JourneyFormulation,
@@ -23,11 +24,16 @@ export function JourneyPage() {
     isLoadingTimeline,
     isLoadingInsights,
     error,
+    therapyPlanGoals,
+    hasTherapyPlan,
+    isLoadingTherapyPlan,
     setTimeline,
     setInsights,
     setLoadingTimeline,
     setLoadingInsights,
     setError,
+    setTherapyPlanGoals,
+    setLoadingTherapyPlan,
   } = useJourneyStore();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: store actions are stable
@@ -35,12 +41,14 @@ export function JourneyPage() {
     async function fetchData() {
       setLoadingTimeline(true);
       setLoadingInsights(true);
+      setLoadingTherapyPlan(true);
       setError(null);
 
       try {
-        const [timelineData, insightsData] = await Promise.all([
+        const [timelineData, insightsData, therapyData] = await Promise.all([
           api.getJourneyTimeline(50),
           api.getJourneyInsights(),
+          api.getTherapyPlanGoals(),
         ]);
 
         setTimeline(timelineData.items);
@@ -48,10 +56,14 @@ export function JourneyPage() {
 
         setInsights(insightsData as JourneyFormulation);
         setLoadingInsights(false);
+
+        setTherapyPlanGoals(therapyData.goals, therapyData.hasTherapyPlan);
+        setLoadingTherapyPlan(false);
       } catch {
         setError("Failed to load journey data. Please try again.");
         setLoadingTimeline(false);
         setLoadingInsights(false);
+        setLoadingTherapyPlan(false);
       }
     }
 
@@ -112,6 +124,11 @@ export function JourneyPage() {
       {/* Section 3: Patterns We're Noticing (gated: confidence != sparse) */}
       {!isLoadingInsights && insights && confidence !== "sparse" && (
         <FormulationMap formulation={insights} />
+      )}
+
+      {/* Section 3.5: What We're Working Toward */}
+      {!isLoadingInsights && !isLoadingTherapyPlan && hasTherapyPlan && therapyPlanGoals.length > 0 && (
+        <WorkingToward goals={therapyPlanGoals} />
       )}
 
       {/* Section 4: Questions Worth Exploring */}

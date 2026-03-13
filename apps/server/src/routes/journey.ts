@@ -4,12 +4,12 @@
 // GET /assessments — Assessment history
 
 import { zValidator } from "@hono/zod-validator";
-import { AssessmentHistoryQuerySchema, JourneyTimelineQuerySchema } from "@moc/shared";
+import { AssessmentHistoryQuerySchema, JourneyTimelineQuerySchema, TherapyPlanSchema } from "@moc/shared";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, notInArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
-import { assessments, memories, messages, moodLogs, sessionSummaries, sessions } from "../db/schema/index";
+import { assessments, memories, messages, moodLogs, sessionSummaries, sessions, therapyPlans } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
 import { getFormulationInstant } from "../services/formulation-service.js";
 
@@ -415,6 +415,39 @@ ${conversationText}`;
       backfilled,
       total: missingSessions.length,
       errors: errors.length > 0 ? errors : undefined,
+    });
+  })
+
+  // ── GET /therapy-plan — Current therapy goals (internal plan filtered) ──
+  .get("/therapy-plan", async (c) => {
+    const user = await getOrCreateUser();
+
+    const latestPlan = await db
+      .select()
+      .from(therapyPlans)
+      .where(eq(therapyPlans.userId, user.id))
+      .orderBy(desc(therapyPlans.createdAt))
+      .limit(1);
+
+    const planRow = latestPlan[0];
+    if (!planRow) {
+      return c.json({ goals: [], hasTherapyPlan: false, lastUpdatedAt: null });
+    }
+
+    const parsed = TherapyPlanSchema.safeParse(planRow.plan);
+    if (!parsed.success) {
+      console.error("[journey] therapy plan parse error:", parsed.error.message);
+      return c.json({ goals: [], hasTherapyPlan: false, lastUpdatedAt: null });
+    }
+    const goals = parsed.data.therapeutic_goals.map((g) => ({
+      visible_label: g.visible_label,
+      progress: g.progress,
+    }));
+
+    return c.json({
+      goals,
+      hasTherapyPlan: true,
+      lastUpdatedAt: planRow.createdAt.toISOString(),
     });
   });
 
