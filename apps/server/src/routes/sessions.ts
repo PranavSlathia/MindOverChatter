@@ -16,7 +16,7 @@ import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
 import { env } from "../env.js";
-import { sessions, messages, sessionSummaries, assessments } from "../db/schema/index";
+import { sessions, messages, sessionSummaries, assessments, emotionReadings } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
@@ -38,8 +38,8 @@ import {
   addMemoriesAsync,
   summarizeSessionAsync,
 } from "../services/memory-client.js";
-import { invalidateInsightsCache } from "./journey.js";
 import { generateAndPersistFormulation, getLatestFormulation } from "../services/formulation-service.js";
+import { classifyTextEmotion } from "../services/text-emotion-classifier.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
@@ -472,9 +472,6 @@ const app = new Hono()
     // Clean up assessment re-trigger guard for this session
     emittedAssessments.delete(sessionId);
 
-    // Invalidate journey insights cache so next visit generates fresh insights
-    invalidateInsightsCache();
-
     // Notify SSE subscribers that the session ended (immediate — UI shows "ended" right away)
     sessionEmitter.emit(sessionId, {
       event: "session.ended",
@@ -729,6 +726,9 @@ const app = new Hono()
 /** Regex to detect and strip [ASSESSMENT_READY:type] markers from AI output. */
 const ASSESSMENT_MARKER_RE = /\[ASSESSMENT_READY:(phq9|gad7|dass21|isi|rosenberg_se|who5|pc_ptsd5|copenhagen_burnout)\]/g;
 
+/** Regex to detect and strip [CBT_READY] marker from AI output. */
+const CBT_MARKER_RE = /\[CBT_READY\]/g;
+
 /**
  * Calls the SDK session manager to get an AI response, streaming
  * chunks to SSE subscribers as they arrive, then persists the
@@ -762,8 +762,15 @@ async function streamAiResponse(
 
   // Strip [ASSESSMENT_READY:type] markers before persistence/SSE
   const assessmentMarkers: string[] = [];
-  const cleanText = fullText.replace(ASSESSMENT_MARKER_RE, (match, type: string) => {
+  let cleanText = fullText.replace(ASSESSMENT_MARKER_RE, (match, type: string) => {
     assessmentMarkers.push(type);
+    return "";
+  }).trim();
+
+  // Strip [CBT_READY] marker before persistence/SSE
+  let cbtReady = false;
+  cleanText = cleanText.replace(CBT_MARKER_RE, () => {
+    cbtReady = true;
     return "";
   }).trim();
 
@@ -792,11 +799,40 @@ async function streamAiResponse(
     }
   }
 
+  // Emit cbt.start if [CBT_READY] was detected (guarded against re-trigger)
+  if (cbtReady) {
+    const emittedForSession = emittedAssessments.get(sessionId) ?? new Set<string>();
+    if (!emittedForSession.has("cbt_thought_record")) {
+      emittedForSession.add("cbt_thought_record");
+      emittedAssessments.set(sessionId, emittedForSession);
+      sessionEmitter.emit(sessionId, {
+        event: "assessment.start",
+        data: { assessmentType: "cbt_thought_record" },
+      });
+    }
+  }
+
   // Fire-and-forget: extract memories from the conversation turn
   addMemoriesAsync(userId, sessionId, userMessageId, [
     { role: "user", content: userMessage },
     { role: "assistant", content: cleanText },
   ]);
+
+  // Fire-and-forget: text emotion classification (text signal weight = 0.8 per architecture)
+  const textEmotionResult = classifyTextEmotion(userMessage);
+  if (textEmotionResult) {
+    db.insert(emotionReadings).values({
+      sessionId,
+      messageId: userMessageId,
+      channel: "text",
+      emotionLabel: textEmotionResult.emotion,
+      confidence: textEmotionResult.confidence,
+      signalWeight: 0.8,
+      rawScores: { source: "text_classifier", keywords_matched: true },
+    }).catch((err: unknown) => {
+      console.warn("[text-emotion] failed to persist:", err instanceof Error ? err.message : err);
+    });
+  }
 
   // Always check assessment eligibility — deterministic detector is the primary trigger.
   // The [ASSESSMENT_READY:...] markers from Claude are a bonus secondary path.

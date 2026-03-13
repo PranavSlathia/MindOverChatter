@@ -393,9 +393,6 @@ vi.mock("../../src/services/memory-client.js", () => ({
   addMemoriesAsync: vi.fn(),
   summarizeSessionAsync: vi.fn(),
 }));
-vi.mock("../../src/routes/journey.js", () => ({
-  invalidateInsightsCache: vi.fn(),
-}));
 vi.mock("../../src/services/formulation-service.js", () => ({
   generateAndPersistFormulation: vi.fn(),
   getLatestFormulation: vi.fn().mockResolvedValue(null),

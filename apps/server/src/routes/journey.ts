@@ -22,14 +22,6 @@ const USER_VISIBLE_TIMELINE_MEMORY_TYPES = [
   "win",
 ] as const;
 
-/**
- * @deprecated — kept only for backward compatibility with existing callers (sessions.ts, assessments.ts).
- * The formulation is now DB-backed; this is a no-op.
- */
-export function invalidateInsightsCache() {
-  // No-op — formulation freshness is determined by DB timestamp
-}
-
 // ── Route Definitions ────────────────────────────────────────────
 
 const app = new Hono()
@@ -455,9 +447,6 @@ ${conversationText}`;
         errors.push(`${session.id}: ${err instanceof Error ? err.message : "unknown error"}`);
       }
     }
-
-    // Invalidate cache so next insights request uses the new summaries
-    invalidateInsightsCache();
 
     return c.json({
       backfilled,

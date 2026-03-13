@@ -32,8 +32,51 @@ These helplines are free, confidential, and staffed by trained professionals who
 
 As a wellness companion, I'm here to support your day-to-day wellbeing, but for what you're describing, connecting with a professional would be the most helpful step.`;
 
+// ── Hindi / Hinglish Hard-Coded Crisis Responses ─────────────────
+// Same guarantees: NEVER AI-generated. Static, human-authored.
+
+const HIGH_SEVERITY_MESSAGE_HI = `Main aapki baat sun raha/rahi hoon, aur jo aap feel kar rahe hain woh bahut important hai. Lagta hai aap abhi kuch bohot mushkil se guzar rahe hain — please kisi se baat karein jo sach mein madad kar sake.
+
+Yeh helplines hain jo 24/7 available hain:
+- iCall: 9152987821
+- Vandrevala Foundation: 1860-2662-345
+- 988 Suicide & Crisis Lifeline: 988 (US)
+
+Aap akele nahi hain. Yeh free aur confidential hain.`;
+
+const MEDIUM_SEVERITY_MESSAGE_HI = `Main sun raha/rahi hoon ki aap bahut mushkil waqt se guzar rahe hain, aur aapne mujhse share kiya — shukriya. Jo aap feel kar rahe hain woh bilkul valid hai.
+
+Agar aapko professional support chahiye:
+- iCall: 9152987821
+- Vandrevala Foundation: 1860-2662-345
+- 988 Suicide & Crisis Lifeline: 988 (US)
+
+Yeh helplines free, confidential aur trained professionals ke saath hain.
+
+Main ek wellness companion hoon — jo aap describe kar rahe hain uske liye kisi professional se baat karna sabse helpful hoga.`;
+
+// ── Language Detection ────────────────────────────────────────────
+
+const HINGLISH_MARKERS = [
+  "hai", "nahi", "mujhe", "karo", "tha", "hoon", "yaar", "bhai", "aur", "kya",
+];
+
+/**
+ * Detects whether a message is likely Hindi/Hinglish or English.
+ * Uses Devanagari script presence as a strong signal, plus Hinglish
+ * marker words as a secondary signal for romanised Hindi.
+ */
+function detectLanguage(message: string): "hindi" | "english" {
+  const hasDevanagari = /[\u0900-\u097F]/.test(message);
+  const words = message.toLowerCase().split(/\s+/);
+  const hinglishCount = words.filter((w) => HINGLISH_MARKERS.includes(w)).length;
+  return hasDevanagari || hinglishCount >= 2 ? "hindi" : "english";
+}
+
 /**
  * Returns the appropriate hard-coded crisis response based on severity.
+ * When a message is provided, language detection selects the matching
+ * response (Hindi/Hinglish or English).
  *
  * HIGH severity: Active suicidal ideation, self-harm intent, immediate danger.
  * MEDIUM severity: Passive ideation, harm to others, elevated risk signals.
@@ -42,15 +85,26 @@ As a wellness companion, I'm here to support your day-to-day wellbeing, but for 
  * the detector may still route here — the medium response is the floor.
  *
  * @param severity - The detected severity level
+ * @param message  - Optional original user message for language detection
  * @returns Hard-coded crisis response content (never AI-generated)
  */
 export function getCrisisResponse(
   severity: KeywordSeverity | HaikuRiskLevel,
+  message?: string,
 ): CrisisResponseContent {
   const isHigh = severity === "high" || severity === "crisis";
+  const lang = message ? detectLanguage(message) : "english";
+  const msg =
+    lang === "hindi"
+      ? isHigh
+        ? HIGH_SEVERITY_MESSAGE_HI
+        : MEDIUM_SEVERITY_MESSAGE_HI
+      : isHigh
+        ? HIGH_SEVERITY_MESSAGE
+        : MEDIUM_SEVERITY_MESSAGE;
 
   return {
-    message: isHigh ? HIGH_SEVERITY_MESSAGE : MEDIUM_SEVERITY_MESSAGE,
+    message: msg,
     helplines: HELPLINES,
     severity,
   };

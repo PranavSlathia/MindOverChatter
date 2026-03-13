@@ -6,7 +6,6 @@ import {
   timestamp,
   real,
 } from "drizzle-orm/pg-core";
-import { vector } from "drizzle-orm/pg-core";
 import { userProfiles } from "./user-profiles";
 
 export const memoryTypeEnum = pgEnum("memory_type", [
@@ -32,7 +31,6 @@ export const memories = pgTable("memories", {
   memoryType: memoryTypeEnum("memory_type").notNull(),
   importance: real("importance").notNull(), // 0-1 importance score
   confidence: real("confidence").notNull(), // 0-1 extraction confidence
-  embedding: vector("embedding", { dimensions: 1024 }), // For semantic retrieval
   sourceSessionId: uuid("source_session_id"), // Which session this was extracted from
   sourceMessageId: uuid("source_message_id"), // Specific message that produced this memory
   lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }), // When user last reaffirmed

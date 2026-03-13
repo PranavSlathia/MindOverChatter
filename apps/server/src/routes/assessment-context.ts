@@ -35,6 +35,8 @@ export const ASSESSMENT_TYPE_LABELS: Record<AssessmentType, string> = {
   ecr: "relationship patterns exploration",
   pcl5: "trauma response check-in",
   ace_iq: "expanded early life experiences reflection",
+  // Therapeutic tools
+  cbt_thought_record: "CBT thought record",
 };
 
 /** Map severity enums to descriptive, non-clinical phrases. No diagnostic labels. */
@@ -57,6 +59,11 @@ export function buildAssessmentContextBlock(
 ): string {
   const label = ASSESSMENT_TYPE_LABELS[type];
   const severityDesc = SEVERITY_DESCRIPTIONS[severity];
+
+  // CBT Thought Record is a reflection exercise — not a screening instrument
+  if (type === "cbt_thought_record") {
+    return `The user just completed a CBT Thought Record exercise. This is a structured reflection, not a clinical assessment. Acknowledge their effort warmly and invite them to share what came up for them, if they'd like.`;
+  }
 
   // Personality instruments don't use severity framing
   if (type === "ipip_big5" || type === "harrower_inkblot" || type === "ecr") {
@@ -91,6 +98,11 @@ export function buildFormulationText(
   severity: AssessmentSeverity,
   nextScreener: AssessmentType | null,
 ): string {
+  // CBT Thought Record is a reflection exercise — not a symptom episode
+  if (type === "cbt_thought_record") {
+    return `Internal note: User completed a CBT Thought Record exercise.`;
+  }
+
   const label = ASSESSMENT_TYPE_LABELS[type];
   const severityDesc = SEVERITY_DESCRIPTIONS[severity];
   let text = `Internal formulation: User completed ${label}. Severity: ${severityDesc}.`;

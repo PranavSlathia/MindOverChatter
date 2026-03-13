@@ -47,7 +47,15 @@ function spawnClaude(prompt: string): Promise<string | null> {
       }
     };
 
-    const child = spawn("claude", ["--model", "haiku", "--print", "--max-turns", "1", prompt]);
+    // Strip CLAUDECODE to prevent nested session guard
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+
+    const child = spawn("claude", ["--model", "haiku", "--print", "--max-turns", "1"], { env });
+
+    // Pipe prompt via stdin (avoids ARG_MAX limits on long prompts)
+    child.stdin.write(prompt);
+    child.stdin.end();
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");

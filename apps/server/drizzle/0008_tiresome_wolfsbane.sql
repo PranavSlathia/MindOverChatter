@@ -1,0 +1,1 @@
+ALTER TYPE "public"."assessment_type" ADD VALUE 'cbt_thought_record';

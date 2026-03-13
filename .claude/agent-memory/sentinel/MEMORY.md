@@ -12,86 +12,106 @@ The following Phase 4-A findings are now resolved and confirmed fixed:
 - `CreateAssessmentSchema` deprecated export: REMOVED entirely, no longer in shared package
 - `assessment-flow.md` marker parser: IMPLEMENTED in `sessions.ts` `streamAiResponse`
 
-## Active Issues (Phase 7 audit findings)
+## Resolved Issues (Phase 7 → commit c9742eb)
 
-### `screenerResults` column never written
-- `assessments.screener_results jsonb` column defined in schema, never populated by any route.
-- Comment says "Phase 4-B: populated by formulation engine". Either implement or remove.
-- Filed as WARNING (known tech debt, not a safety issue).
+The following Phase 7 WARNING findings are now resolved:
+- `assessment.complete` SSE nextScreener not auto-triggering next widget: FIXED in chat.tsx — the `assessment.complete` handler now calls `startAssessment()` when `nextScreener` is non-null.
+- Hardcoded DB credentials in docker-compose.yml: FIXED — all passwords now use `${DB_PASSWORD:?DB_PASSWORD is required}` syntax.
+- Hono RPC client not used on frontend: FIXED — `apps/web/src/lib/api.ts` now uses `hc<AppType>()` for all routes. `deleteSession` and `resumeSession` still use raw fetch (noted in comments as "routes implemented in parallel") — acceptable.
+- MEMORY_TYPES constant vs validator gap: The `validTypes` array in `memory-client.ts:persistProvenance` is hardcoded to 11 types including `session_summary`. This is consistent with the DB schema. The MEMORY_TYPES constant in shared is not used for enforcement, so the gap is benign but still present.
 
-### MEMORY_TYPES constant missing `session_summary`
-- `packages/shared/src/constants/index.ts` exports `MEMORY_TYPES` with 10 types (no `session_summary`).
-- But `packages/shared/src/validators/memory.ts` `MemoryTypeSchema` and `apps/server/src/db/schema/memories.ts` `memoryTypeEnum` both include `session_summary` (11 types).
-- The constant is inconsistent with the validator and schema. Low risk since the constant is not used for enforcement, but drift is a code-quality issue.
+## Active Issues (as of commit c9742eb)
 
-### Deprecated `SessionHistorySchema` in session.ts
-- Exported but never used anywhere. Remove to reduce dead exports.
+### Negation spillover (known design limitation, not a safety gap)
+- Window-based negation can mark 'want to die' as negated in 'I'm not suicidal but I want to die'
+  because the word 'not' in 'not suicidal' falls within the 25-char window before 'want to die'.
+- This is NOT a safety gap: the message routes to Haiku (Stage 2) for nuanced classification.
+  Haiku will see the full message and correctly classify 'want to die' as crisis.
+- The Haiku-failure fallback (isCrisis=true) preserves safety if Haiku is down.
+- This design limitation should be documented as a known trade-off, not fixed without careful testing.
 
-### Hardcoded DB credentials in docker-compose.yml
-- `POSTGRES_PASSWORD: password` and `DATABASE_URL=postgresql://moc:password@db:5432/moc` are hardcoded.
-- Acceptable for local dev but must use ${DB_PASSWORD} env substitution for any non-local deploy.
+### Summary generation uses Claude (not Haiku) via spawnClaudeStreaming
+- `generateAndPersistSummary` in sessions.ts calls `spawnClaudeStreaming` with a summarization prompt.
+- This spawns the full Claude Sonnet model for session summaries.
+- The SUMMARY_PROMPT is hard-coded with "wellness companion" framing and no therapeutic claims.
+- This is NOT a crisis-response path — purely informational summary. Acceptable.
 
-### Hono RPC client not used on frontend
-- `apps/web/src/lib/api.ts` uses raw `fetch()` with manually-typed interfaces.
-- The type chain is broken: Hono route types (`AppType`) exist but the frontend does not consume them via `hc<AppType>()`.
-- This is a WARNING not CRITICAL because types are manually maintained and consistent at time of audit.
+### Groq used for assessment eligibility (sessions.ts checkAssessmentEligibility)
+- Groq fallback for assessment detection calls `env.GROQ_API_KEY`.
+- Key is loaded from environment via validated `env.ts` schema — not hardcoded. CLEAN.
+- Groq failure is handled gracefully (returns early on non-ok response). CORRECT.
 
-### emotion service produces labels outside shared EMOTION_LABELS enum
-- `services/emotion/main.py` emits `excited`, `calm`, `anxious` as emotion labels.
-- `packages/shared/src/constants/emotions.ts` `EMOTION_LABELS` only has: happy, sad, angry, neutral, fearful, disgusted, surprised.
-- Schema `emotion_readings.emotionLabel` is `text()` so no DB error, but the frontend's `EmotionScores` type in `emotion-store.ts` will receive unknown keys.
+### Assessment eligibility check runs AFTER AI response is sent
+- `checkAssessmentEligibility()` is called inside `streamAiResponse()` after the AI response completes.
+- This means there is a message-count trigger window where assessment.start could fire TWICE per turn:
+  once from Claude's `[ASSESSMENT_READY:...]` marker (primary path) and once from the deterministic detector.
+- The `completedTypes` guard prevents duplicate widgets for the SAME assessment type.
+- But if Claude emits gad7 marker AND the detector independently triggers phq9, both fire in same turn.
+- This is a UX issue (two widgets queued), not a safety issue.
 
-### assessment.complete SSE — nextScreener not auto-triggering next widget
-- When `assessment.complete` arrives with a non-null `nextScreener`, the frontend calls `completeAssessment()` which stores the result but does NOT call `startAssessment()`.
-- The next screener widget only appears if another `assessment.start` SSE event arrives (which requires the AI to produce another `[ASSESSMENT_READY:...]` marker).
-- This is a gap in the screener chaining UX but not a safety issue.
+### `screenerResults` column never written (pre-existing)
+- `assessments.screener_results jsonb` column defined in schema, never populated.
+- Comment says "Phase 4-B: populated by formulation engine". Known tech debt.
 
-### CORS not configured
-- No CORS middleware on the Hono server. Single-user, same-origin app makes this low priority for local dev, but needed for any external access scenario.
+### MEMORY_TYPES constant missing `session_summary` (pre-existing)
+- `packages/shared/src/constants/index.ts` MEMORY_TYPES has 10 types (no `session_summary`).
+- Validator and schema have 11 types. Low-risk drift.
 
-### Security headers absent
-- No Helmet-equivalent headers (CSP, X-Frame-Options, etc.) on the Hono server. Acceptable for local personal app.
+### emotion service produces labels outside shared EMOTION_LABELS enum (pre-existing)
+- `services/emotion/main.py` emits `excited`, `calm`, `anxious`.
+- Frontend `EmotionScores` type won't have those keys. DB stores as text so no crash.
 
-## Safety Patterns (confirmed correct as of Phase 7)
+### CORS not configured (pre-existing)
+- No CORS middleware on Hono server.
 
-### Crisis detection — fully intact
+## Safety Patterns (confirmed correct as of commit c9742eb)
+
+### Crisis detection — fully intact + negation handling added
 - `detectCrisis()` runs on EVERY user message in `POST /:id/messages` before any Claude call.
-- Two-stage: keyword (deterministic, ~0ms) + Haiku classifier (LLM, ~1-5s).
-- Fallback on Haiku failure: keyword result used conservatively.
-- Assessment route (POST /api/assessments) receives only numeric arrays — no crisis detection needed there.
+- Non-negated HIGH keyword -> immediate crisis (no Haiku, ~0ms).
+- Negated HIGH keyword -> Stage 2 Haiku for nuanced classification.
+- Haiku failure with negated HIGH -> err on caution, isCrisis=true (conservative).
+- MEDIUM keyword -> Stage 2 Haiku always.
+- Haiku failure with MEDIUM -> err on caution, isCrisis=true.
+- Subtle signals only -> Stage 2 Haiku; if Haiku fails -> isCrisis=false (acceptable: no keyword hit).
 
-### Crisis response — hard-coded, never AI-generated
-- `crisis-response.ts`: `HIGH_SEVERITY_MESSAGE` and `MEDIUM_SEVERITY_MESSAGE` are static string constants.
-- `getCrisisResponse()` returns one of the two static messages based on severity. No AI call path.
+### isNegated logic is all-or-nothing for high matches
+- isNegated=true ONLY if ALL high-severity matches are negated.
+- One non-negated high match among multiple matches -> isNegated=false -> immediate crisis.
+- This is the correct design to prevent false negatives.
 
-### Helpline numbers — CORRECT
-- 988 (US), iCall 9152987821 (IN), Vandrevala 1860-2662-345 (IN) all present in `HELPLINES` constant.
-- Used in both `crisis-response.ts` and `CrisisBanner` component.
+### Crisis response — hard-coded, never AI-generated (unchanged)
+- Static constants in crisis-response.ts.
 
-### Framing compliance — confirmed
-- SYSTEM_PROMPT: "You are NOT a therapist, counselor, or medical professional."
-- Crisis response messages: "This app is a wellness companion, not a replacement for professional help."
-- Assessment context injection: no raw scores exposed, no diagnostic labels.
-- `SEVERITY_DESCRIPTIONS`: descriptive phrases only, no clinical labels.
+### Helpline numbers — CORRECT (unchanged)
+- 988 (US), iCall 9152987821 (IN), Vandrevala 1860-2662-345 (IN).
 
-### Prompt injection protection — confirmed
-- All dynamic content (memories, skills, context injections, conversation history, user message) wrapped with `delimit()`.
-- Delimiter boundary pattern is non-standard and unlikely to appear in user text.
+### Framing compliance — confirmed (unchanged)
+- SUMMARY_PROMPT in sessions.ts: "NOT a therapist" framing, warm non-clinical language.
+- "wellness companion" in prompts.
+
+### Hono RPC type chain — RESTORED
+- api.ts now uses `hc<AppType>()` — type chain is end-to-end.
+- `deleteSession` and `resumeSession` use raw fetch (commented as known gap, types manually maintained).
 
 ## Approved Patterns (stable)
 
 ### Self-referential FK with `(): any`
-- Drizzle's documented workaround for circular references. Intentional, not missed.
+- Drizzle's documented workaround for circular references. Intentional.
 
 ### Module-level caches with test reset exports
-- `cachedSkills` / `resetSkillCache()` in session-manager.ts.
-- `cachedUserId` / `_resetCachedUserId()` in db/helpers.ts.
-- Both correct patterns for single-user app.
+- `cachedSkills`/`resetSkillCache()` and `cachedUserId`/`_resetCachedUserId()`. Correct.
 
 ### Server-side scoring only
 - `SubmitAssessmentSchema` does not accept `totalScore` or `severity`. Correct.
-- `computeSeverity()` is pure and deterministic.
 
 ### Assessment markers stripped before SSE/DB
-- `ASSESSMENT_MARKER_RE` regex strips `[ASSESSMENT_READY:phq9|gad7]` from AI output.
-- Clean text stored in DB, marker triggers `assessment.start` SSE event.
+- `ASSESSMENT_MARKER_RE` strips `[ASSESSMENT_READY:phq9|gad7]` from AI output. Confirmed.
+
+### negatedHindiPhrase double-registration pattern
+- Phrases like "marna chahta" appear in BOTH `hindiPhrase(...)` and `negatedHindiPhrase(...)`.
+- The hindiPhrase matches the affirmative form (crisis).
+- The negatedHindiPhrase matches the negated form (routes to Haiku).
+- Because the two regex patterns are mutually exclusive (hindiPhrase won't match 'marna nahi chahta'),
+  only the relevant entry fires for any given input. highMatchCount stays correct.
+- This is an intentional and correct design. Not a bug.

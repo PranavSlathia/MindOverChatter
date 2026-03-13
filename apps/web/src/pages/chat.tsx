@@ -2,6 +2,7 @@ import { HELPLINES } from "@moc/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { Link, useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
+import { CBTThoughtRecordWidget } from "@/components/chat/cbt-thought-record-widget.js";
 import { ChatHeader } from "@/components/chat/chat-header.js";
 import {
   CrisisBanner,
@@ -442,12 +443,15 @@ export function ChatPage() {
           {isThinking && !isStreaming && <ThinkingBubble />}
           {isStreaming && <StreamingBubble content={streamingContent} />}
 
-          {activeAssessment && (
-            <AssessmentWidget
-              assessmentType={activeAssessment.assessmentType}
-              parentAssessmentId={activeAssessment.parentAssessmentId}
-            />
-          )}
+          {activeAssessment &&
+            (activeAssessment.assessmentType === "cbt_thought_record" ? (
+              <CBTThoughtRecordWidget />
+            ) : (
+              <AssessmentWidget
+                assessmentType={activeAssessment.assessmentType}
+                parentAssessmentId={activeAssessment.parentAssessmentId}
+              />
+            ))}
 
           {isCrisis && crisisResponse && <CrisisBanner crisisResponse={crisisResponse} />}
 

@@ -76,7 +76,7 @@ export async function detectCrisis(message: string): Promise<CrisisResult> {
         severity: keywordResult.severity,
         matchedPhrases: keywordResult.matchedPhrases,
         stages: ["keyword"],
-        response: getCrisisResponse("high"),
+        response: getCrisisResponse("high", message),
         haikuResult: null,
       };
     }
@@ -113,7 +113,7 @@ export async function detectCrisis(message: string): Promise<CrisisResult> {
         severity: keywordResult.severity,
         matchedPhrases: keywordResult.matchedPhrases,
         stages: ["keyword"],
-        response: getCrisisResponse(keywordResult.severity),
+        response: getCrisisResponse(keywordResult.severity, message),
         haikuResult: null,
       };
     }
@@ -143,7 +143,7 @@ export async function detectCrisis(message: string): Promise<CrisisResult> {
       severity: combinedSeverity,
       matchedPhrases: keywordResult.matchedPhrases,
       stages,
-      response: getCrisisResponse(combinedSeverity),
+      response: getCrisisResponse(combinedSeverity, message),
       haikuResult,
     };
   }

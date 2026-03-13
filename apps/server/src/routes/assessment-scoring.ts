@@ -392,9 +392,15 @@ const SCREENER_QUESTION_COUNTS: Record<string, number> = {
  */
 export function computeSeverity(
   type: AssessmentType,
-  answers: number[],
+  answers: (number | string)[],
 ): { totalScore: number; severity: AssessmentSeverity } {
-  const totalScore = answers.reduce((sum, val) => sum + val, 0);
+  // CBT Thought Record is a reflection tool — not a scored instrument
+  if (type === "cbt_thought_record") {
+    return { totalScore: 0, severity: "minimal" };
+  }
+
+  const numericAnswers = answers as number[];
+  const totalScore = numericAnswers.reduce((sum, val) => sum + val, 0);
 
   let severity: AssessmentSeverity;
   switch (type) {
@@ -405,10 +411,10 @@ export function computeSeverity(
       severity = gad7Severity(totalScore);
       break;
     case "dass21":
-      severity = dass21Severity(answers);
+      severity = dass21Severity(numericAnswers);
       break;
     case "rosenberg_se":
-      severity = rosenbergSeverity(answers);
+      severity = rosenbergSeverity(numericAnswers);
       break;
     case "who5":
       severity = who5Severity(totalScore);
@@ -424,10 +430,10 @@ export function computeSeverity(
       severity = "minimal";
       break;
     case "ucla_loneliness":
-      severity = uclaSeverity(answers);
+      severity = uclaSeverity(numericAnswers);
       break;
     case "copenhagen_burnout":
-      severity = copenhagenSeverity(answers);
+      severity = copenhagenSeverity(numericAnswers);
       break;
     case "ace_score":
       severity = aceSeverity(totalScore);
@@ -439,10 +445,10 @@ export function computeSeverity(
       severity = harrowerSeverity(totalScore);
       break;
     case "pss":
-      severity = pssSeverity(pssScore(answers));
+      severity = pssSeverity(pssScore(numericAnswers));
       break;
     case "mspss":
-      severity = mspssSeverity(answers);
+      severity = mspssSeverity(numericAnswers);
       break;
     case "ecr":
       // Personality instrument — not a severity concept
@@ -455,7 +461,7 @@ export function computeSeverity(
       severity = aceIqSeverity(totalScore);
       break;
     default:
-      severity = screenerSeverity(totalScore, SCREENER_QUESTION_COUNTS[type] ?? answers.length);
+      severity = screenerSeverity(totalScore, SCREENER_QUESTION_COUNTS[type] ?? numericAnswers.length);
       break;
   }
 

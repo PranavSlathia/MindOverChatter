@@ -28,6 +28,8 @@ export const AssessmentTypeSchema = z.enum([
   "ecr",
   "pcl5",
   "ace_iq",
+  // Therapeutic tools (not scored instruments)
+  "cbt_thought_record",
 ]);
 
 export const AssessmentSeveritySchema = z.enum([
@@ -67,6 +69,8 @@ export const ASSESSMENT_QUESTION_COUNTS: Record<z.infer<typeof AssessmentTypeSch
   ecr: 36,
   pcl5: 20,
   ace_iq: 13,
+  // Therapeutic tools
+  cbt_thought_record: 7,
 };
 
 /** Max answer value per assessment type (most are 0-3, but some differ). */
@@ -103,7 +107,8 @@ export const SubmitAssessmentSchema = z
   .object({
     sessionId: z.string().uuid().optional(),
     type: AssessmentTypeSchema,
-    answers: z.array(z.number().int().min(0).max(7)).min(1),
+    // Numeric answers for scored instruments; string answers for CBT thought record
+    answers: z.array(z.union([z.number().int().min(0).max(100), z.string().max(10000)])).min(1),
     parentAssessmentId: z.string().uuid().optional(),
   })
   .superRefine((data, ctx) => {
@@ -116,14 +121,18 @@ export const SubmitAssessmentSchema = z
       });
     }
 
-    // Validate answer range per type
+    // CBT thought record uses free-text answers — skip numeric range validation
+    if (data.type === "cbt_thought_record") return;
+
+    // Validate answer range per type for scored instruments
     const maxVal = MAX_ANSWER_VALUES[data.type] ?? 3;
     const minVal = MIN_ANSWER_VALUES[data.type] ?? 0;
     for (let i = 0; i < data.answers.length; i++) {
-      if (data.answers[i]! < minVal || data.answers[i]! > maxVal) {
+      const val = data.answers[i];
+      if (typeof val === "number" && (val < minVal || val > maxVal)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `${data.type} answer values must be ${String(minVal)}-${String(maxVal)}, got ${String(data.answers[i])} at index ${String(i)}`,
+          message: `${data.type} answer values must be ${String(minVal)}-${String(maxVal)}, got ${String(val)} at index ${String(i)}`,
           path: ["answers", i],
         });
       }

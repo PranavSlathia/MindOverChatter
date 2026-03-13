@@ -12,14 +12,11 @@ COPY uv.lock* .
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Pre-download the bge-m3 embedding model to avoid cold start latency.
-# The model is cached in /app/models via the model-cache volume at runtime,
-# but this build step ensures the HuggingFace hub tooling works and the
-# model is baked into the image layer.
+# Pre-download the embedding model to avoid cold start latency.
 ENV HF_HOME=/app/models
 RUN uv run python -c "\
 from sentence_transformers import SentenceTransformer; \
-model = SentenceTransformer('BAAI/bge-m3'); \
+model = SentenceTransformer('BAAI/bge-small-en-v1.5'); \
 print(f'Model downloaded: {model.get_sentence_embedding_dimension()} dims')"
 
 # Copy application

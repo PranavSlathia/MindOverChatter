@@ -31,7 +31,7 @@ docker compose up -d      # Start all Docker services
 
 ## Schema Tables
 
-`user_profiles`, `sessions`, `messages`, `emotion_readings`, `mood_logs`, `assessments`, `memories`, `session_summaries`
+`user_profiles`, `sessions`, `messages`, `emotion_readings`, `mood_logs`, `assessments`, `memories`, `session_summaries`, `user_formulations`
 
 ## Key Architecture Decisions
 

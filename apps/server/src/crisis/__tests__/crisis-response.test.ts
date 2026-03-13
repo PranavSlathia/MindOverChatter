@@ -137,6 +137,51 @@ describe("crisis-response", () => {
     });
   });
 
+  // ── Language Detection ───────────────────────────────────────
+  describe("language detection — Hinglish/Hindi responses", () => {
+    it("2+ Hinglish markers triggers Hindi response (nahi + hoon)", () => {
+      const response = getCrisisResponse("high", "main theek nahi hoon");
+      // Hindi response contains Hinglish text, not English "I hear you"
+      expect(response.message).toContain("aapki");
+    });
+
+    it("Devanagari script triggers Hindi response", () => {
+      const response = getCrisisResponse("medium", "मुझे मरना है");
+      // Hindi MEDIUM response uses "aap" (respectful "you")
+      expect(response.message).toContain("aap");
+      // Must not be the English response
+      expect(response.message).not.toContain("I can hear that");
+    });
+
+    it("English-only message returns English response", () => {
+      const response = getCrisisResponse("high", "I want to hurt myself");
+      expect(response.message).toContain("I hear you");
+    });
+
+    it("single Hinglish marker (below threshold) returns English response", () => {
+      const response = getCrisisResponse("high", "I feel sad hai");
+      // Only 1 marker ("hai") — threshold is 2 — should be English
+      expect(response.message).toContain("I hear you");
+    });
+
+    it("3 Hinglish markers triggers Hindi response (yaar + mujhe + hai)", () => {
+      const response = getCrisisResponse("high", "yaar mujhe bahut bura lag raha hai");
+      expect(response.message).toContain("aapki");
+    });
+
+    it("Hindi HIGH response contains all three helpline numbers", () => {
+      const response = getCrisisResponse("high", "main nahi hoon theek yaar");
+      expect(response.message).toContain("9152987821");
+      expect(response.message).toContain("1860-2662-345");
+      expect(response.message).toContain("988");
+    });
+
+    it("Hindi MEDIUM response contains wellness companion framing in Hindi", () => {
+      const response = getCrisisResponse("medium", "main nahi hoon theek yaar");
+      expect(response.message).toContain("wellness companion");
+    });
+  });
+
   // ── Severity Routing ────────────────────────────────────────
   describe("severity routing", () => {
     it('"high" and "crisis" map to the same (high) response message', () => {

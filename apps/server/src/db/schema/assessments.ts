@@ -37,6 +37,8 @@ export const assessmentTypeEnum = pgEnum("assessment_type", [
   "ecr",
   "pcl5",
   "ace_iq",
+  // CBT structured exercises
+  "cbt_thought_record",
 ]);
 
 export const assessmentSeverityEnum = pgEnum("assessment_severity", [
