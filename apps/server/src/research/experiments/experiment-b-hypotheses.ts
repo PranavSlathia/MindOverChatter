@@ -1,0 +1,220 @@
+// ── Experiment B — Hypothesis Confidence Feedback Simulator ──────
+// Simulates how session outcome data would shift hypothesis confidence
+// scores in therapy plans, without modifying any live plan.
+//
+// No Claude call. Pure simulation over therapy plan history and session
+// summaries. All writes go to research_hypothesis_simulations only.
+//
+// INVARIANT: Does NOT import upsertBlock, generateAndPersistTherapyPlan,
+// or generateAndPersistFormulation.
+
+import { randomUUID } from "node:crypto";
+import { db } from "../../db/index.js";
+import { researchHypothesisSimulations } from "../db/schema/index.js";
+import {
+  getTherapyPlanHistory,
+  getSessionSummariesWithSessions,
+} from "../lib/read-only-queries.js";
+import type { TherapyPlanRow, SessionSummaryWithSession } from "../lib/read-only-queries.js";
+
+// ── Experiment version ────────────────────────────────────────────
+
+const EXPERIMENT_VERSION = "1.0.0";
+
+// ── Public types ─────────────────────────────────────────────────
+
+export interface HypothesisDelta {
+  hypothesis: string;
+  actualConfidence: number;
+  simulatedConfidence: number;
+  delta: number;
+  direction: "increased" | "decreased" | "unchanged";
+  evidenceBasis: string;
+}
+
+export interface ExperimentBResult {
+  runId: string;
+  userId: string;
+  plansAnalyzedCount: number;
+  sessionsAnalyzedCount: number;
+  hypothesisDeltas: HypothesisDelta[];
+  meanAbsoluteDelta: number;
+  maxDelta: number;
+  /** Number of hypotheses where |delta| > 0.2. */
+  highDriftCount: number;
+  ranAt: Date;
+}
+
+// ── Pairing logic ─────────────────────────────────────────────────
+// Pair plan version N with the summary whose sessionStartedAt falls between
+// plan_N.createdAt and plan_N+1.createdAt (or after plan_N if it's the latest).
+
+interface PairedPlanSummary {
+  plan: TherapyPlanRow;
+  summary: SessionSummaryWithSession | null;
+}
+
+function pairPlansWithSummaries(
+  plans: TherapyPlanRow[],
+  summaries: SessionSummaryWithSession[],
+): PairedPlanSummary[] {
+  // plans arrive version DESC, summaries arrive sessionStartedAt DESC.
+  // Sort both chronologically for pairing.
+  const chronPlans = [...plans].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const chronSummaries = [...summaries].sort(
+    (a, b) => a.sessionStartedAt.getTime() - b.sessionStartedAt.getTime(),
+  );
+
+  return chronPlans.map((plan, idx) => {
+    const nextPlan = chronPlans[idx + 1];
+    const windowEnd = nextPlan ? nextPlan.createdAt : new Date(9999, 0, 1);
+
+    const matchingSummary = chronSummaries.find(
+      (s) =>
+        s.sessionStartedAt >= plan.createdAt &&
+        s.sessionStartedAt < windowEnd,
+    );
+
+    return { plan, summary: matchingSummary ?? null };
+  });
+}
+
+// ── Hypothesis simulation ─────────────────────────────────────────
+
+function keywordsOverlap(text: string, hypothesis: string): boolean {
+  if (!text || !hypothesis) return false;
+  // Extract words of 4+ chars from hypothesis to avoid stop-word matches
+  const words = hypothesis
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length >= 4);
+  const lowerText = text.toLowerCase();
+  return words.some((w) => lowerText.includes(w));
+}
+
+function simulateHypothesisDelta(
+  hypothesis: { hypothesis: string; confidence: number },
+  summary: SessionSummaryWithSession | null,
+): HypothesisDelta {
+  const actual = hypothesis.confidence;
+  let simulated = actual;
+  let evidenceBasis = "No paired session summary — confidence unchanged.";
+
+  if (summary) {
+    const themesText = (summary.themes ?? []).join(" ");
+    const patternsText = (summary.cognitivePatterns ?? []).join(" ");
+
+    const themesOverlap = keywordsOverlap(themesText, hypothesis.hypothesis);
+    const patternsContradict =
+      patternsText.length > 0 &&
+      !keywordsOverlap(patternsText, hypothesis.hypothesis) &&
+      patternsText.toLowerCase().includes("contradict") === false &&
+      // Heuristic: patterns are a signal of cognitive complexity; if they
+      // are present but don't overlap with the hypothesis, treat as mild
+      // contradiction signal. This is a conservative simulation — not a
+      // true semantic analysis.
+      patternsText.length > 10;
+
+    if (themesOverlap) {
+      simulated = Math.min(1.0, actual + 0.1);
+      evidenceBasis = `Session themes overlap hypothesis keywords — confidence increased by 0.1.`;
+    } else if (patternsContradict) {
+      simulated = Math.max(0.0, actual - 0.15);
+      evidenceBasis =
+        `Session cognitive patterns present but do not overlap hypothesis — ` +
+        `treated as weak contradiction signal, confidence decreased by 0.15.`;
+    } else {
+      evidenceBasis = `No theme overlap or contradiction signal — confidence unchanged.`;
+    }
+  }
+
+  const delta = simulated - actual;
+  const absDelta = Math.abs(delta);
+
+  let direction: "increased" | "decreased" | "unchanged";
+  if (absDelta < 0.001) {
+    direction = "unchanged";
+  } else if (delta > 0) {
+    direction = "increased";
+  } else {
+    direction = "decreased";
+  }
+
+  return {
+    hypothesis: hypothesis.hypothesis,
+    actualConfidence: actual,
+    simulatedConfidence: simulated,
+    delta,
+    direction,
+    evidenceBasis,
+  };
+}
+
+// ── Main experiment function ──────────────────────────────────────
+
+export async function runExperimentB(userId: string): Promise<ExperimentBResult> {
+  const runId = randomUUID();
+  const ranAt = new Date();
+
+  // Step 1 — read therapy plan history
+  const plans = await getTherapyPlanHistory(db, userId, 10);
+
+  // Step 2 — read session summaries
+  const summaries = await getSessionSummariesWithSessions(db, userId, 10);
+
+  // Step 3 — pair plans with session summaries
+  const paired = pairPlansWithSummaries(plans, summaries);
+
+  // Step 4 — simulate hypothesis deltas for each paired plan
+  const allDeltas: HypothesisDelta[] = [];
+
+  for (const { plan, summary } of paired) {
+    for (const hypothesis of plan.workingHypotheses) {
+      const delta = simulateHypothesisDelta(hypothesis, summary);
+      allDeltas.push(delta);
+    }
+  }
+
+  // Step 5 — compute aggregates
+  const meanAbsoluteDelta =
+    allDeltas.length > 0
+      ? allDeltas.reduce((sum, d) => sum + Math.abs(d.delta), 0) / allDeltas.length
+      : 0;
+
+  const maxDelta =
+    allDeltas.length > 0
+      ? Math.max(...allDeltas.map((d) => Math.abs(d.delta)))
+      : 0;
+
+  const highDriftCount = allDeltas.filter((d) => Math.abs(d.delta) > 0.2).length;
+
+  // Use the most recent plan's id as the plan reference (plans come back DESC by version)
+  const latestPlanId = plans[0]?.id ?? null;
+
+  // Write row to research_hypothesis_simulations
+  await db.insert(researchHypothesisSimulations).values({
+    userId,
+    experimentRunId: runId,
+    planId: latestPlanId,
+    plansAnalyzedCount: plans.length,
+    sessionsAnalyzedCount: summaries.length,
+    hypothesisDeltas: allDeltas as unknown as Record<string, unknown>[],
+    meanAbsoluteDelta,
+    maxDelta,
+    highDriftCount,
+    experimentVersion: EXPERIMENT_VERSION,
+    ranAt,
+  });
+
+  return {
+    runId,
+    userId,
+    plansAnalyzedCount: plans.length,
+    sessionsAnalyzedCount: summaries.length,
+    hypothesisDeltas: allDeltas,
+    meanAbsoluteDelta,
+    maxDelta,
+    highDriftCount,
+    ranAt,
+  };
+}

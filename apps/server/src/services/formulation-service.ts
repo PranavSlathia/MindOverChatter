@@ -4,7 +4,7 @@
 //
 // Consumers: session end, assessment submit, journey /insights.
 
-import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   assessments,
@@ -26,7 +26,11 @@ import type { ActionRecommendation } from "../routes/assessment-actions.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
-export type FormulationTrigger = "session_end" | "assessment_submit" | "manual";
+export type FormulationTrigger =
+  | "session_end"
+  | "session_end_fallback"   // Claude failed; row contains algorithmic data only
+  | "assessment_submit"
+  | "manual";
 
 export interface FormulationResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -380,6 +384,7 @@ export async function generateAndPersistFormulation(
   userId: string,
   triggeredBy: FormulationTrigger,
 ): Promise<FormulationResult> {
+  console.log(`[formulation-service] generateAndPersistFormulation called — userId: ${userId}, triggeredBy: ${triggeredBy}`);
   // ── Fetch ALL data sources in parallel ──────────────────────
   const [sessionCountRows, summaryRows, memoryRows, assessmentRows, moodRows] = await Promise.all([
     db
@@ -700,7 +705,9 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
   let snapshot: Record<string, any> | null = null;
 
   try {
+    console.log(`[formulation-service] Calling Claude for formulation (triggeredBy: ${triggeredBy})`);
     const rawResponse = await spawnClaudeStreaming(prompt, () => {});
+    console.log(`[formulation-service] Claude response length: ${rawResponse.length} chars`);
     if (rawResponse.trim()) {
       let jsonStr = rawResponse.trim();
       const codeFenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -749,7 +756,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
       };
     }
   } catch (err) {
-    console.error("[formulation-service] Failed to generate formulation:", err);
+    console.error(`[formulation-service] Claude call failed (triggeredBy: ${triggeredBy}):`, err instanceof Error ? `${err.message}\n${err.stack}` : err);
   }
 
   // Fallback if generation failed — populate with algorithmic data
@@ -869,7 +876,15 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
       dataConfidence,
       moodTrend,
     };
-    // Do NOT persist fallback — let the next request retry with Claude
+    // Persist the algorithmic fallback so session_end triggers always write a row
+    // and the journey page has something to show. Mark it as "session_end_fallback"
+    // so callers can distinguish it from a full Claude formulation.
+    // NOTE: getRecentFormulation() treats this row as fresh for up to 1 hour, so
+    // the fallback may be the canonical context for that window. The scheduler
+    // (every 2h) will eventually regenerate with Claude when the row goes stale.
+    const fallbackTrigger: FormulationTrigger =
+      triggeredBy === "session_end" ? "session_end_fallback" : triggeredBy;
+    await persistFormulation(userId, snapshot, fallbackDomainSignals, actionRecommendations, dataConfidence, fallbackTrigger);
     return { snapshot, domainSignals: fallbackDomainSignals, actionRecommendations, dataConfidence };
   }
 
@@ -903,24 +918,33 @@ async function persistFormulation(
   dataConfidence: string,
   triggeredBy: FormulationTrigger,
 ): Promise<void> {
-  // Get next version number
-  const [latest] = await db
-    .select({ version: userFormulations.version })
-    .from(userFormulations)
-    .where(eq(userFormulations.userId, userId))
-    .orderBy(desc(userFormulations.version))
-    .limit(1);
+  // Advisory lock serialises concurrent version allocation for the same user.
+  // lock id 3 is the formulation namespace (1 = therapy-plan, 2 = reserved).
+  let nextVersion = 1;
 
-  const nextVersion = (latest?.version ?? 0) + 1;
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(3, hashtext(${userId}::text))`,
+    );
 
-  await db.insert(userFormulations).values({
-    userId,
-    version: nextVersion,
-    snapshot,
-    domainSignals,
-    actionRecommendations,
-    dataConfidence,
-    triggeredBy,
+    const [latest] = await tx
+      .select({ version: userFormulations.version })
+      .from(userFormulations)
+      .where(eq(userFormulations.userId, userId))
+      .orderBy(desc(userFormulations.version))
+      .limit(1);
+
+    nextVersion = (latest?.version ?? 0) + 1;
+
+    await tx.insert(userFormulations).values({
+      userId,
+      version: nextVersion,
+      snapshot,
+      domainSignals,
+      actionRecommendations,
+      dataConfidence,
+      triggeredBy,
+    });
   });
 
   console.log(`[formulation-service] Persisted formulation v${nextVersion} for user ${userId} (triggered by: ${triggeredBy})`);

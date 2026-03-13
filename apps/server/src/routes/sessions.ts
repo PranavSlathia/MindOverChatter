@@ -90,12 +90,21 @@ const app = new Hono()
           ),
         ),
       )
-      .orderBy(desc(sessions.startedAt), desc(sessions.id))
-      .limit(limit)
-      .offset(offset);
+      .orderBy(desc(sessions.startedAt), desc(sessions.id), desc(sessionSummaries.createdAt))
+      .limit(limit * 10) // over-fetch to account for duplicates before dedup
+      .offset(0);
+
+    // Deduplicate: one row per session, keeping the most recent summary
+    // (a session can have multiple summaries if it was resumed after being completed)
+    const seen = new Set<string>();
+    const deduped = rows.filter((r) => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    }).slice(offset, offset + limit);
 
     return c.json({
-      sessions: rows.map((r) => ({
+      sessions: deduped.map((r) => ({
         id: r.id,
         status: r.status,
         startedAt: r.startedAt.toISOString(),

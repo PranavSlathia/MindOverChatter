@@ -16,6 +16,7 @@ assertHookContract({
     { name: "session-summary", priority: "critical" },
     { name: "formulation", priority: "background" },
     { name: "therapy-plan", priority: "background" },
+    { name: "user-memory-blocks", priority: "background" },
     { name: "therapeutic-calibration", priority: "background" },
   ],
 });

@@ -49,3 +49,57 @@ const CALIBRATION_BLOCKLIST: RegExp[] = [
 export function isSafeCalibration(text: string): boolean {
   return !CALIBRATION_BLOCKLIST.some((pattern) => pattern.test(text));
 }
+
+// ── User memory block safety blocklist ────────────────────────────
+// Guards the five user/* blocks (overview, goals, triggers, coping_strategies,
+// relationships). These blocks are injected into every session start context,
+// so any unsafe content becomes persistent prompt state.
+//
+// Two threat classes:
+//   1. Prompt injection — crafted user messages that became memories and could
+//      alter Claude's behaviour when re-injected at session start.
+//   2. Clinical labels — DSM diagnostic terms should NEVER be stored as profile
+//      facts; the app is a wellness companion, not a diagnostic tool.
+
+const USER_BLOCK_BLOCKLIST: RegExp[] = [
+  // ── Prompt injection patterns ────────────────────────────────
+  /ignore\s+(all\s+)?previous\s+instructions/i,
+  /you\s+are\s+now\s+(a|an)\s+/i,
+  /system\s*prompt/i,
+  /\[SYSTEM\]/i,
+  /\[INST\]/i,
+  // ── Safety bypass directives ─────────────────────────────────
+  /bypass.*crisis/i,
+  /skip.*crisis/i,
+  /ignore.*crisis/i,
+  /disable.*safety/i,
+  // ── Therapist / medical identity claims ──────────────────────
+  /\btherapist\b/i,
+  /\bpsychiatrist\b/i,
+  /\bcounselor\b/i,
+  /\bmedical\s+professional\b/i,
+  // ── Clinical / DSM diagnostic labels ─────────────────────────
+  /\bdiagnos(ed|is|tic|e)\b/i,             // diagnosed, diagnosis, diagnostic
+  /\bDSM\b/,
+  /\bbipolar\s+(disorder|I|II)\b/i,
+  /\bschizophreni/i,
+  /\bnarcissistic\s+personality\b/i,
+  /\bborderline\s+personality\b/i,
+  /\bAPD\b/,                               // Antisocial Personality Disorder acronym
+  // ── Crisis content — belongs in safety_critical memories only ─
+  /\bsuicid/i,
+  /\bself[-\s]harm\b/i,
+  /\bactive\s+plan\b/i,
+  // ── Medical advice ────────────────────────────────────────────
+  /\bmedication\b/i,
+  /\bprescri/i,                            // prescribe, prescription
+];
+
+/**
+ * Returns true if the block content is safe to persist in a user/* memory block.
+ * Called before every upsertBlock for user/* labels.
+ * Blocks: prompt injection, safety bypass directives, clinical diagnoses.
+ */
+export function isSafeUserBlock(text: string): boolean {
+  return !USER_BLOCK_BLOCKLIST.some((pattern) => pattern.test(text));
+}
