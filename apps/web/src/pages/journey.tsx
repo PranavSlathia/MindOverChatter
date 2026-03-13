@@ -1,15 +1,12 @@
 import { useEffect } from "react";
 import { Link } from "react-router";
-import { ActionCards } from "@/components/journey/action-cards.js";
-import { ActiveStateCards } from "@/components/journey/active-state-cards.js";
-import { CopingSteps } from "@/components/journey/coping-steps.js";
 import { FormulationMap } from "@/components/journey/formulation-map.js";
+import { HowYoureDoing } from "@/components/journey/how-youre-doing.js";
 import { MoodTrajectory } from "@/components/journey/mood-trajectory.js";
-import { ProtectiveStrengths } from "@/components/journey/protective-strengths.js";
 import { ReflectiveQuestions } from "@/components/journey/reflective-questions.js";
 import { SessionTimeline } from "@/components/journey/session-timeline.js";
 import { ThemeOfToday } from "@/components/journey/theme-of-today.js";
-import { WellbeingMap } from "@/components/journey/wellbeing-map.js";
+import { WhatMightHelp } from "@/components/journey/what-might-help.js";
 import { api } from "@/lib/api.js";
 import type {
   JourneyFormulation,
@@ -106,34 +103,24 @@ export function JourneyPage() {
         </div>
       )}
 
-      {/* Section 1: Theme of Today */}
+      {/* Section 1: Theme Banner */}
       {!isLoadingInsights && insights && <ThemeOfToday formulation={insights} />}
 
-      {/* Section 2: What's Active Right Now */}
-      {!isLoadingInsights && insights && <ActiveStateCards formulation={insights} />}
+      {/* Section 2: How You're Doing (merged ActiveStates + WellbeingMap) */}
+      {!isLoadingInsights && insights && <HowYoureDoing formulation={insights} />}
 
-      {/* Section 3: What You're Building */}
-      {!isLoadingInsights && insights && <ProtectiveStrengths formulation={insights} />}
-
-      {/* Section 4: Wellbeing Map (not shown for sparse data) */}
-      {!isLoadingInsights && insights && confidence !== "sparse" && (
-        <WellbeingMap formulation={insights} />
-      )}
-
-      {/* Section 5: How We Understand This (not shown for sparse data) */}
+      {/* Section 3: Patterns We're Noticing (gated: confidence != sparse) */}
       {!isLoadingInsights && insights && confidence !== "sparse" && (
         <FormulationMap formulation={insights} />
       )}
 
-      {/* Section 6: Questions Worth Exploring */}
+      {/* Section 4: Questions Worth Exploring */}
       {!isLoadingInsights && insights && <ReflectiveQuestions formulation={insights} />}
 
-      {/* Section 7: Action Recommendations (not shown for sparse data) */}
-      {!isLoadingInsights && insights && confidence !== "sparse" && (
-        <ActionCards formulation={insights} />
-      )}
+      {/* Section 5: What Might Help (merged ProtectiveStrengths + CopingSteps + ActionCards) */}
+      {!isLoadingInsights && insights && <WhatMightHelp formulation={insights} />}
 
-      {/* Sparse data gentle message for hidden sections */}
+      {/* Sparse data gentle message */}
       {!isLoadingInsights && insights && confidence === "sparse" && (
         <div className="rounded-2xl border border-primary/10 bg-primary/5 p-6 text-center">
           <p className="text-sm leading-relaxed text-foreground/50">
@@ -143,7 +130,7 @@ export function JourneyPage() {
         </div>
       )}
 
-      {/* Timeline & Charts Section */}
+      {/* Section 6: Your Journey So Far */}
       <section>
         <h2 className="mb-3 text-lg font-semibold text-foreground">Your Journey So Far</h2>
 
@@ -166,9 +153,6 @@ export function JourneyPage() {
               sessions={sessionItems.map((s) => s.data)}
               assessments={assessmentItems.map((a) => a.data)}
             />
-
-            {/* Things That Might Help */}
-            {!isLoadingInsights && insights && <CopingSteps formulation={insights} />}
           </div>
         ) : (
           <div className="rounded-2xl border border-primary/10 bg-primary/5 p-8 text-center">

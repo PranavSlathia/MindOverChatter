@@ -64,6 +64,13 @@
       "when": 1773395687196,
       "tag": "0008_tiresome_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1773397673862,
+      "tag": "0009_ivfflat_vector_indexes",
+      "breakpoints": true
     }
   ]
 }
