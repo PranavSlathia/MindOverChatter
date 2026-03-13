@@ -40,6 +40,7 @@ export interface FormulationResult {
 // ── Constants ───────────────────────────────────────────────────
 
 const FORMULATION_FRESHNESS_MS = 60 * 60 * 1000; // 1 hour
+const REGENERATION_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // ── Public API ──────────────────────────────────────────────────
 
@@ -99,6 +100,276 @@ export async function getLatestFormulation(
     domainSignals: (row.domainSignals ?? {}) as Record<string, any>,
     dataConfidence: row.dataConfidence,
   };
+}
+
+/**
+ * Get the best available formulation instantly (no Claude CLI).
+ * Priority: recent DB row → latest DB row (any age) → algorithmic-only fallback.
+ * If the formulation is stale, triggers a background regeneration.
+ */
+export async function getFormulationInstant(
+  userId: string,
+): Promise<FormulationResult> {
+  // 1. Try recent formulation (< 1 hour)
+  const recent = await getRecentFormulation(userId);
+  if (recent) {
+    return {
+      snapshot: recent.snapshot,
+      domainSignals: recent.domainSignals,
+      actionRecommendations: recent.actionRecommendations,
+      dataConfidence: recent.dataConfidence as FormulationResult["dataConfidence"],
+    };
+  }
+
+  // 2. Try latest formulation regardless of age
+  const latest = await getLatestFormulation(userId);
+  if (latest) {
+    // Trigger background regeneration since it's stale
+    generateAndPersistFormulation(userId, "manual").catch((err) => {
+      console.error("[formulation-service] Background regeneration failed:", err);
+    });
+    return {
+      snapshot: latest.snapshot,
+      domainSignals: latest.domainSignals,
+      actionRecommendations: latest.actionRecommendations,
+      dataConfidence: latest.dataConfidence as FormulationResult["dataConfidence"],
+    };
+  }
+
+  // 3. No formulation exists at all — build algorithmic-only (fast, no Claude)
+  const result = await generateAlgorithmicFormulation(userId);
+
+  // Also trigger a full Claude generation in the background for next load
+  generateAndPersistFormulation(userId, "manual").catch((err) => {
+    console.error("[formulation-service] Background initial generation failed:", err);
+  });
+
+  return result;
+}
+
+/**
+ * Build a formulation from algorithmic data only (no Claude CLI call).
+ * Fast — runs DB queries + pure functions only. Does NOT persist.
+ */
+async function generateAlgorithmicFormulation(
+  userId: string,
+): Promise<FormulationResult> {
+  const [summaryRows, memoryRows, assessmentRows, moodRows, sessionCountRows] = await Promise.all([
+    db
+      .select({
+        content: sessionSummaries.content,
+        themes: sessionSummaries.themes,
+        cognitivePatterns: sessionSummaries.cognitivePatterns,
+        actionItems: sessionSummaries.actionItems,
+        createdAt: sessionSummaries.createdAt,
+      })
+      .from(sessionSummaries)
+      .where(and(eq(sessionSummaries.userId, userId), eq(sessionSummaries.level, "session")))
+      .orderBy(desc(sessionSummaries.createdAt))
+      .limit(7),
+
+    db
+      .select({
+        id: memories.id,
+        content: memories.content,
+        memoryType: memories.memoryType,
+        confidence: memories.confidence,
+        createdAt: memories.createdAt,
+      })
+      .from(memories)
+      .where(
+        and(
+          eq(memories.userId, userId),
+          isNull(memories.supersededBy),
+          inArray(memories.memoryType, [
+            "life_event", "profile_fact", "recurring_trigger", "unresolved_thread",
+            "coping_strategy", "relationship", "symptom_episode", "win", "goal", "safety_critical",
+          ]),
+        ),
+      )
+      .orderBy(desc(memories.confidence))
+      .limit(100),
+
+    db
+      .select({
+        type: assessments.type,
+        answers: assessments.answers,
+        totalScore: assessments.totalScore,
+        severity: assessments.severity,
+        createdAt: assessments.createdAt,
+      })
+      .from(assessments)
+      .where(eq(assessments.userId, userId))
+      .orderBy(desc(assessments.createdAt)),
+
+    db
+      .select({
+        valence: moodLogs.valence,
+        arousal: moodLogs.arousal,
+        createdAt: moodLogs.createdAt,
+      })
+      .from(moodLogs)
+      .where(eq(moodLogs.userId, userId))
+      .orderBy(desc(moodLogs.createdAt))
+      .limit(30),
+
+    db
+      .select({ id: sessions.id, startedAt: sessions.startedAt })
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), eq(sessions.status, "completed")))
+      .orderBy(desc(sessions.startedAt)),
+  ]);
+
+  // Compute data confidence
+  const completedSessions = sessionCountRows.length;
+  const uniqueDays = new Set(sessionCountRows.map((s) => s.startedAt.toISOString().slice(0, 10))).size;
+  const memoryTypeCount = new Set(memoryRows.map((m) => m.memoryType)).size;
+  const evidenceScore =
+    Math.min(completedSessions, 10) +
+    Math.min(uniqueDays, 7) * 1.5 +
+    memoryTypeCount * 0.5 +
+    (assessmentRows.length > 0 ? 2 : 0) +
+    (summaryRows.length > 0 ? 2 : 0);
+  const dataConfidence: FormulationResult["dataConfidence"] =
+    evidenceScore < 5 ? "sparse" : evidenceScore < 15 ? "emerging" : "established";
+
+  const moodTrend = computeMoodTrend(moodRows);
+
+  // Empty data case
+  if (summaryRows.length === 0 && memoryRows.length === 0 && assessmentRows.length === 0) {
+    return {
+      snapshot: {
+        formulation: { presentingTheme: "", roots: [], recentActivators: [], perpetuatingCycles: [], protectiveStrengths: [] },
+        userReflection: { summary: "Your journey is just beginning. Each conversation adds to a richer picture.", encouragement: "We're here whenever you're ready to talk." },
+        activeStates: [], domainSignals: {}, questionsWorthExploring: [], themeOfToday: "Your journey is just beginning.",
+        copingSteps: [], dataConfidence, moodTrend,
+      },
+      domainSignals: {},
+      actionRecommendations: [],
+      dataConfidence,
+    };
+  }
+
+  // Dedup + group memories
+  const deduped = deduplicateMemories(memoryRows);
+  const groupByType = (type: string) =>
+    deduped.filter((m) => m.memoryType === type).slice(0, 8).map((m) => ({
+      id: m.id, content: m.content, confidence: m.confidence, createdAt: m.createdAt.toISOString(),
+    }));
+  const memoryGroups = {
+    life_event: groupByType("life_event"),
+    recurring_trigger: groupByType("recurring_trigger"),
+    unresolved_thread: groupByType("unresolved_thread"),
+    coping_strategy: groupByType("coping_strategy"),
+    symptom_episode: groupByType("symptom_episode"),
+    win: groupByType("win"),
+    goal: groupByType("goal"),
+    safety_critical: groupByType("safety_critical"),
+  };
+
+  // Algorithmic domain signals
+  const assessmentInputs: AssessmentInput[] = assessmentRows
+    .filter((a) => a.answers && Array.isArray(a.answers))
+    .map((a) => ({
+      type: a.type as AssessmentInput["type"],
+      answers: a.answers as number[],
+      totalScore: a.totalScore,
+      severity: a.severity as AssessmentInput["severity"],
+      createdAt: a.createdAt,
+    }));
+
+  const algorithmicDomainSignals = computeDomainSignals(assessmentInputs);
+  const correlations = detectCorrelations(assessmentInputs);
+  const domainTrends = computeDomainTrends(assessmentInputs);
+  const actionRecommendations = computeActionRecommendations(algorithmicDomainSignals, correlations, domainTrends, assessmentInputs);
+
+  // Build domain signals object
+  const domainSignalsObj: Record<string, unknown> = {};
+  for (const sig of algorithmicDomainSignals) {
+    const trend = domainTrends.find((t) => t.domain === sig.domain);
+    domainSignalsObj[sig.domain] = {
+      level: sig.level,
+      trend: trend?.trend ?? "stable",
+      evidence: `Based on ${sig.contributions.length} assessment(s).`,
+    };
+  }
+
+  // Derive theme from session summary themes
+  const recentThemes = summaryRows.flatMap((s) => s.themes ?? []).filter(Boolean).slice(0, 3);
+  const themeOfToday = recentThemes.length > 0 ? recentThemes.join(", ") : "We're still gathering threads from your conversations.";
+
+  // Build active states from assessments
+  const activeStates: Array<{ label: string; confidence: number; signal: string; domain: string }> = [];
+  for (const a of assessmentRows.slice(0, 5)) {
+    if (a.severity === "moderate" || a.severity === "moderately_severe" || a.severity === "severe") {
+      const domain = a.type === "phq9" ? "vitality" : a.type === "gad7" ? "groundedness" : "self_regard";
+      activeStates.push({ label: `${a.type.toUpperCase()} indicates ${a.severity.replace("_", " ")}`, confidence: 0.8, signal: `Score: ${a.totalScore}`, domain });
+    }
+  }
+  for (const m of memoryGroups.symptom_episode.slice(0, 3)) {
+    activeStates.push({ label: m.content.slice(0, 80), confidence: m.confidence, signal: "From conversation memory", domain: "vitality" });
+  }
+
+  const snapshot = {
+    formulation: {
+      presentingTheme: recentThemes[0] ?? "",
+      roots: memoryGroups.life_event.slice(0, 3).map((m) => ({ content: m.content, sourceType: "life_event", confidence: m.confidence, evidenceRefs: [{ sourceType: "life_event", sourceId: m.id.slice(0, 8) }] })),
+      recentActivators: memoryGroups.recurring_trigger.slice(0, 3).map((m) => ({ content: m.content, confidence: m.confidence, evidenceRefs: [{ sourceType: "recurring_trigger", sourceId: m.id.slice(0, 8) }] })),
+      perpetuatingCycles: memoryGroups.unresolved_thread.slice(0, 3).map((m) => ({ pattern: m.content.slice(0, 80), mechanism: "Identified from conversation patterns", evidenceRefs: [{ sourceType: "unresolved_thread", sourceId: m.id.slice(0, 8) }] })),
+      protectiveStrengths: [
+        ...memoryGroups.win.slice(0, 3).map((m) => ({ content: m.content, sourceType: "win", evidenceRefs: [{ sourceType: "win", sourceId: m.id.slice(0, 8) }] })),
+        ...memoryGroups.goal.slice(0, 2).map((m) => ({ content: m.content, sourceType: "goal", evidenceRefs: [{ sourceType: "goal", sourceId: m.id.slice(0, 8) }] })),
+        ...memoryGroups.coping_strategy.slice(0, 2).map((m) => ({ content: m.content, sourceType: "coping_strategy", evidenceRefs: [{ sourceType: "coping_strategy", sourceId: m.id.slice(0, 8) }] })),
+      ],
+    },
+    userReflection: {
+      summary: summaryRows.length > 0
+        ? `From our recent conversations, we've been exploring ${recentThemes.slice(0, 2).join(" and ") || "several topics together"}.`
+        : "We're still gathering threads from your conversations.",
+      encouragement: "Every session helps us understand you better.",
+    },
+    activeStates,
+    domainSignals: domainSignalsObj,
+    questionsWorthExploring: actionRecommendations.slice(0, 4).map((a) => ({ question: a.conversationHint, rationale: a.evidenceSummary, linkedTo: a.domain })),
+    themeOfToday,
+    copingSteps: memoryGroups.coping_strategy.slice(0, 4).map((m) => ({ step: m.content.slice(0, 60), rationale: `Something you've shared with us.`, domain: "groundedness" })),
+    dataConfidence,
+    moodTrend,
+  };
+
+  return { snapshot, domainSignals: domainSignalsObj, actionRecommendations, dataConfidence };
+}
+
+/**
+ * Start background periodic formulation regeneration.
+ * Runs every 2 hours for users who have had recent activity.
+ */
+export function startFormulationScheduler(): void {
+  console.log("[formulation-service] Starting background scheduler (every 2h)");
+
+  setInterval(async () => {
+    try {
+      // Find users with sessions in the last 7 days
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const activeUsers = await db
+        .selectDistinct({ userId: sessions.userId })
+        .from(sessions)
+        .where(gte(sessions.startedAt, cutoff));
+
+      for (const { userId } of activeUsers) {
+        // Skip if there's a recent formulation
+        const recent = await getRecentFormulation(userId, REGENERATION_INTERVAL_MS);
+        if (recent) continue;
+
+        console.log(`[formulation-service] Regenerating formulation for user ${userId}`);
+        await generateAndPersistFormulation(userId, "manual").catch((err) => {
+          console.error(`[formulation-service] Scheduled regeneration failed for ${userId}:`, err);
+        });
+      }
+    } catch (err) {
+      console.error("[formulation-service] Scheduler error:", err);
+    }
+  }, REGENERATION_INTERVAL_MS);
 }
 
 /**
@@ -481,29 +752,125 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
     console.error("[formulation-service] Failed to generate formulation:", err);
   }
 
-  // Fallback if generation failed
+  // Fallback if generation failed — populate with algorithmic data
   if (!snapshot) {
+    // Build domain signals from algorithmic computation
+    const fallbackDomainSignals: Record<string, unknown> = {};
+    for (const sig of algorithmicDomainSignals) {
+      const trend = domainTrends.find((t) => t.domain === sig.domain);
+      fallbackDomainSignals[sig.domain] = {
+        level: sig.level,
+        trend: trend?.trend ?? "stable",
+        evidence: `Based on ${sig.contributions.length} assessment(s).`,
+        contributions: sig.contributions.map((c) => ({
+          assessmentType: c.source.assessmentType,
+          subscale: c.source.subscale,
+          normalizedScore: c.normalizedScore,
+        })),
+      };
+    }
+
+    // Derive activeStates from assessment severity + memory symptom episodes
+    const fallbackActiveStates: Array<{ label: string; confidence: number; signal: string; domain: string }> = [];
+    for (const a of assessmentRows.slice(0, 5)) {
+      if (a.severity === "moderate" || a.severity === "moderately_severe" || a.severity === "severe") {
+        const domain = a.type === "phq9" ? "vitality" : a.type === "gad7" ? "groundedness" : "self_regard";
+        fallbackActiveStates.push({
+          label: `${a.type.toUpperCase()} indicates ${a.severity.replace("_", " ")}`,
+          confidence: 0.8,
+          signal: `Score: ${a.totalScore}`,
+          domain,
+        });
+      }
+    }
+    for (const m of memoryGroups.symptom_episode.slice(0, 3)) {
+      fallbackActiveStates.push({
+        label: m.content.slice(0, 80),
+        confidence: m.confidence,
+        signal: "From conversation memory",
+        domain: "vitality",
+      });
+    }
+
+    // Derive protectiveStrengths from win/goal/coping_strategy memories
+    const fallbackStrengths = [
+      ...memoryGroups.win.slice(0, 3).map((m) => ({ content: m.content, sourceType: "win" as const, evidenceRefs: [{ sourceType: "win", sourceId: m.id.slice(0, 8) }] })),
+      ...memoryGroups.goal.slice(0, 2).map((m) => ({ content: m.content, sourceType: "goal" as const, evidenceRefs: [{ sourceType: "goal", sourceId: m.id.slice(0, 8) }] })),
+      ...memoryGroups.coping_strategy.slice(0, 2).map((m) => ({ content: m.content, sourceType: "coping_strategy" as const, evidenceRefs: [{ sourceType: "coping_strategy", sourceId: m.id.slice(0, 8) }] })),
+    ];
+
+    // Derive themeOfToday from most recent session summary themes
+    const recentThemes = summaryRows
+      .flatMap((s) => s.themes ?? [])
+      .filter(Boolean)
+      .slice(0, 3);
+    const fallbackTheme = recentThemes.length > 0
+      ? recentThemes.join(", ")
+      : "We're still gathering threads from your conversations.";
+
+    // Derive questionsWorthExploring from action recommendations
+    const fallbackQuestions = actionRecommendations.slice(0, 4).map((a) => ({
+      question: a.conversationHint,
+      rationale: a.evidenceSummary,
+      linkedTo: a.domain,
+    }));
+
+    // Derive copingSteps from coping_strategy memories
+    const fallbackCopingSteps = memoryGroups.coping_strategy.slice(0, 4).map((m) => ({
+      step: m.content.slice(0, 60),
+      rationale: `Something you've shared with us (confidence: ${m.confidence}).`,
+      domain: "groundedness",
+    }));
+
+    // Build summary from session summaries if available
+    const fallbackSummary = summaryRows.length > 0
+      ? `From our recent conversations, we've been exploring ${recentThemes.slice(0, 2).join(" and ") || "several topics together"}.`
+      : "We're still gathering threads from your conversations.";
+
+    // Derive presenting theme from recent triggers or themes
+    const fallbackPresentingTheme = recentThemes[0] ?? "";
+
+    // Derive roots from life_event memories
+    const fallbackRoots = memoryGroups.life_event.slice(0, 3).map((m) => ({
+      content: m.content,
+      sourceType: "life_event",
+      confidence: m.confidence,
+      evidenceRefs: [{ sourceType: "life_event", sourceId: m.id.slice(0, 8) }],
+    }));
+
+    // Derive recentActivators from recurring_trigger memories
+    const fallbackActivators = memoryGroups.recurring_trigger.slice(0, 3).map((m) => ({
+      content: m.content,
+      confidence: m.confidence,
+      evidenceRefs: [{ sourceType: "recurring_trigger", sourceId: m.id.slice(0, 8) }],
+    }));
+
     snapshot = {
       formulation: {
-        presentingTheme: "",
-        roots: [],
-        recentActivators: [],
-        perpetuatingCycles: [],
-        protectiveStrengths: [],
+        presentingTheme: fallbackPresentingTheme,
+        roots: fallbackRoots,
+        recentActivators: fallbackActivators,
+        perpetuatingCycles: memoryGroups.unresolved_thread.slice(0, 3).map((m) => ({
+          pattern: m.content.slice(0, 80),
+          mechanism: "Identified from conversation patterns",
+          evidenceRefs: [{ sourceType: "unresolved_thread", sourceId: m.id.slice(0, 8) }],
+        })),
+        protectiveStrengths: fallbackStrengths,
       },
       userReflection: {
-        summary: "We're still gathering threads from your conversations.",
+        summary: fallbackSummary,
         encouragement: "Every session helps us understand you better.",
       },
-      activeStates: [],
-      domainSignals: {},
-      questionsWorthExploring: [],
-      themeOfToday: "We're still gathering threads from your conversations.",
+      activeStates: fallbackActiveStates,
+      domainSignals: fallbackDomainSignals,
+      questionsWorthExploring: fallbackQuestions,
+      themeOfToday: fallbackTheme,
+      copingSteps: fallbackCopingSteps,
       dataConfidence,
       moodTrend,
     };
-    // Do NOT persist fallback — let the next request retry
-    return { snapshot, domainSignals: {}, actionRecommendations, dataConfidence };
+    // Do NOT persist fallback — let the next request retry with Claude
+    return { snapshot, domainSignals: fallbackDomainSignals, actionRecommendations, dataConfidence };
   }
 
   // ── Persist to DB ───────────────────────────────────────────

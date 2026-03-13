@@ -11,7 +11,7 @@ import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
 import { assessments, memories, messages, moodLogs, sessionSummaries, sessions } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
-import { getRecentFormulation, generateAndPersistFormulation } from "../services/formulation-service.js";
+import { getFormulationInstant } from "../services/formulation-service.js";
 
 const USER_VISIBLE_TIMELINE_MEMORY_TYPES = [
   "profile_fact",
@@ -237,55 +237,18 @@ const app = new Hono()
     return c.json({ items: response, limit, offset });
   })
 
-  // ── GET /insights — AI-Generated Formulation ──────────────────
-  // Now backed by the canonical `user_formulations` table.
-  // 1. Check for a recent snapshot (< 1 hour) → return directly
-  // 2. If stale/missing → generate, persist, and return
+  // ── GET /insights — Formulation (instant, never blocks on Claude CLI) ──
+  // Priority: recent DB row → latest DB row (any age) → algorithmic-only fallback.
+  // If stale, triggers background regeneration via Claude CLI.
   .get("/insights", async (c) => {
     const user = await getOrCreateUser();
 
-    // Check for a recent formulation in the DB
-    const recent = await getRecentFormulation(user.id);
-    if (recent) {
-      return c.json({
-        ...recent.snapshot,
-        actionRecommendations: recent.actionRecommendations,
-        cachedAt: recent.createdAt.toISOString(),
-      });
-    }
-
-    // No fresh formulation — generate one
-    try {
-      const result = await generateAndPersistFormulation(user.id, "manual");
-      return c.json({
-        ...result.snapshot,
-        actionRecommendations: result.actionRecommendations,
-        cachedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error("[journey] Formulation generation failed:", err);
-      return c.json({
-        formulation: {
-          presentingTheme: "",
-          roots: [],
-          recentActivators: [],
-          perpetuatingCycles: [],
-          protectiveStrengths: [],
-        },
-        userReflection: {
-          summary: "We're still gathering threads from your conversations.",
-          encouragement: "Every session helps us understand you better.",
-        },
-        activeStates: [],
-        domainSignals: {},
-        questionsWorthExploring: [],
-        themeOfToday: "We're still gathering threads from your conversations.",
-        dataConfidence: "sparse",
-        moodTrend: { direction: "stable", period: "not enough data" },
-        actionRecommendations: [],
-        cachedAt: new Date().toISOString(),
-      });
-    }
+    const result = await getFormulationInstant(user.id);
+    return c.json({
+      ...result.snapshot,
+      actionRecommendations: result.actionRecommendations,
+      cachedAt: new Date().toISOString(),
+    });
   })
 
   // ── GET /assessments — Assessment History ───────────────────

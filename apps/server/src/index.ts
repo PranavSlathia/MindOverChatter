@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { env } from "./env.js";
 import { app } from "./routes/index.js";
 import { startOrphanSweep } from "./session/orphan-sweep.js";
+import { startFormulationScheduler } from "./services/formulation-service.js";
 
 // ── Claude CLI auth check ────────────────────────────────────────
 // Verify the local `claude` CLI is installed and authenticated
@@ -38,6 +39,9 @@ serve({
 
 // Start the orphan session sweep (runs every 5 minutes)
 const stopSweep = startOrphanSweep();
+
+// Start background formulation regeneration (runs every 2 hours)
+startFormulationScheduler();
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
