@@ -92,7 +92,13 @@ export function registerSessionHooks(): void {
     // Build the ordered label map for O(1) lookup
     const blockByLabel = new Map(blocks.map((b) => [b.label, b.content]));
 
-    const lines: string[] = ["=== User Memory Blocks ==="];
+    const lines: string[] = [
+      "=== Your Memory About This User ===",
+      "These are your own notes about the user — facts you have already learned across previous sessions.",
+      "When the user asks if you remember something, consult these notes first. Do not say you don't know",
+      "something that is recorded here. Treat this as your own memory, not external information.",
+      "",
+    ];
     for (const label of MEMORY_BLOCK_LABELS) {
       const raw = blockByLabel.get(label) ?? "";
       const safeContent = sanitizeForPrompt(raw);
@@ -100,7 +106,7 @@ export function registerSessionHooks(): void {
       lines.push(safeContent !== "" ? safeContent : "(not yet set)");
       lines.push("");
     }
-    lines.push("=== End User Memory Blocks ===");
+    lines.push("=== End of Your Memory ===");
 
     injectSessionContext(ctx.sdkSessionId, lines.join("\n"));
   });
