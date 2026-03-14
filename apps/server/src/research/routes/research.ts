@@ -21,6 +21,7 @@ import { runExperimentA } from "../experiments/experiment-a-calibration.js";
 import { runExperimentB } from "../experiments/experiment-b-hypotheses.js";
 import { runExperimentC } from "../experiments/experiment-c-direction.js";
 import { runExperimentD } from "../experiments/experiment-d-replay.js";
+import { runExperimentE } from "../experiments/experiment-e-developmental.js";
 import type { OutcomeConfidence, OutcomeDirection } from "../lib/outcome-scorer.js";
 import { promote } from "../lib/promote.js";
 import {
@@ -28,12 +29,13 @@ import {
   formatReportB,
   formatReportC,
   formatReportD,
+  formatReportE,
 } from "../lib/research-reporter.js";
 
 // ── Zod request schemas ───────────────────────────────────────────
 
 const RunExperimentSchema = z.object({
-  experiment: z.enum(["a", "b", "c", "d", "all"]),
+  experiment: z.enum(["a", "b", "c", "d", "e", "all"]),
   userId: z.string().uuid(),
   candidateContent: z.string().optional(),
 });
@@ -92,6 +94,12 @@ research.post("/run", zValidator("json", RunExperimentSchema), async (c) => {
     if (experiment === "d" || experiment === "all") {
       const result = await runExperimentD(userId, candidateContent);
       const { json } = formatReportD(result);
+      reports.push(json);
+    }
+
+    if (experiment === "e" || experiment === "all") {
+      const result = await runExperimentE(userId);
+      const { json } = formatReportE(result);
       reports.push(json);
     }
 
@@ -205,9 +213,9 @@ research.get("/report/:runId", async (c) => {
     return c.json({ error: "Invalid runId — must be a UUID." }, 400);
   }
 
-  const experimentParsed = z.enum(["a", "b", "c", "d"]).safeParse(experiment);
+  const experimentParsed = z.enum(["a", "b", "c", "d", "e"]).safeParse(experiment);
   if (!experimentParsed.success) {
-    return c.json({ error: "Query param 'experiment' must be 'a', 'b', 'c', or 'd'." }, 400);
+    return c.json({ error: "Query param 'experiment' must be 'a', 'b', 'c', 'd', or 'e'." }, 400);
   }
 
   const exp = experimentParsed.data;
@@ -344,6 +352,19 @@ research.get("/report/:runId", async (c) => {
       return c.json({ ok: true, report: json });
     }
 
+    if (exp === "e") {
+      // Experiment E writes to research_developmental_coverage (via DB in runExperimentE).
+      // Re-running the experiment for the same runId is not meaningful (different runId each time).
+      // Return a 501 directing the user to run the experiment fresh instead.
+      return c.json(
+        {
+          error:
+            "Experiment E reports cannot be reconstructed from a runId. Run the experiment again to get a fresh report.",
+        },
+        501,
+      );
+    }
+
     // exp === 'c'
     const rows = await db
       .select()
@@ -368,7 +389,11 @@ research.get("/report/:runId", async (c) => {
       meanComplianceScore: row.complianceScore ?? 0,
       modeAlignedSessions: row.modeAligned === true ? 1 : 0,
       modeUnalignedSessions: row.modeAligned === false ? 1 : 0,
-      dataGaps: ["Report reconstructed from single row — full detail in original run report."],
+      childhoodExplorationCount: 0,
+      dataGaps: [
+        "Report reconstructed from single row — full detail in original run report.",
+        "childhoodExplorationCount is 0 in reconstructed reports — run-level aggregate is not stored per row.",
+      ],
       ranAt: row.ranAt,
     };
 

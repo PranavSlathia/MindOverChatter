@@ -24,7 +24,7 @@ import type { MemoryBlockLabel } from "@moc/shared/validators/memory-block";
 // ── Public constants ─────────────────────────────────────────────
 
 /**
- * Canonical set of all 6 memory block labels.
+ * Canonical set of all 7 memory block labels.
  * Derived from the schema — single source of truth.
  */
 export const MEMORY_BLOCK_LABELS = MemoryBlockLabelSchema.options as MemoryBlockLabel[];
@@ -36,6 +36,7 @@ export const BLOCK_CHAR_LIMITS: Record<MemoryBlockLabel, number> = {
   "user/triggers": 500,
   "user/coping_strategies": 500,
   "user/relationships": 500,
+  "user/origin_story": 1000,
   "companion/therapeutic_calibration": 800,
 };
 

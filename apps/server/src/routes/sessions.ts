@@ -16,7 +16,7 @@ import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
 import { env } from "../env.js";
-import { sessions, messages, sessionSummaries, assessments, emotionReadings } from "../db/schema/index";
+import { sessions, messages, sessionSummaries, assessments, emotionReadings, memoryBlocks } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
@@ -28,12 +28,16 @@ import {
   loadSkillFiles,
   selectRelevantSkills,
   injectSessionContext,
+  injectSkillDynamically,
   isSessionActive,
   getSessionMode,
   setSessionMode,
   getSessionAuthority,
+  getSessionMessages,
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
+import { runSessionSupervisor } from "../services/session-supervisor.js";
+import { runResponseValidator } from "../services/response-validator.js";
 import {
   getAllMemories,
   searchMemories,
@@ -163,8 +167,18 @@ const app = new Hono()
     }
 
     // ── Selective skill loading based on formulation ─────────────
+    // Count prior COMPLETED sessions to determine if this is a returning user.
+    // Do not use formulation presence as proxy — assessments can generate
+    // formulations during a user's first session, incorrectly triggering
+    // developmental probing (probing-development.md rule: ≥2nd session only).
+    const [completedCountRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sessions)
+      .where(and(eq(sessions.userId, user.id), eq(sessions.status, "completed")));
+    const isReturningUser = (completedCountRow?.count ?? 0) > 0;
+
     const allSkills = loadSkillFiles();
-    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null);
+    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null, isReturningUser);
 
     // Create an SDK session with memory context and selectively loaded skills
     const sdkSessionId = await createSdkSession(
@@ -391,20 +405,73 @@ const app = new Hono()
       setSessionMode(sdkSessionId, targetMode);
     }
 
-    // Notify SSE subscribers that the AI is processing
+    // Notify SSE subscribers that the AI is processing (immediate — before supervisor)
     sessionEmitter.emit(sessionId, {
       event: "ai.thinking",
       data: { status: "thinking" },
     });
 
-    // Kick off streaming in the background — do not await
-    streamAiResponse(sessionId, sdkSessionId, text, userMsg!.id, session.userId).catch((err) => {
-      console.error(`AI streaming error for session ${sessionId}:`, err);
-      sessionEmitter.emit(sessionId, {
-        event: "ai.error",
-        data: { error: "Failed to get AI response" },
+    // ── Background pipeline: Supervisor → inject → Claude response ─
+    // The supervisor MUST complete before streamAiResponse() so that
+    // skill injections and context hints are in the prompt.
+    // HTTP response returns immediately; client listens on SSE.
+    void (async () => {
+      // ── Session Supervisor (LLM-enhanced mode/skill selection) ──
+      // Haiku call that classifies intent, refines mode, and activates dynamic skills.
+      // Falls back silently to regex result on failure or low confidence.
+      try {
+        const sdkMessages = getSessionMessages(sdkSessionId);
+        const allSkills = loadSkillFiles();
+        const formulation = await getLatestFormulation(session.userId);
+
+        const originBlock = await db.query.memoryBlocks.findFirst({
+          where: (mb, { and, eq }) =>
+            and(eq(mb.userId, session.userId), eq(mb.label, "user/origin_story")),
+          columns: { content: true },
+        });
+        const hasOriginStory = (originBlock?.content ?? "").trim().length > 0;
+
+        const supervisorOutput = await runSessionSupervisor({
+          lastFiveTurns: sdkMessages.slice(-10),
+          currentMode: getSessionMode(sdkSessionId),
+          formulation: formulation?.snapshot?.formulation ?? null,
+          availableSkills: [...allSkills.keys()],
+          sessionTurnCount: Math.floor(sdkMessages.length / 2),
+          hasOriginStory,
+        });
+
+        if (supervisorOutput && supervisorOutput.confidence >= 0.6) {
+          // Override mode only if regex didn't already set one this turn
+          if (supervisorOutput.recommendedMode && !targetMode) {
+            console.log(`[session-supervisor] mode → ${supervisorOutput.recommendedMode}`);
+            injectSessionContext(sdkSessionId, formatModeShiftBlock(supervisorOutput.recommendedMode));
+            setSessionMode(sdkSessionId, supervisorOutput.recommendedMode);
+          }
+          // Dynamic skill injection — supervisor has analysed the turn and picked skills
+          for (const skillName of supervisorOutput.activateSkills) {
+            injectSkillDynamically(sdkSessionId, skillName, allSkills);
+          }
+          // Context focus hint — single-sentence steer for this turn
+          if (supervisorOutput.contextFocus) {
+            injectSessionContext(
+              sdkSessionId,
+              `=== Current Focus ===\n${supervisorOutput.contextFocus}\n=== End Current Focus ===`,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("[session-supervisor] error — falling back to regex only:", err);
+      }
+
+      // ── Claude response (supervisor context is now injected) ────
+      streamAiResponse(sessionId, sdkSessionId, text, userMsg!.id, session.userId).catch((err) => {
+        console.error(`AI streaming error for session ${sessionId}:`, err);
+        sessionEmitter.emit(sessionId, {
+          event: "ai.error",
+          data: { error: "Failed to get AI response" },
+        });
       });
-    });
+    })();
 
     return c.json({ userMessageId: userMsg!.id, crisis: false });
   })
@@ -697,8 +764,10 @@ const app = new Hono()
     }
 
     // ── Selective skill loading based on formulation ─────────────
-    const allSkills = loadSkillFiles();
-    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null);
+    // Resume: the session being resumed counts as a prior session, so the user
+    // is a returning user by definition (they have at least this session's history).
+    const allSkillsResume = loadSkillFiles();
+    const selectedSkills = selectRelevantSkills(allSkillsResume, formulation?.snapshot ?? null, true);
 
     // Create a fresh SDK session with memory context and selectively loaded skills
     const sdkSessionId = await createSdkSession(
@@ -887,6 +956,21 @@ async function streamAiResponse(
     { role: "user", content: userMessage },
     { role: "assistant", content: cleanText },
   ]);
+
+  // Fire-and-forget: response validator (therapeutic safety audit)
+  // Catches issues that input-only crisis detection misses.
+  // Never blocks or delays the client response.
+  runResponseValidator({
+    response: cleanText,
+    lastThreeTurns: [
+      { role: "user", content: userMessage },
+      { role: "assistant", content: cleanText },
+    ],
+    sessionMode: getSessionMode(sdkSessionId) ?? "follow_support",
+    sessionId,
+  }).catch((err) => {
+    console.error("[response-validator] unhandled error:", err);
+  });
 
   // Fire-and-forget: text emotion classification (text signal weight = 0.8 per architecture)
   const textEmotionResult = classifyTextEmotion(userMessage);

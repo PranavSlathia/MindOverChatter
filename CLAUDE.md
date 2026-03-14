@@ -39,16 +39,19 @@ docker compose up -d      # Start all Docker services
 - **Hono RPC** for end-to-end type safety (no codegen)
 - **Context budget**: ~120,000 tokens per session
 - **Language**: Adapt to user input (mostly English)
-- **Therapeutic approach**: Open-ended with blended CBT + MI-OARS
+- **Therapeutic approach**: Open-ended with blended CBT + MI-OARS + Person-Centred + IPT/Schema-informed probing
 - **Emotion signals are WEAK**: Face=0.3, Voice=0.5, Text=0.8 weight. Prompt follow-ups, never conclude state.
-- **Structured memory types**: profile_fact, relationship, goal, coping_strategy, recurring_trigger, life_event, symptom_episode, unresolved_thread, safety_critical, win
+- **Structured memory types**: profile_fact, relationship, goal, coping_strategy, recurring_trigger, life_event, symptom_episode, unresolved_thread, safety_critical, win, formative_experience
 - **Memory provenance**: Every memory has source_session_id, source_message_id, confidence, last_confirmed_at, superseded_by
 - **Session lifecycle hooks**: `registerOnStart/registerOnEnd` registry in `sdk/session-lifecycle.ts`. `assertHookContract()` runs at server startup and throws if any required hook is missing or has wrong priority. No SOP can be silently skipped.
 - **5-mode session system**: `follow_support | assess_map | deepen_history | challenge_pattern | consolidate_close`. Initialised from therapy plan at session start. Shifts mid-session via rule-based `detectModeShift()` (regex, no LLM). `follow_support` always beats `challenge_pattern`. Mode instructions injected into Claude context on shift.
-- **Named memory blocks**: 6 persistent text fields in `memory_blocks` table (`user/overview`, `user/goals`, `user/triggers`, `user/coping_strategies`, `user/relationships`, `companion/therapeutic_calibration`). Injected at session start, rewritten at session end.
+- **Named memory blocks**: 7 persistent text fields in `memory_blocks` table (`user/overview`, `user/goals`, `user/triggers`, `user/coping_strategies`, `user/relationships`, `user/origin_story`, `companion/therapeutic_calibration`). Injected at session start, rewritten at session end.
 - **Therapeutic calibration**: Background hook after sessions with ≥4 turns. Claude rewrites `companion/therapeutic_calibration` block. Two-layer defence: `sanitizeForPrompt()` strips delimiters from inputs; `isSafeCalibration()` blocklist rejects unsafe output before persistence.
 - **Internal therapy plan**: Generated after every session end and every assessment. Versioned with `pg_advisory_xact_lock` + `UNIQUE(user_id, version)`. Never shown to user. Injected into system prompt at next session start via `therapy-plan-injection` onStart hook.
-- **onEnd hook order**: `session-summary` (critical, user waits) → `formulation` (background) → `therapy-plan` (background) → `therapeutic-calibration` (background)
+- **onEnd hook order**: `session-summary` (critical, user waits) → `formulation` (background) → `therapy-plan` (background) → `therapeutic-calibration` (background) → `user-memory-blocks` (background)
+- **Session Supervisor**: `services/session-supervisor.ts` — fires in the message handler IIFE before `streamAiResponse()`. Validates session state, enforces mode constraints, and gates messages that would violate therapeutic safety invariants.
+- **Response Validator**: `services/response-validator.ts` — fires fire-and-forget inside `streamAiResponse()` after streaming completes. Scores the AI response against active directives and logs compliance metrics.
+- **Skill files** (`/.claude/skills/*.md`): loaded into every session prompt. Therapeutic skills: `probing-general` (MI/Person-Centred, general exploration + life-domain coverage), `probing-longitudinal` (IPT/Schema, pattern recognition + cross-session continuity, gated ≥3 turns rapport), `probing-development` (Bowlby attachment + Young schema + Bowen family systems, childhood probing, gated ≥2nd session), `probing-{depression,anxiety,grief,panic,relationship}` (presentation-specific), `therapeutic-direction` (Operator-editable session steering), `therapeutic-safety` (crisis + framing rules), `assessment-flow` (PHQ-9/GAD-7)
 
 ## Therapeutic Safety (NON-NEGOTIABLE)
 

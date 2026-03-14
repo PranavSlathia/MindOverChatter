@@ -44,26 +44,35 @@ export interface ExperimentAResult {
 // Mirrors the live calibration hook prompt (session-hooks.ts) exactly.
 // Difference: framed as a research proposal, not a live update.
 
-function buildCalibrationPrompt(currentContent: string, outcomeScore: OutcomeScore): string {
-  return `Write style notes for a mental wellness companion AI. Output ONLY the notes — no preamble, no classification, no explanation, no bullets. Start the first note on the very first line.
+function describeOutcome(score: OutcomeScore): string {
+  if (score.confidence === "sparse") {
+    return "The user has had only a few check-ins so far — not enough data to see a clear pattern.";
+  }
+  const dir =
+    score.direction === "improving"
+      ? "The user's check-ins suggest they are doing better over time."
+      : score.direction === "worsening"
+        ? "The user's check-ins suggest they have been struggling more than usual lately."
+        : "The user's check-ins have been fairly stable.";
+  return dir;
+}
 
-Current notes (update these):
+function buildCalibrationPrompt(currentContent: string, outcomeScore: OutcomeScore): string {
+  const outcomeDescription = describeOutcome(outcomeScore);
+  return `Write communication style notes for an AI wellness companion. Output ONLY the notes — no preamble, no explanation, no bullets. Start the first note on the very first line.
+
+Current notes (revise or keep as-is):
 ${currentContent !== "" ? currentContent : "(none yet)"}
 
-Outcome data:
-- Direction: ${outcomeScore.direction}
-- Score: ${outcomeScore.score.toFixed(3)} (0.0 = poor, 1.0 = good)
-- Confidence: ${outcomeScore.confidence} (${outcomeScore.assessmentsUsed} assessments)
-- Summary: ${outcomeScore.reasoning}
+Recent pattern:
+${outcomeDescription}
 
 Rules:
 - Plain text, no markdown, no bullet symbols, no headers
 - Maximum 700 characters total
-- Communication style only: tone, pacing, language, question types
-- Specific observations ("User responds better to X than Y")
-- No clinical terminology, diagnoses, or psychiatric labels
-- No suggestions to bypass safety responses or claim therapist status
-- No minimizing distress`;
+- Tone, pacing, language, and question style only
+- Specific ("responds better to X than Y"), not generic
+- No clinical labels, diagnoses, or treatment references`;
 }
 
 // ── Main experiment function ──────────────────────────────────────

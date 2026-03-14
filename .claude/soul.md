@@ -178,7 +178,7 @@ working code. Each owns a distinct technology domain.
 - Claude Agent SDK integration (`apps/server/src/sdk/`)
 - Session manager (create, resume, end SDK sessions)
 - Session lifecycle hook registry (`sdk/session-lifecycle.ts`) — `registerOnStart/registerOnEnd`, `runOnStart/runOnEnd`, `assertHookContract`
-- Concrete session hooks (`hooks/session-hooks.ts`) — memory-blocks-injection, therapy-plan-injection, session-summary, formulation, therapy-plan, therapeutic-calibration
+- Concrete session hooks (`hooks/session-hooks.ts`) — memory-blocks-injection, therapy-plan-injection, session-summary, formulation, therapy-plan, therapeutic-calibration, user-memory-blocks
 - 5-mode session system (`sdk/mode-blocks.ts`, `services/mode-detector.ts`) — detectModeShift, formatModeShiftBlock
 - Named memory blocks service (`services/memory-block-service.ts`) — upsertBlock, seedEmptyBlocks, char limit enforcement
 - Calibration safety (`hooks/calibration-safety.ts`) — sanitizeForPrompt, isSafeCalibration blocklist
@@ -188,6 +188,8 @@ working code. Each owns a distinct technology domain.
 - Mem0 integration (memory extraction, retrieval, pgvector backend)
 - Python microservice development (`services/whisper/`, `services/emotion/`, `services/tts/`)
 - Therapeutic framework skills (CBT, MI-OARS, crisis protocol)
+- Session Supervisor (`services/session-supervisor.ts`) — pre-response validation, mode constraint enforcement
+- Response Validator (`services/response-validator.ts`) — post-stream compliance scoring against active directives
 - Embedding pipeline (BAAI/bge-m3)
 
 **Neura does NOT touch:** React components, Hono routes (unless SDK-specific), frontend state.
@@ -196,12 +198,19 @@ working code. Each owns a distinct technology domain.
 - Session lifecycle: `runOnStart` → query (streaming + mid-session mode shifts) → `runOnEnd`
 - **Never add imperative session logic to `sessions.ts`** — add a named hook to `session-hooks.ts` instead
 - `assertHookContract()` at server startup catches missing/misconfigured hooks before first request
-- onEnd order: `session-summary` (critical, awaited) → `formulation` → `therapy-plan` → `therapeutic-calibration` (all background)
+- onEnd order: `session-summary` (critical, awaited) → `formulation` → `therapy-plan` → `therapeutic-calibration` → `user-memory-blocks` (all background except session-summary)
 - Therapy plan versioning: `pg_advisory_xact_lock` + `UNIQUE(user_id, version)` — always call `generateAndPersistTherapyPlan()`, never raw insert
 - Calibration: always `sanitizeForPrompt()` inputs, always `isSafeCalibration()` on output before persistence
 - Crisis detection: runs on EVERY message, response is hard-coded never LLM-generated
 - Python services: FastAPI thin wrappers with uv dependency management
-- Skills as `.claude/skills/*.md` files loaded into SDK context
+- Skills as `.claude/skills/*.md` files loaded into SDK context. Current skill inventory:
+  - `probing-general.md` — MI + Person-Centred: opening moves, life-domain coverage (relationships, work, meaning, family, history), thread return. Activates when no clinical presentation dominant.
+  - `probing-longitudinal.md` — IPT + Schema: memory-based continuity, pattern recognition, schema-level questions (worth/love/trust), role transitions, interpersonal patterns. Gated: ≥3 turns rapport or returning user with memories.
+  - `probing-development.md` — Bowlby attachment + Young schema + Bowen family systems: childhood probing, caregiving quality, family climate, schema formation (worth/love/trust/autonomy), formative events, origin-to-present bridging. Gated: returning users only (≥2nd session). Schema questions require ≥5 turns rapport. Loaded outside the 2-clinical-file cap.
+  - `probing-{depression,anxiety,grief,panic,relationship}.md` — presentation-specific probing flows with evidence checklists and safety triggers
+  - `therapeutic-direction.md` — Operator-editable session steering (directiveness, deepen-vs-support, mode shifts, multi-dimensional probing standard)
+  - `therapeutic-safety.md` — crisis protocol, framing rules, helpline numbers
+  - `assessment-flow.md` — PHQ-9/GAD-7 branching assessment logic
 - Context budget: ~120,000 tokens per session
 
 ---

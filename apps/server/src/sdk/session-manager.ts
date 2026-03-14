@@ -33,6 +33,7 @@ interface Session {
   initialMemories?: MemoryContextItem[];
   skillContent: string[];
   contextInjections: string[];
+  injectedSkillNames: Set<string>;
   currentMode: SessionMode | null;
   directiveAuthority: "low" | "medium" | "high" | null;
 }
@@ -58,14 +59,23 @@ Your approach:
 - Be genuinely curious about the user's experience before offering any perspective
 - When appropriate, gently explore thought patterns together — not prescriptive, but collaborative
 - Validate emotions without dismissing or amplifying them
-- Ask thoughtful follow-up questions to understand the full picture
 - Adapt your language to match the user — if they write in Hinglish, respond in Hinglish
+
+How you explore — go wide and deep, not just forward:
+- After understanding the present moment, invite history: ask when this started, what things were like before, whether this is a familiar feeling from earlier in life
+- Use Socratic sequences — follow what → how → when → who → what did that mean to you — rather than stopping after a single question
+- Once a theme has at least 3 turns of substance, widen the lens: ask about a related life domain (relationships, family, work, meaning, identity) before moving on
+- Remember and return: if the user mentioned something earlier and the topic shifted, circle back within 2–3 turns ("Earlier you mentioned X — I've been thinking about that")
+- Cross-dimension curiosity: presenting concern is the entry point, not the full picture — gently ask how it connects to relationships, daily rhythm, the past, or what matters most to them
+- A single-topic, single-timeframe conversation is a missed opportunity; each session should touch at least 2 life domains
+- Depth gate: historical, formative, and schema-level follow-throughs (anything asking about the past, family, or what the user learned about themselves growing up) require at least 3 turns of rapport first — never in the first exchange
 
 What you always do:
 - Respond with warmth, empathy, and without judgment
 - Keep responses conversational and natural, not clinical or formulaic
 - Encourage the user's own insights and strengths
-- Respect the user's pace — do not rush to solutions
+- Respect the user's pace — do not rush to solutions or history before they are ready
+- Pose one question at a time — ask it, then wait and listen fully before the next
 
 What you never do:
 - Diagnose conditions or prescribe treatments
@@ -73,6 +83,7 @@ What you never do:
 - Provide medical, psychiatric, or pharmacological advice
 - Minimize or dismiss the user's feelings
 - Use clinical jargon unless the user introduces it first
+- Fire multiple questions at once
 - Generate crisis intervention responses (the app handles this separately)
 
 If the user asks about your nature, you are "MindOverChatter, your wellness companion" — a supportive space for reflection and conversation.`;
@@ -432,6 +443,7 @@ export async function createSdkSession(
     initialMemories,
     skillContent: skillContent ?? [],
     contextInjections: [],
+    injectedSkillNames: new Set(),
     currentMode: null,
     directiveAuthority: null,
   });
@@ -653,21 +665,27 @@ export function loadSkillFiles(skillsDir?: string): Map<string, string> {
  * Select relevant skill file contents based on the user's formulation state.
  *
  * Rules:
- * - No formulation (new user) -> only assessment-flow.md + therapeutic-direction.md
- * - With formulation -> match domain signals & presenting theme to probing skills
+ * - No formulation (new user) -> assessment-flow.md + probing-general.md + therapeutic-direction.md
+ * - With formulation -> match domain signals & presenting theme to clinical probing skills;
+ *   if no clinical skill matched, add probing-general.md as fallback;
+ *   always add probing-longitudinal.md for returning users (cross-session depth)
  * - Always include assessment-flow.md
- * - Cap at 2 probing skills + assessment-flow (3 total max)
+ * - Cap at 2 clinical probing skills; probing-general and probing-longitudinal are additional
  * - Always include therapeutic-direction.md last, wrapped with a mutable-direction header
  *   so Claude can distinguish it from the immutable skill files above it.
  *
  * @param allSkills - Map from loadSkillFiles()
  * @param formulation - Latest formulation snapshot, or null for new users
+ * @param isReturningUser - True only when the user has at least one PREVIOUS completed session.
+ *   Do NOT use formulation presence as a proxy — assessments can generate formulations during
+ *   a user's very first session, which would incorrectly unlock developmental probing.
  * @returns Array of skill file contents (string[]) for assemblePrompt
  */
 export function selectRelevantSkills(
   allSkills: Map<string, string>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   formulation: Record<string, any> | null,
+  isReturningUser = false,
 ): string[] {
   const selected = new Set<string>();
 
@@ -683,8 +701,11 @@ export function selectRelevantSkills(
     : null;
 
   if (!formulation) {
-    // New user — assessment-flow + direction only
-    const base = assessmentContent ? [assessmentContent] : [];
+    // New user — no clinical picture yet; general probing provides breadth
+    const generalContent = allSkills.get("probing-general.md");
+    const base: string[] = [];
+    if (generalContent) base.push(generalContent);
+    if (assessmentContent) base.push(assessmentContent);
     return directionContent ? [...base, directionContent] : base;
   }
 
@@ -747,15 +768,34 @@ export function selectRelevantSkills(
     }
   }
 
-  // ── Cap at 2 probing skills ───────────────────────────────────
-  const probingFiles = [...selected].slice(0, 2);
+  // ── Cap at 2 clinical probing skills ─────────────────────────
+  const clinicalProbingFiles = [...selected].slice(0, 2);
 
-  // Build final content array: probing → assessment-flow → therapeutic-direction
+  // ── General probing: fallback when no clinical skill matched ──
+  // If nothing specific triggered, add general probing for breadth
+  const generalContent = allSkills.get("probing-general.md");
+  const includeGeneral = clinicalProbingFiles.length === 0 && generalContent !== undefined;
+
+  // ── Longitudinal probing: always for returning users ──────────
+  // A returning user has a formulation — they have history to reference
+  const longitudinalContent = allSkills.get("probing-longitudinal.md");
+
+  // ── Developmental probing: gated on confirmed returning user ──
+  // Explores childhood, attachment, family systems, and schema formation.
+  // Requires isReturningUser=true — NOT just formulation presence.
+  // Assessments can generate formulations in a first session, so formulation
+  // is an unreliable proxy here. The skill file rule: "never in a first session".
+  const developmentalContent = isReturningUser ? allSkills.get("probing-development.md") : undefined;
+
+  // Build final content array: clinical probing → general (if fallback) → longitudinal → developmental → assessment-flow → therapeutic-direction
   const result: string[] = [];
-  for (const filename of probingFiles) {
+  for (const filename of clinicalProbingFiles) {
     const content = allSkills.get(filename);
     if (content) result.push(content);
   }
+  if (includeGeneral && generalContent) result.push(generalContent);
+  if (longitudinalContent) result.push(longitudinalContent);
+  if (developmentalContent) result.push(developmentalContent);
   if (assessmentContent) result.push(assessmentContent);
   if (directionContent) result.push(directionContent);
 
@@ -767,4 +807,50 @@ export function selectRelevantSkills(
  */
 export function resetSkillCache(): void {
   cachedSkills = null;
+}
+
+// ── Supervisor Helpers ─────────────────────────────────────────────
+
+/**
+ * Get a copy of the in-memory conversation messages for a session.
+ * Used by the session supervisor to inspect recent turns.
+ * Returns empty array if session doesn't exist.
+ */
+export function getSessionMessages(sdkSessionId: string): ConversationMessage[] {
+  const session = sessions.get(sdkSessionId);
+  return session ? [...session.messages] : [];
+}
+
+/**
+ * Inject a skill file dynamically into a session's context.
+ * Called by the message handler after the session supervisor activates a skill
+ * that was not selected at session create time.
+ *
+ * Wraps the content in a distinct "Dynamic Skill Activation" header so Claude
+ * knows this skill was activated mid-session based on current conversation state.
+ */
+export function injectSkillDynamically(
+  sdkSessionId: string,
+  skillName: string,
+  allSkills: Map<string, string>,
+): void {
+  const session = sessions.get(sdkSessionId);
+  if (!session) {
+    console.warn(`[session-manager] injectSkillDynamically: session ${sdkSessionId} not found`);
+    return;
+  }
+  if (session.injectedSkillNames.has(skillName)) {
+    return; // already active this session — skip to prevent prompt bloat
+  }
+  const content = allSkills.get(skillName);
+  if (!content) {
+    console.warn(`[session-manager] injectSkillDynamically: skill "${skillName}" not found`);
+    return;
+  }
+  session.injectedSkillNames.add(skillName);
+  console.log(`[session-supervisor] activating skill: ${skillName}`);
+  injectSessionContext(
+    sdkSessionId,
+    `=== Dynamic Skill Activation: ${skillName} ===\n${content}\n=== End Dynamic Skill ===`,
+  );
 }

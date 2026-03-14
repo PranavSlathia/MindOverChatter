@@ -43,6 +43,30 @@ const DIRECTION_FILE = resolve(SKILLS_DIR, "therapeutic-direction.md");
 const MODE_PERSISTENCE_GAP =
   "Session mode transitions are not persisted — mode alignment uses therapy plan recommendation as proxy only";
 
+// ── Childhood exploration keyword list ───────────────────────────
+// Keywords indicating a developmental/childhood question was asked in this session.
+// Matched against session summary themes and action items.
+
+const CHILDHOOD_KEYWORDS = [
+  "childhood",
+  "grew up",
+  "growing up",
+  "family",
+  "parents",
+  "shaped you",
+  "formative",
+  "early",
+  "when you were young",
+  "caregivers",
+  "caregiver",
+  "attachment",
+  "upbringing",
+  "as a child",
+  "when i was",
+  "young",
+  "origin",
+];
+
 // ── Public types ─────────────────────────────────────────────────
 
 export interface DirectionComplianceResult {
@@ -54,6 +78,7 @@ export interface DirectionComplianceResult {
   meanComplianceScore: number;
   modeAlignedSessions: number;
   modeUnalignedSessions: number;
+  childhoodExplorationCount: number;
   dataGaps: string[];
   ranAt: Date;
 }
@@ -152,6 +177,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
       meanComplianceScore: 0,
       modeAlignedSessions: 0,
       modeUnalignedSessions: 0,
+      childhoodExplorationCount: 0,
       dataGaps: [
         "therapeutic-direction.md does not exist — run Phase A first",
         MODE_PERSISTENCE_GAP,
@@ -190,6 +216,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
   let totalComplianceScore = 0;
   let modeAligned = 0;
   let modeUnaligned = 0;
+  let childhoodExplorationCount = 0;
 
   for (const session of completedSessions) {
     const activePlan = findActivePlanForSession(session, chronPlans);
@@ -214,6 +241,20 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
 
     const complianceScore = computeComplianceScore(isAligned, summary, activeDirectives);
     totalComplianceScore += complianceScore;
+
+    // Count sessions with childhood/developmental exploration
+    if (summary) {
+      const summaryText = [
+        ...(summary.themes ?? []),
+        ...(summary.actionItems ?? []),
+        ...(summary.cognitivePatterns ?? []),
+      ].join(" ").toLowerCase();
+
+      const hasChildhoodContent = CHILDHOOD_KEYWORDS.some((kw) => summaryText.includes(kw));
+      if (hasChildhoodContent) {
+        childhoodExplorationCount += 1;
+      }
+    }
 
     // Write one row per session
     await db.insert(researchDirectionCompliance).values({
@@ -255,6 +296,7 @@ export async function runExperimentC(userId: string): Promise<DirectionComplianc
     meanComplianceScore,
     modeAlignedSessions: modeAligned,
     modeUnalignedSessions: modeUnaligned,
+    childhoodExplorationCount,
     dataGaps,
     ranAt,
   };

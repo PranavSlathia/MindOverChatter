@@ -11,6 +11,7 @@ import type { ExperimentAResult } from "../experiments/experiment-a-calibration.
 import type { ExperimentBResult } from "../experiments/experiment-b-hypotheses.js";
 import type { DirectionComplianceResult } from "../experiments/experiment-c-direction.js";
 import type { ExperimentDResult } from "../experiments/experiment-d-replay.js";
+import type { DevelopmentalCoverageResult } from "../experiments/experiment-e-developmental.js";
 
 // ── Reports directory ─────────────────────────────────────────────
 
@@ -196,6 +197,7 @@ export function formatReportC(result: DirectionComplianceResult): {
       mean_compliance_score: Number(result.meanComplianceScore.toFixed(4)),
       mode_aligned_sessions: result.modeAlignedSessions,
       mode_unaligned_sessions: result.modeUnalignedSessions,
+      childhood_exploration_count: result.childhoodExplorationCount,
     },
     active_directives: result.activeDirectives,
     data_gaps: result.dataGaps,
@@ -227,6 +229,7 @@ ${directiveList}
 | Mean compliance score | ${result.meanComplianceScore.toFixed(4)} |
 | Mode-aligned sessions | ${result.modeAlignedSessions} |
 | Mode-unaligned sessions | ${result.modeUnalignedSessions} |
+| Childhood exploration sessions | ${result.childhoodExplorationCount} |
 
 ## Data Gaps
 
@@ -380,6 +383,77 @@ ${result.gateDecision === "keep" ? `\`\`\`\nPOST /api/research/promote\n${JSON.s
 
   ensureReportsDir();
   const filename = `${formatDateYMD(result.ranAt)}_experiment-d_${result.runId.slice(0, 8)}.md`;
+  const filepath = resolve(REPORTS_DIR, filename);
+  writeFileSync(filepath, markdown, "utf-8");
+
+  return { json, markdown };
+}
+
+// ── Experiment E ─────────────────────────────────────────────────
+
+export function formatReportE(result: DevelopmentalCoverageResult): {
+  json: object;
+  markdown: string;
+} {
+  const json = {
+    experiment: "e",
+    experiment_version: "1.0.0",
+    run_id: result.runId,
+    ran_at: result.ranAt.toISOString(),
+    summary: {
+      sessions_analyzed: result.sessionsAnalyzed,
+      mean_total_score: Number(result.meanTotalScore.toFixed(4)),
+      dimension_means: Object.fromEntries(
+        Object.entries(result.dimensionMeans).map(([k, v]) => [k, Number(v.toFixed(4))]),
+      ),
+    },
+    session_coverage: result.sessionCoverage.map((s) => ({
+      session_id: s.sessionId,
+      total_score: Number(s.totalScore.toFixed(4)),
+      dimensions: Object.fromEntries(
+        Object.entries(s.dimensions).map(([k, v]) => [
+          k,
+          { score: (v as { score: number; notes: string }).score, notes: (v as { score: number; notes: string }).notes },
+        ]),
+      ),
+    })),
+    data_gaps: result.dataGaps,
+  };
+
+  const dimRows = Object.entries(result.dimensionMeans)
+    .map(([dim, mean]) => `| ${dim} | ${mean.toFixed(4)} |`)
+    .join("\n");
+
+  const gapList = result.dataGaps.map((g) => `- ${g}`).join("\n");
+
+  const markdown = `# Experiment E — Developmental Coverage Tracker
+
+**Run ID**: \`${result.runId}\`
+**Ran at**: ${result.ranAt.toISOString()}
+**User ID**: \`${result.userId}\`
+
+## Coverage Summary
+
+| Metric | Value |
+|--------|-------|
+| Sessions analyzed | ${result.sessionsAnalyzed} |
+| Mean total score | ${result.meanTotalScore.toFixed(4)} |
+
+## Dimension Means
+
+| Dimension | Mean Score |
+|-----------|-----------|
+${dimRows}
+
+## Data Gaps
+
+${gapList}
+
+_Note: Scores are heuristic — 0.0 = not detected, 0.5 = partial signal, 1.0 = clear signal. Based on keyword matching in session summaries and messages._
+`;
+
+  ensureReportsDir();
+  const filename = `${formatDateYMD(result.ranAt)}_experiment-e_${result.runId.slice(0, 8)}.md`;
   const filepath = resolve(REPORTS_DIR, filename);
   writeFileSync(filepath, markdown, "utf-8");
 

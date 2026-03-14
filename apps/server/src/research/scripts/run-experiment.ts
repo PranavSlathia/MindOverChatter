@@ -17,18 +17,20 @@ import { runExperimentA } from "../experiments/experiment-a-calibration.js";
 import { runExperimentB } from "../experiments/experiment-b-hypotheses.js";
 import { runExperimentC } from "../experiments/experiment-c-direction.js";
 import { runExperimentD } from "../experiments/experiment-d-replay.js";
+import { runExperimentE } from "../experiments/experiment-e-developmental.js";
 import { promote } from "../lib/promote.js";
 import {
   formatReportA,
   formatReportB,
   formatReportC,
   formatReportD,
+  formatReportE,
 } from "../lib/research-reporter.js";
 
 // ── Argument parser ───────────────────────────────────────────────
 
 interface ParsedArgs {
-  experiment: "a" | "b" | "c" | "d" | "all" | null;
+  experiment: "a" | "b" | "c" | "d" | "e" | "all" | null;
   userId: string | null;
   runId: string | null;
   isPromote: boolean;
@@ -55,8 +57,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       args.isPromote = true;
     } else if (arg === "--experiment" || arg === "-e") {
       const next = argv[i + 1];
-      if (next && ["a", "b", "c", "d", "all"].includes(next)) {
-        args.experiment = next as "a" | "b" | "c" | "d" | "all";
+      if (next && ["a", "b", "c", "d", "e", "all"].includes(next)) {
+        args.experiment = next as "a" | "b" | "c" | "d" | "e" | "all";
         i += 1;
       }
     } else if (arg === "--candidate-file") {
@@ -96,6 +98,7 @@ Run an experiment:
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment c --user <userId>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment d --user <userId>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment d --user <userId> --candidate-file <path>
+  tsx apps/server/src/research/scripts/run-experiment.ts --experiment e --user <userId>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment all --user <userId>
 
 Promote a gate-approved proposal:
@@ -113,7 +116,10 @@ Experiments:
      Scores candidate therapeutic-direction.md versions against real session history.
      Use --candidate-file <path> to test a draft direction file without editing the live one.
      Omit --candidate-file for a self-evaluation baseline run.
-  all  Run A, B, C, and D sequentially.
+  e  Developmental Coverage Tracker
+     Evaluates per-session developmental coverage across 5 dimensions (attachment quality,
+     family climate, schema formation, formative events, origin-to-present bridging).
+  all  Run A, B, C, D, and E sequentially.
 
 Output:
   JSON printed to stdout.
@@ -141,8 +147,8 @@ async function main(): Promise<void> {
 
   // ── Promote mode ──────────────────────────────────────────────
   if (args.isPromote) {
-    if (!args.experiment || args.experiment === "all") {
-      fatal("--promote requires --experiment a|b|c|d (not 'all')");
+    if (!args.experiment || args.experiment === "all" || args.experiment === "e") {
+      fatal("--promote requires --experiment a|b|c|d (not 'all' or 'e')");
     }
     if (!args.runId) {
       fatal("--promote requires --run-id <uuid>");
@@ -162,7 +168,7 @@ async function main(): Promise<void> {
   // ── Experiment mode ───────────────────────────────────────────
   if (!args.experiment) {
     printUsage();
-    fatal("--experiment is required. Use: a, b, c, or all");
+    fatal("--experiment is required. Use: a, b, c, d, e, or all");
   }
 
   if (!args.userId) {
@@ -235,6 +241,18 @@ async function main(): Promise<void> {
     );
   };
 
+  const runE = async (): Promise<void> => {
+    process.stderr.write("[research] Running Experiment E — Developmental Coverage Tracker...\n");
+    const result = await runExperimentE(userId).catch((err: unknown) => {
+      fatal(`Experiment E failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    const { json } = formatReportE(result);
+    results.push(json);
+    process.stderr.write(
+      `[research] Experiment E complete. ${result.sessionsAnalyzed} sessions analyzed. Mean score: ${result.meanTotalScore.toFixed(4)}.\n`,
+    );
+  };
+
   switch (args.experiment) {
     case "a":
       await runA();
@@ -248,11 +266,15 @@ async function main(): Promise<void> {
     case "d":
       await runD();
       break;
+    case "e":
+      await runE();
+      break;
     case "all":
       await runA();
       await runB();
       await runC();
       await runD();
+      await runE();
       break;
   }
 

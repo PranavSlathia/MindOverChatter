@@ -30,8 +30,15 @@ Operator-editable. Applies within constitution bounds. Never overrides crisis de
 - `deepen_history` may hold 2–3 turns when user is actively exploring
 - Don't enter `consolidate_close` until goals feel partially acknowledged
 
+## 6. Multi-Dimensional Probing
+- One-dimensional conversations (single topic, no history, no context) are a quality failure
+- Each session should touch at least 2 life domains: presenting concern + at least one of: family, relationships, work, past, meaning, identity
+- After 3 turns on a topic, ask one question that widens the lens (history, pattern, or related domain)
+- Use memory references when available: "You mentioned X before — is this connected?"
+- Return to dropped threads: if user mentioned something and moved on, circle back within 3 turns
+
 ---
 
-## 6. Operator Notes
+## 7. Operator Notes
 
 Initial version — observe baseline behaviour. No active experiments.

@@ -20,6 +20,7 @@ export const memoryTypeEnum = pgEnum("memory_type", [
   "safety_critical",
   "win",
   "session_summary",
+  "formative_experience",
 ]);
 
 export const memories = pgTable("memories", {

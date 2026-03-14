@@ -5,6 +5,9 @@ hypothesis validation against live user data. All computation here is read-only
 against live tables; research tables are write-only outputs that never feed back
 into the live application stack.
 
+For the full operational reference — experiments, CLI runner, HTTP routes, promotion
+workflow, and known limitations — see [RESEARCH_SANDBOX.md](./RESEARCH_SANDBOX.md).
+
 ## Invariant Contract (NON-NEGOTIABLE)
 
 The following rules are enforced by convention and code review. Violating any of
@@ -66,10 +69,14 @@ research/
 │       ├── research-calibration-proposals.ts   # Table A — calibration gate outcomes
 │       ├── research-hypothesis-simulations.ts  # Table B — hypothesis drift analysis
 │       ├── research-direction-compliance.ts    # Table C — direction/mode compliance
+│       ├── research-replay-runs.ts             # Table D — offline replay harness results
+│       ├── research-developmental-coverage.ts  # Table E — developmental probing coverage
 │       └── index.ts                            # Research-only barrel (never imported by live schema)
+├── candidates/                                 # Candidate therapeutic-direction.md files for Exp D
 ├── reports/                                    # Gitignored — generated output files
 │   └── .gitkeep
-└── README.md                                   # This file
+├── README.md                                   # Invariant rules and schema policy (this file)
+└── RESEARCH_SANDBOX.md                         # Operational reference — experiments, CLI, HTTP routes
 ```
 
 ## Tables
@@ -79,7 +86,9 @@ research/
 | `research_calibration_proposals` | Records proposed therapeutic calibration rewrites with gate verdicts (keep/discard/insufficient_data) and outcome scores |
 | `research_hypothesis_simulations` | Records hypothesis drift analysis across plans and sessions, with delta statistics |
 | `research_direction_compliance` | Records per-session compliance with therapy plan directives and mode alignment |
+| `research_replay_runs` | Records offline replay harness results: baseline vs candidate direction scoring with turn-level data and gate verdicts |
+| `research_developmental_coverage` | Records 5-dimension developmental probing coverage per session (attachment, family climate, schema, formative events, origin bridging) |
 
-All three tables carry `experiment_run_id`, `experiment_version`, `ran_at`, and
+All five tables carry `experiment_run_id`, `experiment_version`, `ran_at`, and
 optional `promoted_at` / `promoted_by` columns to support auditability and the
 human-in-the-loop promotion workflow.

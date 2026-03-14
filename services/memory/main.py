@@ -46,6 +46,7 @@ VALID_MEMORY_TYPES = {
     "safety_critical",
     "win",
     "session_summary",
+    "formative_experience",
 }
 
 # ---------------------------------------------------------------------------
@@ -55,7 +56,7 @@ VALID_MEMORY_TYPES = {
 CUSTOM_EXTRACTION_PROMPT = """You are a memory extraction engine for a mental wellness companion app.
 Your job is to extract discrete, factual memories from a therapy-style conversation.
 
-For each fact you extract, you MUST classify it into exactly ONE of these 10 types:
+For each fact you extract, you MUST classify it into exactly ONE of these 11 types:
 - profile_fact: Biographical information (name, age, job, location, preferences)
 - relationship: People in the user's life and their role/dynamic
 - goal: Things the user wants to achieve or is working toward
@@ -66,6 +67,7 @@ For each fact you extract, you MUST classify it into exactly ONE of these 10 typ
 - unresolved_thread: Topics brought up but not fully explored or resolved
 - safety_critical: Anything related to self-harm, crisis history, medications, or safety concerns
 - win: Positive achievements, progress, breakthroughs, or good moments
+- formative_experience: Childhood or developmental experiences that shaped the user — early caregiving, family climate, formative events, memories of growing up, early beliefs about self/others/world
 
 For each extracted fact, also assign a confidence score from 0.0 to 1.0:
 - 1.0: Explicitly and clearly stated by the user
@@ -411,6 +413,15 @@ def _classify_by_rules(content: str) -> str | None:
     ]):
         return "win"
 
+    # Formative experiences (childhood/developmental)
+    if any(w in lower for w in [
+        "grew up", "growing up", "childhood", "as a child", "when i was young",
+        "when i was a kid", "my parents", "my mother", "my father", "my family",
+        "caregivers", "caregiver", "formative", "shaped me", "early life",
+        "early years", "my upbringing", "back then", "as a teenager",
+    ]):
+        return "formative_experience"
+
     return None  # Fall through to Groq
 
 
@@ -436,6 +447,7 @@ async def _classify_memory_type(content: str) -> str:
 - unresolved_thread: Topics not fully explored
 - safety_critical: Self-harm, crisis history, medications, safety
 - win: Positive achievements, progress, breakthroughs
+- formative_experience: Childhood/developmental experiences that shaped the user (early caregiving, family climate, growing up memories, early beliefs)
 
 Memory: "{content}"
 

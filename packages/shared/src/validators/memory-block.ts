@@ -6,6 +6,7 @@ export const MemoryBlockLabelSchema = z.enum([
   "user/triggers",
   "user/coping_strategies",
   "user/relationships",
+  "user/origin_story",
   "companion/therapeutic_calibration",
 ]);
 
