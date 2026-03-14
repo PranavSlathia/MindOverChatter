@@ -275,10 +275,29 @@ export function registerSessionHooks(): void {
         origin_story: sanitizeForPrompt(blockByLabel.get("user/origin_story") ?? ""),
       };
 
-      const conversationText = ctx.conversationHistory
-        .slice(-20)
-        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${sanitizeForPrompt(m.content)}`)
-        .join("\n");
+      // Prefer the session summary (full condensed session written by Claude) over
+      // raw conversation slice. For long sessions the summary captures the whole arc;
+      // slice(-20) only sees the tail and misses earlier disclosures.
+      const summaryRow = await db.query.sessionSummaries.findFirst({
+        where: eq(sessionSummaries.sessionId, ctx.sessionId),
+        columns: { content: true },
+      });
+
+      let conversationText: string;
+      if (summaryRow?.content) {
+        // Use summary as primary source + last 10 turns for recency
+        const recentTurns = ctx.conversationHistory
+          .slice(-10)
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${sanitizeForPrompt(m.content)}`)
+          .join("\n");
+        conversationText = `Session summary:\n${sanitizeForPrompt(summaryRow.content)}\n\nRecent turns (last 10 messages):\n${recentTurns}`;
+      } else {
+        // No summary yet (session-summary hook may still be running) — fall back to last 30 turns
+        conversationText = ctx.conversationHistory
+          .slice(-30)
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${sanitizeForPrompt(m.content)}`)
+          .join("\n");
+      }
 
       const prompt = `You are a memory extraction system for a wellness companion. Your job is to update structured user profile notes based on what was shared in this session.
 
