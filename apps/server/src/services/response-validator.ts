@@ -112,7 +112,8 @@ Be conservative. Only flag clear violations, not stylistic preferences.`;
 
 function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
-    let stdout = "";
+    let lineBuffer = "";
+    let resultText: string | null = null;
     let settled = false;
 
     const settle = (val: string | null) => {
@@ -124,6 +125,8 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
+    // Use stream-json (the proven format) — `json` emits a JSON array that the
+    // envelope parser misreads, and produces empty stdout in some server contexts.
     const child = spawn(
       "claude",
       [
@@ -134,7 +137,8 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
         "--max-turns",
         "1",
         "--output-format",
-        "json",
+        "stream-json",
+        "--include-partial-messages",
       ],
       { env: cleanEnv, cwd: "/tmp" },
     );
@@ -148,25 +152,24 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
     }, timeoutMs);
 
     child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const event = JSON.parse(trimmed) as Record<string, unknown>;
+          if (event.type === "result" && typeof event.result === "string") {
+            resultText = event.result;
+          }
+        } catch { /* skip malformed lines */ }
+      }
     });
 
-    child.on("close", (code) => {
+    child.on("close", () => {
       clearTimeout(timer);
-      if (code !== 0) {
-        settle(null);
-        return;
-      }
-      try {
-        const envelope = JSON.parse(stdout.trim()) as Record<string, unknown>;
-        if (typeof envelope.result === "string") {
-          settle(envelope.result);
-        } else {
-          settle(stdout.trim() || null);
-        }
-      } catch {
-        settle(stdout.trim() || null);
-      }
+      settle(resultText);
     });
 
     child.on("error", (err) => {

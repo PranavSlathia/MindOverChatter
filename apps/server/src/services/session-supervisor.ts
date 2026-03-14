@@ -120,12 +120,15 @@ confidence: 0.9+ = very clear signal, 0.6-0.9 = moderate confidence, below 0.6 =
 // ── Haiku Spawner ──────────────────────────────────────────────────
 
 /**
- * Spawns Claude Haiku with --output-format json.
- * Returns the `result` text field from the JSON envelope, or null on failure.
+ * Spawns Claude Haiku with --output-format stream-json.
+ * Parses the newline-delimited result events and returns the `result` text,
+ * or null on failure/timeout. Uses stream-json (the proven format) instead
+ * of `json` which emits a JSON array incompatible with the envelope parser.
  */
 function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
-    let stdout = "";
+    let lineBuffer = "";
+    let resultText: string | null = null;
     let settled = false;
 
     const settle = (val: string | null) => {
@@ -138,6 +141,8 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
+    // Use stream-json (the proven format) — `json` emits a JSON array that the
+    // envelope parser misreads, and produces empty stdout in some server contexts.
     const child = spawn(
       "claude",
       [
@@ -148,7 +153,8 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
         "--max-turns",
         "1",
         "--output-format",
-        "json",
+        "stream-json",
+        "--include-partial-messages",
       ],
       { env: cleanEnv, cwd: "/tmp" },
     );
@@ -162,28 +168,24 @@ function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | nul
     }, timeoutMs);
 
     child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const event = JSON.parse(trimmed) as Record<string, unknown>;
+          if (event.type === "result" && typeof event.result === "string") {
+            resultText = event.result;
+          }
+        } catch { /* skip malformed lines */ }
+      }
     });
 
-    child.on("close", (code) => {
+    child.on("close", () => {
       clearTimeout(timer);
-      if (code !== 0) {
-        settle(null);
-        return;
-      }
-      // --output-format json returns a JSON envelope: { result: "...", ... }
-      try {
-        const envelope = JSON.parse(stdout.trim()) as Record<string, unknown>;
-        if (typeof envelope.result === "string") {
-          settle(envelope.result);
-        } else {
-          // Unexpected format — try raw stdout as-is
-          settle(stdout.trim() || null);
-        }
-      } catch {
-        // Not a JSON envelope — treat raw output as text
-        settle(stdout.trim() || null);
-      }
+      settle(resultText);
     });
 
     child.on("error", (err) => {
