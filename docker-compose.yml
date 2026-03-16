@@ -28,7 +28,7 @@ services:
       - EMOTION_SERVICE_URL=http://emotion:8002
       - TTS_SERVICE_URL=http://tts:8003
       - MEMORY_SERVICE_URL=http://memory:8004
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - VOICE_SERVICE_URL=http://voice:8005
     volumes:
       - audio-data:/app/volumes/audio
       - ~/.claude:/root/.claude:ro
@@ -139,6 +139,31 @@ services:
       start_period: 30s
     volumes:
       - model-cache:/app/models
+    networks:
+      - moc-net
+
+  voice:
+    build:
+      context: services/voice
+    ports:
+      - "8005:8005"
+    environment:
+      - DAILY_API_KEY=${DAILY_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      - CARTESIA_VOICE_ID=${CARTESIA_VOICE_ID:-95d51f79-c397-46f9-b49a-23763d3eaa2d}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-sonnet}
+      - MOC_BACKEND_URL=http://server:3000
+      - VOICE_PORT=8005
+    volumes:
+      - ~/.claude:/root/.claude:ro
+      - ~/.claude.json:/root/.claude.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8005/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - moc-net
 

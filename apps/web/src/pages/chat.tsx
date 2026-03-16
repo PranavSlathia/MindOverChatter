@@ -1,5 +1,5 @@
 import { HELPLINES } from "@moc/shared";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { AssessmentWidget } from "@/components/chat/assessment-widget.js";
 import { CBTThoughtRecordWidget } from "@/components/chat/cbt-thought-record-widget.js";
@@ -11,8 +11,9 @@ import {
   ThinkingBubble,
 } from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
+import { VoiceChat } from "@/components/voice/VoiceChat.js";
 import { useServiceHealth } from "@/hooks/use-service-health.js";
-import { api } from "@/lib/api.js";
+import { API_BASE, api } from "@/lib/api.js";
 import { useEmotionStore } from "@/stores/emotion-store.js";
 import { useSessionStore } from "@/stores/session-store.js";
 
@@ -49,6 +50,13 @@ export function ChatPage() {
   } = useSessionStore();
 
   const setEmotionFromSSE = useEmotionStore((s) => s.setEmotion);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<
+    "connected" | "reconnecting" | "disconnected"
+  >("connected");
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const MAX_RECONNECT_ATTEMPTS = 5;
 
   // Poll service health (whisper, TTS) every 60s so buttons reflect availability
   useServiceHealth();
@@ -76,6 +84,8 @@ export function ChatPage() {
 
       es.addEventListener("open", () => {
         setConnected(true);
+        reconnectAttemptsRef.current = 0;
+        setConnectionStatus("connected");
       });
 
       es.addEventListener("ai.thinking", () => {
@@ -256,6 +266,23 @@ export function ChatPage() {
 
       es.onerror = () => {
         setConnected(false);
+        es.close();
+        eventSourceRef.current = null;
+
+        // Don't reconnect if session is ended
+        const currentStatus = useSessionStore.getState().status;
+        if (currentStatus !== "active") return;
+
+        if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000);
+          reconnectAttemptsRef.current += 1;
+          setConnectionStatus("reconnecting");
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connectSSE(sid);
+          }, delay);
+        } else {
+          setConnectionStatus("disconnected");
+        }
       };
 
       return es;
@@ -357,6 +384,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
       eventSourceRef.current?.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     };
   }, [urlSessionId]);
 
@@ -366,7 +394,7 @@ export function ChatPage() {
       const sid = useSessionStore.getState().sessionId;
       const st = useSessionStore.getState().status;
       if (sid && st === "active") {
-        const url = `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/sessions/${sid}/end`;
+        const url = `${API_BASE}/api/sessions/${sid}/end`;
         navigator.sendBeacon(
           url,
           new Blob([JSON.stringify({ reason: "beforeunload" })], {
@@ -445,11 +473,44 @@ export function ChatPage() {
       });
   }, [reset, setSessionId, setStatus, connectSSE, addMessage]);
 
+  const handleRetryConnection = useCallback(() => {
+    if (!sessionId) return;
+    reconnectAttemptsRef.current = 0;
+    setConnectionStatus("reconnecting");
+    connectSSE(sessionId);
+  }, [sessionId, connectSSE]);
+
   const inputDisabled = isStreaming || isEnding || status === "completed";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <ChatHeader status={status} onEndSession={handleEndSession} />
+
+      {connectionStatus === "reconnecting" && (
+        <div
+          className="flex items-center justify-center gap-2 border-b border-foreground/10 bg-yellow-50 px-4 py-2 text-xs text-yellow-800"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-yellow-400 border-t-yellow-800" />
+          Reconnecting...
+        </div>
+      )}
+      {connectionStatus === "disconnected" && (
+        <div
+          className="flex items-center justify-center gap-2 border-b border-foreground/10 bg-red-50 px-4 py-2 text-xs text-red-800"
+          role="alert"
+        >
+          Connection lost.
+          <button
+            type="button"
+            onClick={handleRetryConnection}
+            className="font-medium underline hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Messages area */}
       <main className="flex-1 overflow-y-auto px-4 py-4" role="log" aria-label="Chat messages">
@@ -523,12 +584,40 @@ export function ChatPage() {
         </div>
       </main>
 
-      {/* Input area */}
-      <MessageInput
-        onSend={handleSendMessage}
-        disabled={inputDisabled}
-        placeholder={status === "completed" ? "Session has ended" : "Type a message..."}
-      />
+      {/* Input area — voice or text mode */}
+      {voiceMode ? (
+        <div className="border-t border-foreground/10 bg-muted/30">
+          <VoiceChat />
+          <div className="flex justify-center pb-2">
+            <button
+              type="button"
+              onClick={() => setVoiceMode(false)}
+              className="text-xs text-foreground/40 transition-colors hover:text-foreground/70"
+            >
+              Switch to text
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="relative">
+          <MessageInput
+            onSend={handleSendMessage}
+            disabled={inputDisabled}
+            placeholder={status === "completed" ? "Session has ended" : "Type a message..."}
+          />
+          {status === "active" && (
+            <button
+              type="button"
+              onClick={() => setVoiceMode(true)}
+              className="absolute right-16 top-1/2 -translate-y-1/2 rounded-full p-2 text-foreground/40 transition-colors hover:bg-muted hover:text-foreground/70"
+              aria-label="Switch to voice chat"
+              title="Voice chat"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

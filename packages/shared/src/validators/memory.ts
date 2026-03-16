@@ -12,6 +12,7 @@ export const MemoryTypeSchema = z.enum([
   "safety_critical",
   "win",
   "session_summary",
+  "formative_experience",
 ]);
 
 export const SearchMemoriesSchema = z.object({

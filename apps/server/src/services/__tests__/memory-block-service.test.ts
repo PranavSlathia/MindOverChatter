@@ -248,18 +248,22 @@ describe("memory-block-service", () => {
   // ── Group 5: BLOCK_CHAR_LIMITS constants ──────────────────────
 
   describe("BLOCK_CHAR_LIMITS constants", () => {
-    it("has entries for all 6 labels", () => {
-      expect(Object.keys(BLOCK_CHAR_LIMITS)).toHaveLength(6);
+    it("has entries for all 7 labels", () => {
+      expect(Object.keys(BLOCK_CHAR_LIMITS)).toHaveLength(7);
     });
 
-    it("all user/* labels have a char limit of 500", () => {
-      const userLabels = MEMORY_BLOCK_LABELS.filter((l) =>
-        l.startsWith("user/"),
+    it("all user/* labels except origin_story have a char limit of 500", () => {
+      const userLabels = MEMORY_BLOCK_LABELS.filter(
+        (l) => l.startsWith("user/") && l !== "user/origin_story",
       );
       expect(userLabels.length).toBeGreaterThan(0);
       for (const label of userLabels) {
         expect(BLOCK_CHAR_LIMITS[label]).toBe(500);
       }
+    });
+
+    it("user/origin_story has a char limit of 1000", () => {
+      expect(BLOCK_CHAR_LIMITS["user/origin_story"]).toBe(1000);
     });
 
     it("companion/therapeutic_calibration has a char limit of 800", () => {

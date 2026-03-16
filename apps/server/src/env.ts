@@ -6,6 +6,7 @@ const envSchema = z.object({
   EMOTION_SERVICE_URL: z.string().url().default("http://localhost:8002"),
   TTS_SERVICE_URL: z.string().url().default("http://localhost:8003"),
   MEMORY_SERVICE_URL: z.string().url().default("http://localhost:8004"),
+  VOICE_SERVICE_URL: z.string().url().default("http://localhost:8005"),
   CLAUDE_MODEL: z.string().default("sonnet"),
   CLAUDE_HAIKU_MODEL: z.string().default("haiku"),
   GROQ_API_KEY: z.string().optional(),

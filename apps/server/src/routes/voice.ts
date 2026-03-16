@@ -1,10 +1,13 @@
 // ── Voice Routes ────────────────────────────────────────────────
-// POST /transcribe  — Proxy audio to whisper service for STT
-// POST /tts         — Proxy text to TTS service, return audio
+// POST /transcribe      — Proxy audio to whisper service for STT
+// POST /tts             — Proxy text to TTS service, return audio
+// POST /voice/start     — Start voice session (Daily.co + Pipecat)
+// POST /voice/stop      — Stop voice session
 
 import { zValidator } from "@hono/zod-validator";
 import { SynthesizeRequestSchema } from "@moc/shared";
 import { Hono } from "hono";
+import { z } from "zod";
 import { env } from "../env.js";
 
 const app = new Hono()
@@ -96,7 +99,92 @@ const app = new Hono()
         503,
       );
     }
-  });
+  })
+
+  // ── POST /voice/start — Start voice chat session ──────────────
+  .post(
+    "/voice/start",
+    zValidator(
+      "json",
+      z.object({
+        sessionId: z.string().uuid().optional(),
+      }),
+    ),
+    async (c) => {
+      // Build the system prompt from session context
+      // For now, use a minimal prompt; Phase V2 will wire up memory blocks + therapy plan
+      const systemPrompt = [
+        "You are a warm, empathetic wellness companion called MindOverChatter.",
+        "You speak naturally in a conversational tone, as if talking to a close friend.",
+        "Keep responses concise (2-4 sentences) since this is a voice conversation.",
+        "Never claim to be a therapist. You are a wellness companion.",
+        "If the user expresses suicidal thoughts, self-harm, or immediate danger:",
+        "  - Say: 'I hear you, and I want you to know support is available right now.'",
+        "  - Provide: 988 Suicide & Crisis Lifeline (call or text 988)",
+        "  - Provide: iCall: 9152987821, Vandrevala Foundation: 1860-2662-345",
+      ].join("\n");
+
+      try {
+        const response = await fetch(`${env.VOICE_SERVICE_URL}/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_prompt: systemPrompt,
+            moc_session_id: c.req.valid("json").sessionId ?? null,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return c.json(
+            { error: "VOICE_START_FAILED", message: errorText },
+            response.status as 502 | 503,
+          );
+        }
+
+        const result = await response.json();
+        return c.json(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return c.json(
+          { error: "VOICE_UNAVAILABLE", message: `Voice service unavailable: ${message}` },
+          503,
+        );
+      }
+    },
+  )
+
+  // ── POST /voice/stop — Stop voice chat session ───────────────
+  .post(
+    "/voice/stop",
+    zValidator("json", z.object({ sessionId: z.string() })),
+    async (c) => {
+      try {
+        const response = await fetch(`${env.VOICE_SERVICE_URL}/stop`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: c.req.valid("json").sessionId }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return c.json(
+            { error: "VOICE_STOP_FAILED", message: errorText },
+            response.status as 404 | 500,
+          );
+        }
+
+        const result = await response.json();
+        return c.json(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return c.json(
+          { error: "VOICE_UNAVAILABLE", message: `Voice service unavailable: ${message}` },
+          503,
+        );
+      }
+    },
+  );
 
 // ── Export ────────────────────────────────────────────────────────
 

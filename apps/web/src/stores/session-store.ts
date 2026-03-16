@@ -37,8 +37,6 @@ interface SessionState {
   streamingContent: string;
   isCrisis: boolean;
   crisisResponse: CrisisResponse | null;
-  sessionSummary: string | null;
-
   // Assessment state
   activeAssessment: ActiveAssessment | null;
   assessmentResult: AssessmentResult | null;
@@ -56,7 +54,6 @@ interface SessionState {
   clearStreamingContent: () => void;
   setCrisis: (response: CrisisResponse) => void;
   clearCrisis: () => void;
-  setSessionSummary: (summary: string | null) => void;
   startAssessment: (assessment: ActiveAssessment) => void;
   completeAssessment: (result: AssessmentResult) => void;
   dismissAssessment: () => void;
@@ -74,7 +71,6 @@ export const useSessionStore = create<SessionState>((set) => ({
   streamingContent: "",
   isCrisis: false,
   crisisResponse: null,
-  sessionSummary: null,
   activeAssessment: null,
   assessmentResult: null,
 
@@ -96,7 +92,6 @@ export const useSessionStore = create<SessionState>((set) => ({
   setCrisis: (response) =>
     set({ isCrisis: true, crisisResponse: response, status: "crisis_escalated" }),
   clearCrisis: () => set({ isCrisis: false, crisisResponse: null }),
-  setSessionSummary: (summary) => set({ sessionSummary: summary }),
   startAssessment: (assessment) => set({ activeAssessment: assessment, assessmentResult: null }),
   completeAssessment: (result) => set({ assessmentResult: result }),
   dismissAssessment: () => set({ activeAssessment: null, assessmentResult: null }),
@@ -112,7 +107,6 @@ export const useSessionStore = create<SessionState>((set) => ({
       streamingContent: "",
       isCrisis: false,
       crisisResponse: null,
-      sessionSummary: null,
       activeAssessment: null,
       assessmentResult: null,
     }),

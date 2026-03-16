@@ -31,6 +31,7 @@ export const MEMORY_TYPES = [
   "safety_critical",
   "win",
   "session_summary",
+  "formative_experience",
 ] as const;
 
 // ── Session Constants ──────────────────────────────────────────
