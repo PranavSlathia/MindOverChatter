@@ -1,141 +1,119 @@
 /**
- * VoiceChat — Daily.co WebRTC voice chat component.
+ * VoiceChat — Pipecat + Daily.co voice chat component.
  *
- * Connects to the MindOverChatter voice service (Pipecat bot) via Daily.co.
- * Handles:
- * - Starting/stopping voice sessions
- * - Joining Daily rooms
- * - Audio state (mic, speaker)
- * - Voice session UI (listening indicator, controls)
+ * Uses @pipecat-ai/client-js + @pipecat-ai/daily-transport to connect
+ * to the MindOverChatter voice service (Pipecat bot) via Daily.co WebRTC.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
+import { DailyTransport } from "@pipecat-ai/daily-transport";
+import { API_BASE } from "@/lib/api.js";
 
 type VoiceState = "idle" | "connecting" | "connected" | "error";
-
-interface VoiceSessionInfo {
-  roomUrl: string;
-  token: string;
-  sessionId: string;
-}
 
 export function VoiceChat() {
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const callFrameRef = useRef<any>(null);
-  const sessionRef = useRef<VoiceSessionInfo | null>(null);
+  const [botSpeaking, setBotSpeaking] = useState(false);
+  const [userTranscript, setUserTranscript] = useState("");
+  const [botTranscript, setBotTranscript] = useState("");
+  const clientRef = useRef<PipecatClient | null>(null);
 
-  // Start a voice session
   const startVoice = useCallback(async () => {
     setState("connecting");
     setError(null);
+    setUserTranscript("");
+    setBotTranscript("");
 
     try {
-      // 1. Request voice session from backend
-      const resp = await fetch("/api/voice/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+      const transport = new DailyTransport();
+      const client = new PipecatClient({
+        transport,
+        enableMic: true,
+        enableCam: false,
+        callbacks: {
+          onConnected: () => {
+            console.log("[voice] Connected");
+            setState("connected");
+          },
+          onDisconnected: () => {
+            console.log("[voice] Disconnected");
+            setState("idle");
+          },
+          onBotStartedSpeaking: () => setBotSpeaking(true),
+          onBotStoppedSpeaking: () => setBotSpeaking(false),
+          onUserTranscript: (data) => {
+            const text = (data as { text?: string })?.text;
+            if (text) setUserTranscript(text);
+          },
+          onBotTranscript: (data) => {
+            const text = (data as { text?: string })?.text;
+            if (text) setBotTranscript(text);
+          },
+          onError: (err) => {
+            console.error("[voice] Error:", err);
+            setError(String(err));
+            setState("error");
+          },
+        },
       });
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ message: resp.statusText }));
-        throw new Error(err.message || `HTTP ${resp.status}`);
-      }
+      clientRef.current = client;
 
-      const data = await resp.json();
-      const session: VoiceSessionInfo = {
-        roomUrl: data.room_url,
-        token: data.token,
-        sessionId: data.session_id,
-      };
-      sessionRef.current = session;
-
-      // 2. Dynamically import Daily.co SDK (avoid SSR issues)
-      const DailyIframe = await import("@daily-co/daily-js");
-      const daily = DailyIframe.default;
-
-      // 3. Create call frame (audio-only, no video)
-      const callFrame = daily.createCallObject({
-        audioSource: true,
-        videoSource: false,
+      // Call the voice service directly (bypasses Hono proxy for lower latency)
+      const VOICE_URL = "http://localhost:8005";
+      await client.startBotAndConnect({
+        endpoint: `${VOICE_URL}/start`,
+        requestData: {
+          system_prompt: "You are a warm wellness companion called MindOverChatter. Keep responses concise (2-3 sentences) for voice. Never claim to be a therapist.",
+          moc_session_id: null,
+        },
       });
-      callFrameRef.current = callFrame;
-
-      // 4. Set up event handlers
-      callFrame.on("joined-meeting", () => {
-        setState("connected");
-      });
-
-      callFrame.on("left-meeting", () => {
-        setState("idle");
-        cleanup();
-      });
-
-      callFrame.on("error", (ev: any) => {
-        console.error("[voice] Daily error:", ev);
-        setError(ev?.errorMsg || "Connection error");
-        setState("error");
-      });
-
-      // Track when bot starts/stops speaking for visual feedback
-      callFrame.on("participant-updated", (ev: any) => {
-        // Could track bot speaking state here for UI indicators
-      });
-
-      // 5. Join the Daily room
-      await callFrame.join({ url: session.roomUrl, token: session.token });
     } catch (err) {
+      console.error("[voice] Start failed:", err);
       const message = err instanceof Error ? err.message : "Failed to start voice";
       setError(message);
       setState("error");
     }
   }, []);
 
-  // Stop voice session
   const stopVoice = useCallback(async () => {
-    cleanup();
+    if (clientRef.current) {
+      try {
+        await clientRef.current.disconnect();
+      } catch {
+        // Ignore
+      }
+    }
+    clientRef.current = null;
     setState("idle");
   }, []);
 
-  // Toggle mute
   const toggleMute = useCallback(() => {
-    if (callFrameRef.current) {
+    if (clientRef.current) {
       const newMuted = !isMuted;
-      callFrameRef.current.setLocalAudio(!newMuted);
+      clientRef.current.enableMic(!newMuted);
       setIsMuted(newMuted);
     }
   }, [isMuted]);
 
-  // Cleanup Daily.co call
-  const cleanup = useCallback(() => {
-    if (callFrameRef.current) {
-      try {
-        callFrameRef.current.leave();
-        callFrameRef.current.destroy();
-      } catch {
-        // Ignore cleanup errors
-      }
-      callFrameRef.current = null;
-    }
-    sessionRef.current = null;
-  }, []);
-
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      cleanup();
+      if (clientRef.current) {
+        try { clientRef.current.disconnect(); } catch { /* */ }
+        clientRef.current = null;
+      }
     };
-  }, [cleanup]);
+  }, []);
 
   return (
     <div className="flex flex-col items-center gap-4 p-6">
       {/* Voice state indicator */}
       <div className="flex flex-col items-center gap-2">
         {state === "idle" && (
-          <div className="text-muted-foreground text-sm">
+          <div className="text-sm text-foreground/40">
             Click to start voice chat
           </div>
         )}
@@ -146,9 +124,21 @@ export function VoiceChat() {
           </div>
         )}
         {state === "connected" && (
-          <div className="flex items-center gap-2 text-sm text-emerald-600">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-            Listening...
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-2 text-sm text-emerald-600">
+              <span className={`inline-block h-2 w-2 rounded-full ${botSpeaking ? "animate-pulse bg-blue-500" : "bg-emerald-500"}`} />
+              {botSpeaking ? "Speaking..." : "Listening..."}
+            </div>
+            {userTranscript && (
+              <div className="max-w-xs text-center text-xs text-foreground/50">
+                You: {userTranscript}
+              </div>
+            )}
+            {botTranscript && (
+              <div className="max-w-xs text-center text-xs text-primary/70">
+                Bot: {botTranscript}
+              </div>
+            )}
           </div>
         )}
         {state === "error" && (
@@ -161,31 +151,29 @@ export function VoiceChat() {
       {/* Controls */}
       <div className="flex items-center gap-3">
         {state === "idle" || state === "error" ? (
-          <Button
+          <button
+            type="button"
             onClick={startVoice}
-            size="lg"
-            className="rounded-full bg-emerald-600 px-8 hover:bg-emerald-700"
+            className="rounded-full bg-primary px-8 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
           >
             Start Voice Chat
-          </Button>
+          </button>
         ) : (
           <>
-            <Button
+            <button
+              type="button"
               onClick={toggleMute}
-              variant={isMuted ? "destructive" : "outline"}
-              size="sm"
-              className="rounded-full"
+              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${isMuted ? "bg-red-500 text-white hover:bg-red-600" : "border border-foreground/20 text-foreground/70 hover:bg-muted"}`}
             >
               {isMuted ? "Unmute" : "Mute"}
-            </Button>
-            <Button
+            </button>
+            <button
+              type="button"
               onClick={stopVoice}
-              variant="destructive"
-              size="sm"
-              className="rounded-full"
+              className="rounded-full bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
             >
               End Voice
-            </Button>
+            </button>
           </>
         )}
       </div>

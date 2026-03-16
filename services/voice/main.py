@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import aiohttp
 from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from bot import create_bot, get_daily_import_error
@@ -32,6 +33,13 @@ logger = logging.getLogger("moc-voice")
 # ── App ───────────────────────────────────────────────────────────────
 
 app = FastAPI(title="MindOverChatter Voice Service", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5175", "http://127.0.0.1:5173", "http://127.0.0.1:5175"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Session Tracking ──────────────────────────────────────────────────
 
