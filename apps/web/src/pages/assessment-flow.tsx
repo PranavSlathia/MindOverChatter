@@ -2,32 +2,12 @@ import { useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { getAssessmentDefinition } from "@/data/assessment-questions.js";
 import { api } from "@/lib/api.js";
+import {
+  SEVERITY_COLORS,
+  SEVERITY_DESCRIPTIONS,
+  SEVERITY_LABELS,
+} from "@/lib/assessment-constants.js";
 import { cn } from "@/lib/utils.js";
-
-const SEVERITY_LABELS: Record<string, string> = {
-  minimal: "Minimal",
-  mild: "Mild",
-  moderate: "Moderate",
-  moderately_severe: "Moderately Severe",
-  severe: "Severe",
-};
-
-const SEVERITY_COLORS: Record<string, string> = {
-  minimal: "text-emerald-600",
-  mild: "text-yellow-600",
-  moderate: "text-orange-600",
-  moderately_severe: "text-red-500",
-  severe: "text-red-700",
-};
-
-// Non-clinical result descriptions
-const SEVERITY_DESCRIPTIONS: Record<string, string> = {
-  minimal: "Your responses suggest you're doing well in this area.",
-  mild: "Your responses suggest some mild concerns. It may be worth keeping an eye on how you feel.",
-  moderate: "Your responses suggest moderate concerns. Consider exploring this further in a chat session.",
-  moderately_severe: "Your responses indicate notable concerns. We'd encourage talking through this with your wellness companion.",
-  severe: "Your responses suggest significant concerns. Please consider reaching out to a professional for support.",
-};
 
 export function AssessmentFlowPage() {
   const { type } = useParams<{ type: string }>();
@@ -336,8 +316,15 @@ export function AssessmentFlowPage() {
         </fieldset>
 
         {error && (
-          <div className="px-5 pb-2">
+          <div className="flex items-center gap-2 px-5 pb-2">
             <p className="text-xs text-destructive">{error}</p>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="text-xs font-medium text-primary underline hover:no-underline"
+            >
+              Retry
+            </button>
           </div>
         )}
 

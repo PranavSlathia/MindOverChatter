@@ -173,7 +173,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <time className={cn("text-[11px]", isUser ? "text-white/70" : "text-foreground/50")}>
             {formatTime(message.createdAt)}
           </time>
-          {!isUser && <TTSButton text={message.content} />}
+          {!isUser && (
+            <span role="status" aria-live="polite">
+              <TTSButton text={message.content} />
+            </span>
+          )}
         </div>
       </div>
     </div>

@@ -5,26 +5,11 @@ import {
   getAssessmentsByCategory,
   type AssessmentDefinition,
 } from "@/data/assessment-questions.js";
+import { SEVERITY_COLORS, SEVERITY_LABELS } from "@/lib/assessment-constants.js";
 import { cn } from "@/lib/utils.js";
 
 type LibraryData = {
   latestByType: Record<string, { severity: string; createdAt: string }>;
-};
-
-const SEVERITY_COLORS: Record<string, string> = {
-  minimal: "text-emerald-600",
-  mild: "text-yellow-600",
-  moderate: "text-orange-600",
-  moderately_severe: "text-red-500",
-  severe: "text-red-700",
-};
-
-const SEVERITY_LABELS: Record<string, string> = {
-  minimal: "Minimal",
-  mild: "Mild",
-  moderate: "Moderate",
-  moderately_severe: "Mod. Severe",
-  severe: "Severe",
 };
 
 export function AssessmentsPage() {

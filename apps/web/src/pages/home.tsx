@@ -205,6 +205,7 @@ function QuickActions() {
 export function HomePage() {
   const [summary, setSummary] = useState<HomeSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,7 +216,7 @@ export function HomePage() {
         if (!cancelled) setSummary(data);
       })
       .catch(() => {
-        // Endpoint not ready yet — fall back to quick-actions grid
+        setFetchError(true);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -270,6 +271,12 @@ export function HomePage() {
               Start Your First Session
             </Link>
           </div>
+
+          {fetchError && (
+            <p className="text-center text-xs text-foreground/40">
+              Could not load your latest data. Showing default view.
+            </p>
+          )}
 
           <QuickActions />
         </>

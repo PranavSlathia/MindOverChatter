@@ -139,6 +139,17 @@ export const SubmitAssessmentSchema = z
     }
   });
 
+/**
+ * Client submission for a CBT thought record.
+ * These are free-text answers — no scoring, no severity computation.
+ * Dedicated endpoint avoids collision with the numeric-answer scoring pipeline.
+ */
+export const SubmitCBTSchema = z.object({
+  sessionId: z.string().uuid(),
+  answers: z.array(z.string().min(1)).min(1).max(10),
+});
+
 export type AssessmentType = z.infer<typeof AssessmentTypeSchema>;
 export type AssessmentSeverity = z.infer<typeof AssessmentSeveritySchema>;
 export type SubmitAssessment = z.infer<typeof SubmitAssessmentSchema>;
+export type SubmitCBT = z.infer<typeof SubmitCBTSchema>;

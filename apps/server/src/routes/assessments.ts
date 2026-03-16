@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq, desc, and } from "drizzle-orm";
-import { SubmitAssessmentSchema } from "@moc/shared";
+import { SubmitAssessmentSchema, SubmitCBTSchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
 import { assessments, sessions } from "../db/schema/index";
@@ -214,6 +214,52 @@ const app = new Hono()
         severity,
         nextScreener,
       },
+      201,
+    );
+  })
+
+  // ── POST /cbt — Submit CBT Thought Record ───────────────────────
+  // Dedicated endpoint for free-text CBT records that bypass the numeric scoring pipeline.
+  .post("/cbt", zValidator("json", SubmitCBTSchema), async (c) => {
+    const { sessionId, answers } = c.req.valid("json");
+
+    // Validate session exists and is active
+    const [session] = await db
+      .select({ id: sessions.id, status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      return c.json(
+        { error: ERROR_CODES.SESSION_NOT_FOUND, message: "Session not found" },
+        404,
+      );
+    }
+
+    if (session.status !== "active") {
+      return c.json(
+        { error: ERROR_CODES.SESSION_ENDED, message: "Session is not active" },
+        409,
+      );
+    }
+
+    const user = await getOrCreateUser();
+
+    const [assessment] = await db
+      .insert(assessments)
+      .values({
+        sessionId,
+        userId: user.id,
+        type: "cbt_thought_record",
+        answers,
+        totalScore: 0,
+        severity: "minimal",
+      })
+      .returning();
+
+    return c.json(
+      { assessmentId: assessment!.id, type: "cbt_thought_record" as const },
       201,
     );
   });

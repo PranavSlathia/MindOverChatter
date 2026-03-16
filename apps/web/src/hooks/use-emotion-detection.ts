@@ -178,6 +178,13 @@ export function useEmotionDetection(): UseEmotionDetectionReturn {
     }
   }, [isDetectionActive, isSupported, setActive, detectOnce]);
 
+  // Auto-clear start error after 5 seconds
+  useEffect(() => {
+    if (!startError) return;
+    const timer = setTimeout(() => setStartError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [startError]);
+
   const stopDetection = useCallback(() => {
     // Clear interval
     if (intervalRef.current) {

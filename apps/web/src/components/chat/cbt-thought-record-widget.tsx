@@ -188,9 +188,8 @@ export function CBTThoughtRecordWidget() {
         return a.text;
       });
       api
-        .submitAssessment({
+        .submitCBT({
           sessionId,
-          type: "cbt_thought_record",
           answers: serialized,
         })
         .catch((err: unknown) => {

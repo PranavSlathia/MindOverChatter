@@ -17,6 +17,13 @@ import type {
 } from "@/stores/journey-store.js";
 import { useJourneyStore } from "@/stores/journey-store.js";
 
+function fetchWithTimeout<T>(promise: Promise<T>, ms = 15000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), ms)),
+  ]);
+}
+
 export function JourneyPage() {
   const {
     timeline,
@@ -46,9 +53,9 @@ export function JourneyPage() {
 
       try {
         const [timelineData, insightsData, therapyData] = await Promise.all([
-          api.getJourneyTimeline(50),
-          api.getJourneyInsights(),
-          api.getTherapyPlanGoals(),
+          fetchWithTimeout(api.getJourneyTimeline(50)),
+          fetchWithTimeout(api.getJourneyInsights()),
+          fetchWithTimeout(api.getTherapyPlanGoals()),
         ]);
 
         setTimeline(timelineData.items);

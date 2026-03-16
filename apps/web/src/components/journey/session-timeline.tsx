@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { SEVERITY_BADGE_COLORS, SEVERITY_LABELS } from "@/lib/assessment-constants.js";
 import type { TimelineAssessment, TimelineSession } from "@/stores/journey-store.js";
 
 interface SessionTimelineProps {
@@ -18,22 +19,6 @@ function formatDate(dateStr: string): string {
   }
 }
 
-const SEVERITY_LABELS: Record<string, string> = {
-  minimal: "Minimal",
-  mild: "Mild",
-  moderate: "Moderate",
-  moderately_severe: "Moderately Severe",
-  severe: "Severe",
-};
-
-const SEVERITY_COLORS: Record<string, string> = {
-  minimal: "bg-primary/10 text-primary",
-  mild: "bg-yellow-100 text-yellow-800",
-  moderate: "bg-orange-100 text-orange-800",
-  moderately_severe: "bg-red-100 text-red-700",
-  severe: "bg-red-200 text-red-800",
-};
-
 export function SessionTimeline({ sessions, assessments }: SessionTimelineProps) {
   return (
     <div className="space-y-4">
@@ -49,7 +34,7 @@ export function SessionTimeline({ sessions, assessments }: SessionTimelineProps)
                 <div key={a.id} className="flex items-center gap-2">
                   <div className="text-center">
                     <span
-                      className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${SEVERITY_COLORS[a.severity] ?? "bg-foreground/5 text-foreground/60"}`}
+                      className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${SEVERITY_BADGE_COLORS[a.severity] ?? "bg-foreground/5 text-foreground/60"}`}
                     >
                       {SEVERITY_LABELS[a.severity] ?? a.severity}
                     </span>

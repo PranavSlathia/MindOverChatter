@@ -64,7 +64,7 @@ export function MoodChart({ entries }: MoodChartProps) {
     <div
       className="rounded-2xl border border-foreground/10 bg-white p-6 shadow-sm"
       role="img"
-      aria-label="Mood trends chart showing valence and arousal over time"
+      aria-label={`Mood trends chart with ${entries.length} entries showing valence and arousal over time`}
     >
       <h3 className="mb-4 text-sm font-semibold text-foreground">Mood Trends</h3>
       <ResponsiveContainer width="100%" height={280}>

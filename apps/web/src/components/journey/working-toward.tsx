@@ -25,9 +25,9 @@ export function WorkingToward({ goals }: WorkingTowardProps) {
       <p className="mt-0.5 mb-4 text-xs text-foreground/50">Your evolving focus, in your own time.</p>
 
       <div className="space-y-3">
-        {goals.map((goal, i) => (
+        {goals.map((goal) => (
           <div
-            key={`goal-${i}`}
+            key={goal.visible_label}
             className="flex items-center justify-between gap-4 rounded-xl border border-foreground/8 bg-foreground/[0.02] px-4 py-3"
           >
             <span className="text-sm leading-snug text-foreground/80">{goal.visible_label}</span>

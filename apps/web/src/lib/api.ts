@@ -2,7 +2,7 @@ import type { AppType } from "@moc/server/routes/index.js";
 import type { InferRequestType, InferResponseType } from "hono/client";
 import { hc } from "hono/client";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 // ── Hono RPC Client ────────────────────────────────────────────────
 // Type-safe client inferred from server route definitions.
@@ -81,6 +81,7 @@ type EndSessionSuccess = InferResponseType<
   200
 >;
 type SubmitAssessmentSuccess = InferResponseType<typeof client.api.assessments.$post, 201>;
+type SubmitCBTSuccess = InferResponseType<typeof client.api.assessments.cbt.$post, 201>;
 type SubmitEmotionSuccess = InferResponseType<typeof client.api.emotions.$post, 201>;
 type CreateMoodLogSuccess = InferResponseType<(typeof client.api)["mood-logs"]["$post"], 201>;
 type DeleteSessionSuccess = InferResponseType<(typeof client.api.sessions)[":id"]["$delete"], 200>;
@@ -149,6 +150,12 @@ export const api = {
     const res = await client.api.assessments.$post({ json: body });
     await throwIfError(res);
     return (await res.json()) as SubmitAssessmentSuccess;
+  },
+
+  submitCBT: async (body: { sessionId: string; answers: string[] }): Promise<SubmitCBTSuccess> => {
+    const res = await client.api.assessments.cbt.$post({ json: body });
+    await throwIfError(res);
+    return (await res.json()) as SubmitCBTSuccess;
   },
 
   submitEmotion: async (body: SubmitEmotionInput): Promise<SubmitEmotionSuccess> => {
