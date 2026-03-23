@@ -11,6 +11,7 @@ import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
 import { assessments, memories, messages, moodLogs, sessionSummaries, sessions, therapyPlans } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
+import { env } from "../env.js";
 import { getFormulationInstant } from "../services/formulation-service.js";
 
 const USER_VISIBLE_TIMELINE_MEMORY_TYPES = [
@@ -361,7 +362,7 @@ Conversation:
 ${conversationText}`;
 
       try {
-        const rawResponse = await spawnClaudeStreaming(summaryPrompt, () => {});
+        const rawResponse = await spawnClaudeStreaming(summaryPrompt, () => {}, env.CLAUDE_OPUS_MODEL);
         if (!rawResponse.trim()) {
           errors.push(`${session.id}: empty response`);
           continue;

@@ -16,6 +16,7 @@ import {
   injectSessionContext,
   spawnClaudeStreaming,
 } from "../sdk/session-manager.js";
+import { env } from "../env.js";
 import { db } from "../db/index.js";
 import { sessions as sessionsTable, sessionSummaries } from "../db/schema/index";
 import { eq } from "drizzle-orm";
@@ -174,7 +175,7 @@ export function registerSessionHooks(): void {
       console.log(
         `[session-hooks] Generating summary for session ${ctx.sessionId} (${ctx.conversationHistory.length} messages)`,
       );
-      const rawResponse = await spawnClaudeStreaming(fullPrompt, () => {});
+      const rawResponse = await spawnClaudeStreaming(fullPrompt, () => {}, env.CLAUDE_OPUS_MODEL);
 
       if (!rawResponse.trim()) {
         throw new Error("Summary generation returned empty response");

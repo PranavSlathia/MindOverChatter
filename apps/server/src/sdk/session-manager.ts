@@ -241,7 +241,7 @@ export function assembleVoicePrompt(
  *
  * Returns the accumulated full response text.
  */
-export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void): Promise<string> {
+export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) => void, modelOverride?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     let fullResponse = "";
     let stderr = "";
@@ -264,11 +264,12 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
     delete cleanEnv.CLAUDECODE;
     cleanEnv.CLAUDE_PLUGIN_ROOT = "/dev/null";
 
-    console.log(`[claude-spawn] Spawning claude (model=${getClaudeModel()}, prompt=${prompt.length} chars)`);
+    const model = modelOverride ?? getClaudeModel();
+    console.log(`[claude-spawn] Spawning claude (model=${model}, prompt=${prompt.length} chars)`);
 
     const child = spawn("claude", [
       "--model",
-      getClaudeModel(),
+      model,
       "--print",
       "--verbose",
       "--max-turns",

@@ -15,6 +15,7 @@ import { memories, sessionSummaries, userFormulations } from "../db/schema/index
 import { therapyPlans } from "../db/schema/therapy-plans.js";
 import type { TherapyPlanRow } from "../db/schema/therapy-plans.js";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
+import { env } from "../env.js";
 import { getModeInstructions } from "../sdk/mode-blocks.js";
 import { TherapyPlanSchema } from "@moc/shared";
 import type { TherapyPlan } from "@moc/shared";
@@ -240,7 +241,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
   let rawResponse: string;
   try {
     console.log(`[therapy-plan-service] Calling Claude to generate therapy plan for user ${userId}`);
-    rawResponse = await spawnClaudeStreaming(prompt, () => {});
+    rawResponse = await spawnClaudeStreaming(prompt, () => {}, env.CLAUDE_OPUS_MODEL);
   } catch (err) {
     console.error(`[therapy-plan-service] Claude spawn failed for user ${userId}:`, err);
     return;

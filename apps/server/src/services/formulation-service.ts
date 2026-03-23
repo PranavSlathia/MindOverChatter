@@ -15,6 +15,7 @@ import {
   userFormulations,
 } from "../db/schema/index";
 import { spawnClaudeStreaming } from "../sdk/session-manager.js";
+import { env } from "../env.js";
 import {
   computeDomainSignals,
   computeDomainTrends,
@@ -706,7 +707,7 @@ Respond with ONLY valid JSON, no markdown fences, no explanation.`;
 
   try {
     console.log(`[formulation-service] Calling Claude for formulation (triggeredBy: ${triggeredBy})`);
-    const rawResponse = await spawnClaudeStreaming(prompt, () => {});
+    const rawResponse = await spawnClaudeStreaming(prompt, () => {}, env.CLAUDE_OPUS_MODEL);
     console.log(`[formulation-service] Claude response length: ${rawResponse.length} chars`);
     if (rawResponse.trim()) {
       let jsonStr = rawResponse.trim();
