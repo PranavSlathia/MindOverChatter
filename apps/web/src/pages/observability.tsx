@@ -289,6 +289,43 @@ function TurnCard({ turn }: { turn: ObservabilityTurn }) {
             )}
           </DetailRow>
 
+          {/* Multi-Model Reviewers */}
+          {turn.reviewerResults &&
+            Array.isArray(turn.reviewerResults) &&
+            (turn.reviewerResults as Array<{ reviewer?: string; score?: number; failed?: boolean; issues?: Array<{ type?: string }>; latencyMs?: number }>).length > 0 && (
+            <DetailRow label="Reviewers">
+              <div className="space-y-2">
+                {(turn.reviewerResults as Array<{ reviewer?: string; score?: number; failed?: boolean; issues?: Array<{ type?: string; severity?: string }>; latencyMs?: number }>).map(
+                  (r) => (
+                    <div
+                      key={r.reviewer}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <span className="font-medium text-foreground/70 capitalize">
+                        {r.reviewer?.replace("_", " ") ?? "Unknown"}
+                      </span>
+                      {r.failed ? (
+                        <span className="text-foreground/30">failed</span>
+                      ) : (
+                        <>
+                          <ScoreBadge value={r.score ?? null} />
+                          {r.issues && r.issues.length > 0 && (
+                            <span className="text-destructive/70">
+                              {r.issues.length} issue{r.issues.length > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </>
+                      )}
+                      <span className="text-foreground/30">
+                        {formatMs(r.latencyMs ?? null)}
+                      </span>
+                    </div>
+                  ),
+                )}
+              </div>
+            </DetailRow>
+          )}
+
           {/* Timing */}
           <DetailRow label="Timing">
             <div className="flex flex-wrap gap-3 text-xs text-foreground/60">
