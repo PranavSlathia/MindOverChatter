@@ -109,8 +109,21 @@ function getCodexStatus(): CliToolStatus {
     return { installed: false, loggedIn: false };
   }
 
-  // Codex doesn't have an auth command — just check installation
-  return { installed: true, loggedIn: false };
+  try {
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+    const output = execSync("codex login status", {
+      timeout: 3000,
+      env,
+      cwd: "/tmp",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).toString();
+
+    const loggedIn = /logged in/i.test(output) || /authenticated/i.test(output);
+    return { installed: true, loggedIn };
+  } catch {
+    return { installed: true, loggedIn: false };
+  }
 }
 
 // ── Routes ────────────────────────────────────────────────────

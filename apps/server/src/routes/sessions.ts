@@ -33,6 +33,7 @@ import {
   getSessionAuthority,
   getSessionMessages,
   getSessionMemories,
+  getActiveSkillNames,
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import { runSessionSupervisor } from "../services/session-supervisor.js";
@@ -371,9 +372,17 @@ const app = new Hono()
     void (async () => {
       // Hoist skill names and turn number so they're available for multi-model validation
       // even if the supervisor block fails.
+      // NOTE: The current user message was already pushed into the SDK session before
+      // this IIFE runs (sendMessage pushes user+assistant). But the supervisor needs
+      // to see the current user turn. Append it to the snapshot if it's not already there.
       const sdkMessages = getSessionMessages(sdkSessionId);
+      const lastSdkMsg = sdkMessages[sdkMessages.length - 1];
+      if (!lastSdkMsg || lastSdkMsg.role !== "user" || lastSdkMsg.content !== text) {
+        sdkMessages.push({ role: "user", content: text });
+      }
       const allSkills = loadSkillFiles();
-      const currentTurnNumber = Math.floor(sdkMessages.length / 2);
+      // Turn number is 1-based: count user messages in the snapshot
+      const currentTurnNumber = sdkMessages.filter((m) => m.role === "user").length;
       const skillNames = [...allSkills.keys()];
 
       // ── Session Supervisor (LLM-enhanced mode/skill selection) ──
@@ -427,11 +436,16 @@ const app = new Hono()
         console.warn("[session-supervisor] error — falling back to regex only:", err);
       }
 
+      // ── Capture actually-active skills for telemetry ────────────
+      // After supervisor may have injected dynamic skills, get the real active set
+      const activeSkillNames = getActiveSkillNames(sdkSessionId);
+      collector.setActiveSkills(activeSkillNames);
+
       // ── Claude response (supervisor context is now injected) ────
       try {
         const { validatorPromise } = await streamAiResponse(
           sessionId, sdkSessionId, text, userMsg!.id, session.userId, collector,
-          skillNames, currentTurnNumber,
+          activeSkillNames, currentTurnNumber,
         );
         // Wait for the validator to finish so its result is captured in the turn event.
         // This does NOT block the user — the HTTP response was returned long ago.

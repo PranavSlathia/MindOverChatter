@@ -325,7 +325,8 @@ export async function runMultiModelValidation(
   }
 
   // ── Codex (opt-in, every 3rd turn) ──────────────────────────────
-  if (env.CODEX_ENABLED && input.turnNumber % 3 === 0) {
+  // Codex runs every 3rd turn (1-based: turn 3, 6, 9...). Never on turn 1.
+  if (env.CODEX_ENABLED && input.turnNumber >= 3 && input.turnNumber % 3 === 0) {
     promises.push(runCodexReviewer(input));
   }
 

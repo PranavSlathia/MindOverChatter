@@ -36,9 +36,8 @@ function getClaudeArgs(model?: string): string[] {
 }
 
 function getGeminiArgs(model?: string): string[] {
-  // Gemini CLI: best-guess flags — stdin prompt, model selection.
-  // If the CLI does not exist or these flags are wrong, the spawn
-  // will fail gracefully (caught by the error handler).
+  // Gemini CLI requires -p/--prompt for headless (non-interactive) mode.
+  // The prompt is passed via -p flag, NOT stdin.
   const args: string[] = [];
   if (model) {
     args.push("--model", model);
@@ -47,9 +46,9 @@ function getGeminiArgs(model?: string): string[] {
 }
 
 function getCodexArgs(model?: string): string[] {
-  // Codex CLI: best-guess flags — stdin prompt, model selection.
-  // Graceful failure if binary is missing or flags are wrong.
-  const args: string[] = [];
+  // Codex CLI uses `codex exec` for non-interactive execution.
+  // The prompt is passed via -p/--prompt flag, NOT stdin.
+  const args: string[] = ["exec"];
   if (model) {
     args.push("--model", model);
   }
@@ -136,10 +135,18 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
         break;
     }
 
+    // For Claude: prompt via stdin (avoids ARG_MAX on large prompts)
+    // For Gemini/Codex: prompt via -p flag (required for headless mode)
+    if (cli !== "claude") {
+      args.push("-p", prompt);
+    }
+
     const child = spawn(binary, args, { env: cleanEnv, cwd: "/tmp" });
 
-    child.stdin.write(prompt);
-    child.stdin.end();
+    if (cli === "claude") {
+      child.stdin.write(prompt);
+      child.stdin.end();
+    }
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");

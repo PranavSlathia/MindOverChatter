@@ -597,6 +597,17 @@ export function isSessionActive(sdkSessionId: string): boolean {
 }
 
 /**
+ * Get the names of all skills active in this session (startup + dynamically injected).
+ */
+export function getActiveSkillNames(sdkSessionId: string): string[] {
+  const session = sessions.get(sdkSessionId);
+  if (!session) return [];
+  // Startup skills are in skillContent (unnamed), but injectedSkillNames tracks dynamic ones.
+  // Return the dynamic set — these are the named skills the supervisor activated.
+  return [...session.injectedSkillNames];
+}
+
+/**
  * Inject a context block into a session's prompt assembly.
  * Context blocks appear after memory context and skill content,
  * but before conversation history.

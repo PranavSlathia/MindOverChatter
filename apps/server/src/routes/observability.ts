@@ -241,6 +241,7 @@ function serializeTurnEvent(row: typeof turnEvents.$inferSelect) {
       totalPipelineMs: row.totalPipelineMs,
       claudeResponseMs: row.claudeResponseMs,
     },
+    reviewerResults: row.reviewerResults ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }
