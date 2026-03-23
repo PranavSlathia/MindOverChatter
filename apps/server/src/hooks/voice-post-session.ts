@@ -10,6 +10,7 @@ import { registerOnEnd } from "../sdk/session-lifecycle.js";
 import type { OnEndContext } from "../sdk/session-lifecycle.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import { spawnCliForJson } from "../services/cli-spawner.js";
+import { sanitizeForPrompt } from "./calibration-safety.js";
 import { db } from "../db/index.js";
 import { sessions } from "../db/schema/index";
 import { eq } from "drizzle-orm";
@@ -77,11 +78,12 @@ function buildVoiceAnalysisPrompt(
           ]
             .filter(Boolean)
             .join(", ");
-          return `[${t.role.toUpperCase()}] (${meta}): ${t.content}`;
+          const sanitizedContent = sanitizeForPrompt(t.content);
+          return `[${t.role.toUpperCase()}] (${meta}): ${sanitizedContent}`;
         })
         .join("\n")
     : conversationHistory
-        .map((m) => `[${m.role.toUpperCase()}]: ${m.content}`)
+        .map((m) => `[${m.role.toUpperCase()}]: ${sanitizeForPrompt(m.content)}`)
         .join("\n");
 
   const emotionsSection = voiceMetrics.emotions
@@ -105,7 +107,7 @@ function buildVoiceAnalysisPrompt(
       ].join("\n")
     : "(no session summary data)";
 
-  return `You are a clinical voice analysis system for a wellness companion app. Analyze this voice session transcript along with prosody, emotion, and timing data.
+  return `You are an internal voice session analysis system for a wellness companion app. Analyze this voice session transcript along with prosody, emotion, and timing data.
 
 ---TRANSCRIPT WITH TIMING---
 ${transcriptSection}

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from bot import create_bot, get_daily_import_error
 from config import settings
+from metrics_collector import SessionMetrics
 
 # ── Logging ───────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ class VoiceSession:
         self.created_at = datetime.now(timezone.utc)
         self.user_turns: list[str] = []
         self.assistant_turns: list[str] = []
+        self.session_metrics: Optional[SessionMetrics] = None
 
 
 # ── Daily.co Helpers ──────────────────────────────────────────────────
@@ -186,6 +188,79 @@ async def _persist_transcript(voice_session: Optional["VoiceSession"]) -> None:
         )
 
 
+# ── Enriched Session Persistence ─────────────────────────────────────
+
+
+async def _persist_session_complete(voice_session: Optional["VoiceSession"]) -> bool:
+    """POST full metrics bundle to /api/voice/session-complete.
+
+    Returns True if the enriched persistence succeeded, False otherwise.
+    The caller should fall back to _persist_transcript() on failure.
+    """
+    if not voice_session or not voice_session.moc_session_id:
+        return False
+
+    if voice_session.session_metrics is None:
+        logger.info(
+            "[session=%s] No session_metrics — cannot send enriched data",
+            voice_session.session_id,
+        )
+        return False
+
+    try:
+        bundle = voice_session.session_metrics.get_session_metrics()
+    except Exception as e:
+        logger.error(
+            "[session=%s] Failed to serialize session metrics: %s",
+            voice_session.session_id,
+            e,
+        )
+        return False
+
+    # Ensure the bundle uses the MoC session ID (not the voice service ID)
+    bundle["sessionId"] = voice_session.moc_session_id
+
+    # Check there is actual content to persist
+    transcript = bundle.get("transcript", [])
+    if not transcript:
+        logger.info(
+            "[session=%s] Empty enriched transcript — skipping session-complete",
+            voice_session.session_id,
+        )
+        return False
+
+    url = f"{settings.MOC_BACKEND_URL}/api/voice/session-complete"
+
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.post(url, json=bundle, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    logger.info(
+                        "[session=%s] Session-complete persisted: %d turns, %d emotions",
+                        voice_session.session_id,
+                        result.get("transcriptCount", 0),
+                        result.get("emotionCount", 0),
+                    )
+                    return True
+                else:
+                    body = await resp.text()
+                    logger.error(
+                        "[session=%s] session-complete POST failed (%d): %s",
+                        voice_session.session_id,
+                        resp.status,
+                        body[:200],
+                    )
+                    return False
+    except Exception as e:
+        logger.error(
+            "[session=%s] session-complete POST error: %s",
+            voice_session.session_id,
+            e,
+        )
+        return False
+
+
 # ── Bot Runner ────────────────────────────────────────────────────────
 
 
@@ -211,7 +286,7 @@ async def _run_bot_session(
         logger.info("[session=%s] Assistant: %s", session_id, text[:80])
 
     try:
-        await create_bot(
+        metrics = await create_bot(
             room_url=room_url,
             token=token,
             session_id=session_id,
@@ -220,11 +295,19 @@ async def _run_bot_session(
             on_user_text=on_user_text,
             on_assistant_text=on_assistant_text,
         )
+        if voice_session and metrics is not None:
+            voice_session.session_metrics = metrics
     except Exception as e:
         logger.error("[session=%s] Bot error: %s", session_id, e)
     finally:
-        # Persist transcript before cleanup
-        await _persist_transcript(voice_session)
+        # Try enriched persistence first; fall back to bare transcript
+        enriched_ok = await _persist_session_complete(voice_session)
+        if not enriched_ok:
+            logger.info(
+                "[session=%s] Falling back to bare transcript persistence",
+                session_id,
+            )
+            await _persist_transcript(voice_session)
 
         semaphore.release()
         _sessions.pop(session_id, None)
@@ -342,5 +425,5 @@ async def health() -> dict[str, Any]:
         "daily_error": daily_error,
         "groq_configured": bool(settings.GROQ_API_KEY),
         "cartesia_configured": bool(settings.CARTESIA_API_KEY),
-        "claude_model": settings.CLAUDE_MODEL,
+        "groq_llm_model": settings.GROQ_LLM_MODEL,
     }

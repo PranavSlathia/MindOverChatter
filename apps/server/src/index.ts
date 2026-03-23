@@ -13,6 +13,7 @@ registerSessionHooks();
 assertHookContract({
   onStart: ["memory-blocks-injection", "therapy-plan-injection"],
   onEnd: [
+    { name: "voice-post-session-analysis", priority: "background" },
     { name: "session-summary", priority: "critical" },
     { name: "formulation", priority: "background" },
     { name: "therapy-plan", priority: "background" },

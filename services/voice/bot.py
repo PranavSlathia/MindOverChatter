@@ -1,7 +1,7 @@
-"""Voice bot pipeline: SileroVAD → GroqSTT → ClaudeCLI → CartesiaTTS via Daily.co.
+"""Voice bot pipeline: SileroVAD → GroqSTT → GroqLLM → CartesiaTTS via Daily.co.
 
 Creates and runs a Pipecat bot for a single voice session.
-Modeled after PRSNL's pipecat bot with Claude CLI replacing GroqLLM.
+Modeled after PRSNL's pipecat bot with Groq LLM for low-latency inference.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import asyncio
 import io
 import logging
 import struct
+import time
 from typing import Any, Optional
 
 import aiohttp
@@ -36,9 +37,17 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.groq.stt import GroqSTTService
+from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 
-from claude_processor import ClaudeCLIProcessor
 from config import settings
+from reflection_manager import ReflectionManager
+from metrics_collector import (
+    EmotionSnapshot,
+    MetricsInputObserver,
+    MetricsOutputObserver,
+    SessionMetrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +90,11 @@ class TranscriptLogger(FrameProcessor):
         self._on_assistant_text = on_assistant_text
         self._current_assistant_text: list[str] = []
         self._in_response = False
+        self._reflection_manager: Any = None
+
+    def set_reflection_manager(self, manager: Any) -> None:
+        """Set the ReflectionManager after PipelineTask is created."""
+        self._reflection_manager = manager
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -88,6 +102,13 @@ class TranscriptLogger(FrameProcessor):
         if isinstance(frame, TranscriptionFrame) and frame.finalized and frame.text.strip():
             if self._on_user_text:
                 self._on_user_text(frame.text)
+
+            # Check for therapeutic reflection pause
+            if self._reflection_manager:
+                self._reflection_manager.on_turn_complete(frame.text)
+                should, pause_type = self._reflection_manager.should_pause()
+                if should:
+                    await self._reflection_manager.execute_pause(pause_type)
 
         elif isinstance(frame, LLMFullResponseStartFrame):
             self._in_response = True
@@ -236,11 +257,13 @@ class VoiceEmotionProcessor(FrameProcessor):
         self,
         moc_session_id: Optional[str],
         *,
+        session_metrics: Optional[SessionMetrics] = None,
         emotion_service_url: str = settings.EMOTION_SERVICE_URL,
         backend_url: str = settings.MOC_BACKEND_URL,
     ) -> None:
         super().__init__()
         self._moc_session_id = moc_session_id
+        self._session_metrics = session_metrics
         self._emotion_url = emotion_service_url.rstrip("/")
         self._backend_url = backend_url.rstrip("/")
 
@@ -344,7 +367,23 @@ class VoiceEmotionProcessor(FrameProcessor):
                 self._moc_session_id,
             )
 
-            # --- Step 2: POST to MoC backend ---
+            # --- Step 2: Feed into SessionMetrics (if wired) ---
+            if self._session_metrics is not None:
+                snapshot = EmotionSnapshot(
+                    turn_index=self._session_metrics.current_turn_index(),
+                    timestamp=time.time(),
+                    emotion_label=emotion_label,
+                    confidence=confidence,
+                    pitch_mean=prosody.get("pitch_mean", 0.0) if prosody else 0.0,
+                    pitch_std=prosody.get("pitch_std", 0.0) if prosody else 0.0,
+                    energy_mean=prosody.get("energy_mean", 0.0) if prosody else 0.0,
+                    energy_std=prosody.get("energy_std", 0.0) if prosody else 0.0,
+                    speaking_rate=prosody.get("speaking_rate", 0.0) if prosody else 0.0,
+                    mfcc_summary=prosody.get("mfcc_summary") if prosody else None,
+                )
+                self._session_metrics.add_emotion(snapshot)
+
+            # --- Step 3: POST to MoC backend ---
             await self._report_to_backend(emotion_label, confidence, prosody)
 
         except Exception:
@@ -443,10 +482,14 @@ async def create_bot(
     system_prompt: str,
     on_user_text: Any = None,
     on_assistant_text: Any = None,
-) -> None:
+) -> Optional[SessionMetrics]:
     """Create and run a Pipecat voice bot for a single session.
 
     The bot joins the Daily room and runs until the client disconnects.
+
+    Returns:
+        The SessionMetrics instance containing all collected voice metrics
+        for the session, or None if the bot could not start.
 
     Args:
         room_url: Daily.co room URL
@@ -459,19 +502,19 @@ async def create_bot(
     """
     if _DAILY_IMPORT_ERROR or DailyTransport is None or DailyParams is None:
         logger.error("Daily transport not available: %s", _DAILY_IMPORT_ERROR)
-        return
+        return None
 
     if not settings.GROQ_API_KEY:
         logger.error("GROQ_API_KEY not set")
-        return
+        return None
 
     if not settings.CARTESIA_API_KEY:
         logger.error("CARTESIA_API_KEY not set")
-        return
+        return None
 
     if CartesiaTTSService is None:
         logger.error("CartesiaTTSService not available — install pipecat-ai[cartesia]")
-        return
+        return None
 
     logger.info("[voice-bot] Starting session=%s room=%s", session_id, room_url)
 
@@ -482,7 +525,14 @@ async def create_bot(
         model=settings.GROQ_WHISPER_MODEL,
     )
 
-    llm = ClaudeCLIProcessor(model=settings.CLAUDE_MODEL)
+    llm = GroqLLMService(
+        api_key=settings.GROQ_API_KEY,
+        model=settings.GROQ_LLM_MODEL,
+        params=BaseOpenAILLMService.InputParams(
+            temperature=0.7,
+            max_completion_tokens=1024,
+        ),
+    )
 
     tts = CartesiaTTSService(
         api_key=settings.CARTESIA_API_KEY,
@@ -533,20 +583,35 @@ async def create_bot(
         on_assistant_text=on_assistant_text,
     )
 
+    # ── Session Metrics (shared data store for voice analytics) ──────
+
+    session_metrics = SessionMetrics(session_id=moc_session_id or session_id)
+
     # ── Voice Emotion Processor (fire-and-forget prosody analysis) ─
 
-    voice_emotion = VoiceEmotionProcessor(moc_session_id=moc_session_id)
+    voice_emotion = VoiceEmotionProcessor(
+        moc_session_id=moc_session_id,
+        session_metrics=session_metrics,
+    )
+
+    # ── Metrics Observers (passive frame observers) ────────────────
+
+    metrics_input = MetricsInputObserver(session_metrics)
+    metrics_output = MetricsOutputObserver(session_metrics)
 
     # ── Pipeline ──────────────────────────────────────────────────────
     # voice_emotion sits between transport.input() and stt so it can
-    # buffer raw InputAudioRawFrame samples. It passes all frames
-    # through immediately and dispatches emotion analysis as a
-    # background task when a user speech turn ends.
+    # buffer raw InputAudioRawFrame samples. metrics_input sits after
+    # voice_emotion to observe user speech timing. metrics_output sits
+    # after context_aggregator.assistant() to observe LLM responses,
+    # interruptions, and finalized transcriptions. All observers pass
+    # every frame through — they never consume.
 
     pipeline = Pipeline(
         [
             transport.input(),
             voice_emotion,
+            metrics_input,
             stt,
             transcript_logger,
             crisis_check,
@@ -555,6 +620,7 @@ async def create_bot(
             tts,
             transport.output(),
             context_aggregator.assistant(),
+            metrics_output,
         ]
     )
 
@@ -562,6 +628,15 @@ async def create_bot(
         pipeline,
         params=PipelineParams(allow_interruptions=True),
     )
+
+    # ── Reflection Manager (therapeutic pauses + memory refresh) ──────
+
+    reflection_mgr = ReflectionManager(
+        pipeline_task=task,
+        moc_session_id=moc_session_id,
+        backend_url=settings.MOC_BACKEND_URL,
+    )
+    transcript_logger.set_reflection_manager(reflection_mgr)
 
     # ── Event Handlers ────────────────────────────────────────────────
 
@@ -591,4 +666,7 @@ async def create_bot(
     except Exception as e:
         logger.error("[voice-bot] Session error: %s — %s", session_id, e)
     finally:
+        session_metrics.finalize()
         logger.info("[voice-bot] Session ended: %s", session_id)
+
+    return session_metrics

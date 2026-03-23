@@ -32,6 +32,7 @@ import {
   isSafeCalibration,
   isSafeUserBlock,
 } from "./calibration-safety.js";
+import { registerVoicePostSessionHook } from "./voice-post-session.js";
 
 export { sanitizeForPrompt, isSafeCalibration, isSafeUserBlock };
 
@@ -143,6 +144,11 @@ export function registerSessionHooks(): void {
       setSessionAuthority(ctx.sdkSessionId, plan.directive_authority);
     }
   });
+
+  // ── Hook: voice-post-session-analysis (onEnd, background) ──────
+  // Must register BEFORE session-summary so it runs first in the
+  // background chain and populates ctx.voiceAnalysis for downstream hooks.
+  registerVoicePostSessionHook();
 
   // ── Hook: session-summary (onEnd, critical) ────────────────────
 

@@ -25,8 +25,8 @@ class Settings:
     )
     CARTESIA_MODEL: str = os.getenv("CARTESIA_MODEL", "sonic-3")
 
-    # Claude CLI (main LLM)
-    CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "sonnet")
+    # Groq LLM (main conversation model)
+    GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
 
     # VAD
     VAD_MIN_VOLUME: float = float(os.getenv("VAD_MIN_VOLUME", "0.3"))

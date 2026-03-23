@@ -1,9 +1,12 @@
 // ── Voice Routes ────────────────────────────────────────────────
-// POST /transcribe        — Proxy audio to whisper service for STT
-// POST /tts               — Proxy text to TTS service, return audio
-// POST /voice/start       — Start voice session (Daily.co + Pipecat)
-// POST /voice/stop        — Stop voice session
-// POST /voice/transcript  — Persist voice transcript to DB
+// POST /transcribe              — Proxy audio to whisper service for STT
+// POST /tts                     — Proxy text to TTS service, return audio
+// POST /voice/start             — Start voice session (Daily.co + Pipecat)
+// POST /voice/stop              — Stop voice session
+// POST /voice/transcript        — Persist voice transcript to DB
+// POST /voice/check-turn        — Live crisis gate for voice turns
+// POST /voice/session-complete  — Persist enriched transcript + voice metrics
+// POST /voice/refresh-memories  — Mem0 memory refresh for voice reflection pauses
 
 import { zValidator } from "@hono/zod-validator";
 import { SynthesizeRequestSchema } from "@moc/shared";
@@ -24,6 +27,7 @@ import {
   ensureSdkSessionForStoredSession,
   initializeSdkSessionForUser,
 } from "../session/bootstrap.js";
+import { searchMemories } from "../services/memory-client.js";
 
 const VoiceStartSchema = z.object({
   sessionId: z.string().uuid().optional(),
@@ -47,6 +51,50 @@ const VoiceTranscriptSchema = z.object({
       createdAt: z.string(),
     }),
   ),
+});
+
+const VoiceSessionCompleteSchema = z.object({
+  sessionId: z.string().uuid(),
+  transcript: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.string(),
+      createdAt: z.string(),
+      turnIndex: z.number(),
+      durationSecs: z.number(),
+      pauseBeforeSecs: z.number(),
+      wordCount: z.number(),
+      wasInterrupted: z.boolean(),
+    }),
+  ),
+  emotions: z.array(
+    z.object({
+      turnIndex: z.number(),
+      timestamp: z.string(),
+      emotionLabel: z.string(),
+      confidence: z.number(),
+      pitchMean: z.number(),
+      pitchStd: z.number(),
+      energyMean: z.number(),
+      energyStd: z.number(),
+      speakingRate: z.number(),
+      mfccSummary: z.array(z.number()).nullable(),
+    }),
+  ),
+  sessionSummary: z.object({
+    totalUserSpeechSecs: z.number(),
+    totalSilenceSecs: z.number(),
+    speechToSilenceRatio: z.number(),
+    interruptionCount: z.number(),
+    avgUserTurnLengthWords: z.number(),
+    engagementTrajectory: z.array(z.number()),
+    emotionArc: z.array(z.tuple([z.number(), z.string(), z.number()])),
+  }),
+});
+
+const RefreshMemoriesSchema = z.object({
+  sessionId: z.string().uuid(),
+  recentTopics: z.array(z.string()).min(1).max(20),
 });
 
 const app = new Hono()
@@ -407,6 +455,129 @@ const app = new Hono()
       });
 
       return c.json({ status: "ok", count: sortedTurns.length });
+    },
+  )
+
+  // ── POST /voice/session-complete — Enriched transcript + voice metrics ──
+  .post(
+    "/voice/session-complete",
+    zValidator("json", VoiceSessionCompleteSchema),
+    async (c) => {
+      const { sessionId, transcript, emotions, sessionSummary } =
+        c.req.valid("json");
+      const user = await getOrCreateUser();
+
+      // Verify session exists and belongs to user
+      const [session] = await db
+        .select({
+          id: sessions.id,
+          sdkSessionId: sessions.sdkSessionId,
+          status: sessions.status,
+        })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+        .limit(1);
+
+      if (!session) {
+        return c.json(
+          { error: "SESSION_NOT_FOUND", message: "Session not found" },
+          404,
+        );
+      }
+
+      // 1. Persist enriched transcript to messages table
+      if (transcript.length > 0) {
+        const sortedTranscript = [...transcript].sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+
+        await db.insert(messages).values(
+          sortedTranscript.map((turn) => ({
+            sessionId,
+            role: turn.role as "user" | "assistant",
+            content: turn.content,
+            createdAt: new Date(turn.createdAt),
+          })),
+        );
+
+        // Append to SDK in-memory session for onEnd hooks
+        if (session.sdkSessionId) {
+          appendMessagesToSession(
+            session.sdkSessionId,
+            sortedTranscript.map((turn) => ({
+              role: turn.role,
+              content: turn.content,
+            })),
+          );
+        }
+      }
+
+      // 2. Store full voice metrics bundle on sessions row (JSONB)
+      await db
+        .update(sessions)
+        .set({
+          voiceMetrics: { transcript, emotions, sessionSummary },
+          lastActivityAt: new Date(),
+        })
+        .where(eq(sessions.id, sessionId));
+
+      sessionEmitter.emit(sessionId, {
+        event: "voice.session_complete",
+        data: {
+          transcriptCount: transcript.length,
+          emotionCount: emotions.length,
+          interruptionCount: sessionSummary.interruptionCount,
+        },
+      });
+
+      return c.json({
+        status: "ok",
+        transcriptCount: transcript.length,
+        emotionCount: emotions.length,
+      });
+    },
+  )
+
+  // ── POST /voice/refresh-memories — Mem0 refresh for reflection pauses ──
+  .post(
+    "/voice/refresh-memories",
+    zValidator("json", RefreshMemoriesSchema),
+    async (c) => {
+      const { sessionId, recentTopics } = c.req.valid("json");
+      const user = await getOrCreateUser();
+
+      // Verify session exists and belongs to user
+      const [session] = await db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+        .limit(1);
+
+      if (!session) {
+        return c.json(
+          { error: "SESSION_NOT_FOUND", message: "Session not found" },
+          404,
+        );
+      }
+
+      // Search Mem0 with recent topics joined as query
+      const query = recentTopics.join("; ");
+      const results = await searchMemories(user.id, query, 10);
+
+      if (results.length === 0) {
+        return c.json({ memoriesBlock: "" });
+      }
+
+      // Format memories as a text block for context injection
+      const memoriesBlock = results
+        .map(
+          (m) =>
+            `[${m.memoryType}] ${m.content} (confidence: ${String(m.confidence.toFixed(2))})`,
+        )
+        .join("\n");
+
+      return c.json({ memoriesBlock });
     },
   );
 

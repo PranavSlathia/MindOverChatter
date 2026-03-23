@@ -111,6 +111,7 @@ function parsePlainOutput(raw: string): string | null {
  */
 export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null> {
   const { cli, model, prompt, timeoutMs, label } = options;
+  console.log(`[${label}] spawning ${cli} (model=${model ?? "default"}, prompt=${prompt.length} chars, timeout=${timeoutMs}ms)`);
 
   return new Promise((resolve) => {
     let stdout = "";
@@ -170,7 +171,15 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
       stdout += data.toString();
     });
 
-    child.on("close", () => {
+    let stderr = "";
+    child.stderr.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0 && stderr) {
+        console.warn(`[${label}] exit code ${code}, stderr: ${stderr.slice(0, 200)}`);
+      }
       clearTimeout(timer);
       // Parse based on CLI type
       const parsed = cli === "claude"
@@ -210,38 +219,21 @@ export async function spawnWithGeminiFallback(options: {
 }): Promise<string | null> {
   const { prompt, timeoutMs, label } = options;
 
-  // Try Gemini first (if enabled)
-  if (env.GEMINI_ENABLED) {
-    const geminiResult = await spawnCliForJson({
-      cli: "gemini",
-      model: env.GEMINI_MODEL,
-      prompt,
-      timeoutMs,
-      label: `${label}/gemini`,
-    });
-
-    if (geminiResult) {
-      console.log(`[${label}] Gemini succeeded`);
-      return geminiResult;
-    }
-
-    console.log(`[${label}] Gemini failed — falling back to Claude Haiku`);
-  }
-
-  // Fallback: Claude Haiku
-  const haikuResult = await spawnCliForJson({
-    cli: "claude",
-    model: env.CLAUDE_HAIKU_MODEL,
+  // Use Gemini as the primary (and only) lightweight model.
+  // No Haiku fallback — CLI spawning is too slow for sequential fallback chains.
+  const result = await spawnCliForJson({
+    cli: "gemini",
+    model: env.GEMINI_MODEL,
     prompt,
     timeoutMs,
-    label: `${label}/haiku`,
+    label: `${label}/gemini`,
   });
 
-  if (haikuResult) {
-    console.log(`[${label}] Haiku succeeded`);
+  if (result) {
+    console.log(`[${label}] Gemini succeeded`);
   } else {
-    console.warn(`[${label}] Both Gemini and Haiku failed`);
+    console.warn(`[${label}] Gemini failed — no fallback`);
   }
 
-  return haikuResult;
+  return result;
 }
