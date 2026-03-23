@@ -270,6 +270,7 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
     const child = spawn("claude", [
       "--model",
       model,
+      "--bare",
       "--print",
       "--verbose",
       "--max-turns",

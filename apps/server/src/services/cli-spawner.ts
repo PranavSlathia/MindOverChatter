@@ -23,6 +23,7 @@ export interface CliSpawnOptions {
 
 function getClaudeArgs(model?: string): string[] {
   return [
+    "--bare",
     "--model",
     model ?? env.CLAUDE_HAIKU_MODEL,
     "--print",
