@@ -22,6 +22,10 @@
 - **0013_research_tables.sql**: Research isolated sandbox. 3 tables, check constraint on gate_decision.
   - Tables: research_calibration_proposals, research_hypothesis_simulations, research_direction_compliance
   - Generated programmatically via drizzle-kit/api (CLI requires TTY — see Migration Protocol below)
+- **0017_worried_hammerhead.sql**: Observability layer. 1 table (turn_events), 33 columns, 4 indexes (2 partial).
+  - Captures full pipeline snapshot per user message turn: crisis, mode, supervisor, validator, context, timing
+  - Partial indexes on `depth_alert_fired=true` and `validator_safe=false` for alert queries
+  - FK cascade to sessions.id
 
 ## Research Sandbox Architecture
 
@@ -34,7 +38,7 @@
 
 ## Migration Protocol (drizzle-kit CLI TTY issue)
 
-drizzle-kit 0.31.9 CLI writes output to `/dev/tty` directly (not stdout/stderr) and requires a real TTY. In a non-TTY environment (CI, Claude Code sandbox), use the programmatic API instead:
+drizzle-kit 0.31.9 CLI `npx drizzle-kit generate` works in some environments (worked for 0017 migration in Claude Code). If it fails with TTY issues, use the programmatic API instead:
 
 ```js
 // ESM only — drizzle-kit/api.mjs works, CJS api.js hangs
@@ -58,8 +62,18 @@ Key pitfalls:
 - SSE streaming uses in-memory `SessionEventEmitter` singleton (no Redis needed for single-user)
 - Message endpoint returns `userMessageId` immediately; AI response streams via SSE
 - Crisis detection runs BEFORE Claude call in the message route (non-negotiable)
-- Route types exported for Hono RPC inference: `SessionRoutes` from sessions.ts, `AppType` from routes/index.ts
+- Route types exported for Hono RPC inference: `SessionRoutes` from sessions.ts, `ObservabilityRoutes` from observability.ts, `AppType` from routes/index.ts
 - Shared package exports types AND validators; watch for naming collisions between `types/index.ts` and `validators/*.ts`
+- Observability routes mounted at `/api/observability` with 3 endpoints (GET /turns, GET /alerts, GET /stats)
+
+## Observability Layer
+
+- Turn event collector: `apps/server/src/services/turn-event-collector.ts` — builder pattern, fire-and-forget persist
+- Observability routes: `apps/server/src/routes/observability.ts` — turns, alerts, stats endpoints
+- Schema: `apps/server/src/db/schema/turn-events.ts` — 33-column pipeline snapshot table
+- `streamAiResponse()` returns `{ validatorPromise }` so the IIFE can await the validator before persisting the turn event
+- `response-validator.ts` now returns `ValidationResult | null` instead of `void`
+- Snapshot chain fix: migrations 0014 and 0015 had broken `prevId` (pointed to `00000000...`), fixed to correct parent chain
 
 ## Memory Service Integration (Phase 3)
 
@@ -86,6 +100,9 @@ Key pitfalls:
 - Env: `apps/server/src/env.ts` (Zod-validated)
 - Drizzle config: `apps/server/drizzle.config.ts`
 - Routes: `apps/server/src/routes/sessions.ts` (Phase 2 session routes)
+- Observability routes: `apps/server/src/routes/observability.ts`
+- Turn event collector: `apps/server/src/services/turn-event-collector.ts`
+- Turn events schema: `apps/server/src/db/schema/turn-events.ts`
 - SSE emitter: `apps/server/src/sse/emitter.ts`
 - Orphan sweep: `apps/server/src/session/orphan-sweep.ts`
 - SDK session manager: `apps/server/src/sdk/session-manager.ts` (Neura's domain)

@@ -12,6 +12,8 @@ import type { ExperimentBResult } from "../experiments/experiment-b-hypotheses.j
 import type { DirectionComplianceResult } from "../experiments/experiment-c-direction.js";
 import type { ExperimentDResult } from "../experiments/experiment-d-replay.js";
 import type { DevelopmentalCoverageResult } from "../experiments/experiment-e-developmental.js";
+import type { CounselBenchResult } from "../experiments/experiment-g-counselbench.js";
+import { COUNSELBENCH_DIMENSIONS } from "../experiments/experiment-g-counselbench.js";
 
 // ── Reports directory ─────────────────────────────────────────────
 
@@ -454,6 +456,128 @@ _Note: Scores are heuristic — 0.0 = not detected, 0.5 = partial signal, 1.0 = 
 
   ensureReportsDir();
   const filename = `${formatDateYMD(result.ranAt)}_experiment-e_${result.runId.slice(0, 8)}.md`;
+  const filepath = resolve(REPORTS_DIR, filename);
+  writeFileSync(filepath, markdown, "utf-8");
+
+  return { json, markdown };
+}
+
+// ── Experiment G ─────────────────────────────────────────────────
+
+export function formatReportG(result: CounselBenchResult): {
+  json: object;
+  markdown: string;
+} {
+  const json = {
+    experiment: "g",
+    experiment_version: "1.0.0",
+    run_id: result.runId,
+    ran_at: result.ranAt.toISOString(),
+    summary: {
+      sessions_analyzed: result.sessionsAnalyzed,
+      exchanges_scored: result.exchangesScored,
+      overall_score: Number(result.overallScore.toFixed(3)),
+      below_sonnet_baseline: result.belowSonnetBaseline,
+      flagged_dimensions: result.flaggedDimensions,
+    },
+    overall_means: Object.fromEntries(
+      COUNSELBENCH_DIMENSIONS.map((d) => [d, Number(result.overallMeans[d].toFixed(3))]),
+    ),
+    baseline_comparisons: result.baselineComparisons.map((bc) => ({
+      model: bc.model,
+      overall_baseline: Number(bc.overallBaseline.toFixed(3)),
+      overall_ours: Number(bc.overallOurs.toFixed(3)),
+      overall_delta: Number(bc.overallDelta.toFixed(3)),
+      dimensions: Object.fromEntries(
+        COUNSELBENCH_DIMENSIONS.map((d) => [
+          d,
+          {
+            baseline: bc.dimensions[d].baseline,
+            ours: Number(bc.dimensions[d].ours.toFixed(3)),
+            delta: Number(bc.dimensions[d].delta.toFixed(3)),
+          },
+        ]),
+      ),
+    })),
+    session_aggregates: result.sessionAggregates.map((sa) => ({
+      session_id: sa.sessionId,
+      exchange_count: sa.exchangeCount,
+      overall_mean: Number(sa.overallMean.toFixed(3)),
+      means: Object.fromEntries(
+        COUNSELBENCH_DIMENSIONS.map((d) => [d, Number(sa.means[d].toFixed(3))]),
+      ),
+    })),
+    data_gaps: result.dataGaps,
+  };
+
+  // Dimension means table
+  const dimRows = COUNSELBENCH_DIMENSIONS.map(
+    (d) => `| ${d} | ${result.overallMeans[d].toFixed(2)} |`,
+  ).join("\n");
+
+  // Baseline comparison table
+  const baselineRows = result.baselineComparisons
+    .map((bc) => {
+      const dimCells = COUNSELBENCH_DIMENSIONS.map((d) => {
+        const delta = bc.dimensions[d].delta;
+        const sign = delta >= 0 ? "+" : "";
+        return `${sign}${delta.toFixed(2)}`;
+      }).join(" | ");
+      const overallDeltaSign = bc.overallDelta >= 0 ? "+" : "";
+      return `| ${bc.model} | ${bc.overallBaseline.toFixed(2)} | ${bc.overallOurs.toFixed(2)} | ${overallDeltaSign}${bc.overallDelta.toFixed(2)} | ${dimCells} |`;
+    })
+    .join("\n");
+
+  const flagList =
+    result.flaggedDimensions.length > 0
+      ? result.flaggedDimensions.map((d) => `- **${d}**: ours ${result.overallMeans[d as keyof typeof result.overallMeans].toFixed(2)} < Sonnet baseline`).join("\n")
+      : "_No dimensions below Sonnet baseline._";
+
+  const gapList =
+    result.dataGaps.length > 0
+      ? result.dataGaps.map((g) => `- ${g}`).join("\n")
+      : "_No data gaps._";
+
+  const markdown = `# Experiment G — CounselBench Quality Evaluator
+
+**Run ID**: \`${result.runId}\`
+**Ran at**: ${result.ranAt.toISOString()}
+**User ID**: \`${result.userId}\`
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Sessions analyzed | ${result.sessionsAnalyzed} |
+| Exchanges scored | ${result.exchangesScored} |
+| Overall score | ${result.overallScore.toFixed(3)} |
+| Below Sonnet baseline | ${result.belowSonnetBaseline ? "YES" : "no"} |
+
+## Dimension Scores (1-5 scale)
+
+| Dimension | Mean |
+|-----------|------|
+${dimRows}
+
+## Baseline Comparisons
+
+| Model | Baseline Overall | Ours | Delta | ${COUNSELBENCH_DIMENSIONS.join(" | ")} |
+|-------|-----------------|------|-------|${COUNSELBENCH_DIMENSIONS.map(() => "------").join("|")}|
+${baselineRows}
+
+## Flagged Dimensions (below Claude Sonnet baseline)
+
+${flagList}
+
+## Data Gaps
+
+${gapList}
+
+_Note: Scores are from Claude Haiku evaluation of user-assistant exchanges. Published baselines are from CounselBench (June 2025). Scores of 1-5 per dimension, averaged across all exchanges._
+`;
+
+  ensureReportsDir();
+  const filename = `${formatDateYMD(result.ranAt)}_experiment-g_${result.runId.slice(0, 8)}.md`;
   const filepath = resolve(REPORTS_DIR, filename);
   writeFileSync(filepath, markdown, "utf-8");
 

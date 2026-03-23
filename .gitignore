@@ -23,6 +23,7 @@ tmux-dev.sh
 
 # Research reports (contain session data — never commit)
 apps/server/src/research/reports/
+autoresearch/reports/
 
 # Temp files
 tmp-*

@@ -17,11 +17,13 @@ import { researchCalibrationProposals } from "../db/schema/research-calibration-
 import { researchDirectionCompliance } from "../db/schema/research-direction-compliance.js";
 import { researchHypothesisSimulations } from "../db/schema/research-hypothesis-simulations.js";
 import { researchReplayRuns } from "../db/schema/research-replay-runs.js";
+import { researchCounselbenchScores } from "../db/schema/research-counselbench-scores.js";
 import { runExperimentA } from "../experiments/experiment-a-calibration.js";
 import { runExperimentB } from "../experiments/experiment-b-hypotheses.js";
 import { runExperimentC } from "../experiments/experiment-c-direction.js";
 import { runExperimentD } from "../experiments/experiment-d-replay.js";
 import { runExperimentE } from "../experiments/experiment-e-developmental.js";
+import { runExperimentG } from "../experiments/experiment-g-counselbench.js";
 import type { OutcomeConfidence, OutcomeDirection } from "../lib/outcome-scorer.js";
 import { promote } from "../lib/promote.js";
 import {
@@ -30,12 +32,13 @@ import {
   formatReportC,
   formatReportD,
   formatReportE,
+  formatReportG,
 } from "../lib/research-reporter.js";
 
 // ── Zod request schemas ───────────────────────────────────────────
 
 const RunExperimentSchema = z.object({
-  experiment: z.enum(["a", "b", "c", "d", "e", "all"]),
+  experiment: z.enum(["a", "b", "c", "d", "e", "g", "all"]),
   userId: z.string().uuid(),
   candidateContent: z.string().optional(),
 });
@@ -103,6 +106,12 @@ research.post("/run", zValidator("json", RunExperimentSchema), async (c) => {
       reports.push(json);
     }
 
+    if (experiment === "g" || experiment === "all") {
+      const result = await runExperimentG(userId);
+      const { json } = formatReportG(result);
+      reports.push(json);
+    }
+
     return c.json({ ok: true, reports });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -122,7 +131,7 @@ research.get("/results/:userId", async (c) => {
     return c.json({ error: "Invalid userId — must be a UUID." }, 400);
   }
 
-  const [calibrationRows, hypothesisRows, complianceRows, replayRows] = await Promise.all([
+  const [calibrationRows, hypothesisRows, complianceRows, replayRows, counselbenchRows] = await Promise.all([
     db
       .select({
         id: researchCalibrationProposals.id,
@@ -187,6 +196,29 @@ research.get("/results/:userId", async (c) => {
       .where(eq(researchReplayRuns.userId, userId))
       .orderBy(desc(researchReplayRuns.ranAt))
       .limit(10),
+
+    db
+      .select({
+        id: researchCounselbenchScores.id,
+        userId: researchCounselbenchScores.userId,
+        experimentRunId: researchCounselbenchScores.experimentRunId,
+        sessionId: researchCounselbenchScores.sessionId,
+        exchangeIndex: researchCounselbenchScores.exchangeIndex,
+        empathy: researchCounselbenchScores.empathy,
+        relevance: researchCounselbenchScores.relevance,
+        safety: researchCounselbenchScores.safety,
+        actionability: researchCounselbenchScores.actionability,
+        depth: researchCounselbenchScores.depth,
+        professionalism: researchCounselbenchScores.professionalism,
+        overall: researchCounselbenchScores.overall,
+        experimentVersion: researchCounselbenchScores.experimentVersion,
+        ranAt: researchCounselbenchScores.ranAt,
+        // reasoning intentionally omitted (can be large)
+      })
+      .from(researchCounselbenchScores)
+      .where(eq(researchCounselbenchScores.userId, userId))
+      .orderBy(desc(researchCounselbenchScores.ranAt))
+      .limit(10),
   ]);
 
   return c.json({
@@ -196,6 +228,7 @@ research.get("/results/:userId", async (c) => {
       hypothesisSimulations: hypothesisRows,
       directionCompliance: complianceRows,
       replayRuns: replayRows,
+      counselbenchScores: counselbenchRows,
     },
   });
 });
@@ -213,9 +246,9 @@ research.get("/report/:runId", async (c) => {
     return c.json({ error: "Invalid runId — must be a UUID." }, 400);
   }
 
-  const experimentParsed = z.enum(["a", "b", "c", "d", "e"]).safeParse(experiment);
+  const experimentParsed = z.enum(["a", "b", "c", "d", "e", "g"]).safeParse(experiment);
   if (!experimentParsed.success) {
-    return c.json({ error: "Query param 'experiment' must be 'a', 'b', 'c', 'd', or 'e'." }, 400);
+    return c.json({ error: "Query param 'experiment' must be 'a', 'b', 'c', 'd', 'e', or 'g'." }, 400);
   }
 
   const exp = experimentParsed.data;
@@ -360,6 +393,18 @@ research.get("/report/:runId", async (c) => {
         {
           error:
             "Experiment E reports cannot be reconstructed from a runId. Run the experiment again to get a fresh report.",
+        },
+        501,
+      );
+    }
+
+    if (exp === "g") {
+      // Experiment G stores per-exchange rows. Like E, the aggregate report
+      // cannot be reconstructed from a single runId row — return 501.
+      return c.json(
+        {
+          error:
+            "Experiment G reports cannot be reconstructed from a runId. Run the experiment again to get a fresh report.",
         },
         501,
       );

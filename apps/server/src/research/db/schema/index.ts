@@ -7,3 +7,4 @@ export * from "./research-hypothesis-simulations";
 export * from "./research-direction-compliance";
 export * from "./research-replay-runs";
 export * from "./research-developmental-coverage";
+export * from "./research-counselbench-scores";

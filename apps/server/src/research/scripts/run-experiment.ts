@@ -18,6 +18,7 @@ import { runExperimentB } from "../experiments/experiment-b-hypotheses.js";
 import { runExperimentC } from "../experiments/experiment-c-direction.js";
 import { runExperimentD } from "../experiments/experiment-d-replay.js";
 import { runExperimentE } from "../experiments/experiment-e-developmental.js";
+import { runExperimentG } from "../experiments/experiment-g-counselbench.js";
 import { promote } from "../lib/promote.js";
 import {
   formatReportA,
@@ -25,12 +26,13 @@ import {
   formatReportC,
   formatReportD,
   formatReportE,
+  formatReportG,
 } from "../lib/research-reporter.js";
 
 // ── Argument parser ───────────────────────────────────────────────
 
 interface ParsedArgs {
-  experiment: "a" | "b" | "c" | "d" | "e" | "all" | null;
+  experiment: "a" | "b" | "c" | "d" | "e" | "g" | "all" | null;
   userId: string | null;
   runId: string | null;
   isPromote: boolean;
@@ -57,8 +59,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       args.isPromote = true;
     } else if (arg === "--experiment" || arg === "-e") {
       const next = argv[i + 1];
-      if (next && ["a", "b", "c", "d", "e", "all"].includes(next)) {
-        args.experiment = next as "a" | "b" | "c" | "d" | "e" | "all";
+      if (next && ["a", "b", "c", "d", "e", "g", "all"].includes(next)) {
+        args.experiment = next as "a" | "b" | "c" | "d" | "e" | "g" | "all";
         i += 1;
       }
     } else if (arg === "--candidate-file") {
@@ -99,6 +101,7 @@ Run an experiment:
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment d --user <userId>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment d --user <userId> --candidate-file <path>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment e --user <userId>
+  tsx apps/server/src/research/scripts/run-experiment.ts --experiment g --user <userId>
   tsx apps/server/src/research/scripts/run-experiment.ts --experiment all --user <userId>
 
 Promote a gate-approved proposal:
@@ -119,7 +122,10 @@ Experiments:
   e  Developmental Coverage Tracker
      Evaluates per-session developmental coverage across 5 dimensions (attachment quality,
      family climate, schema formation, formative events, origin-to-present bridging).
-  all  Run A, B, C, D, and E sequentially.
+  g  CounselBench Quality Evaluator
+     Scores AI responses on 6 clinician-validated dimensions (empathy, relevance, safety,
+     actionability, depth, professionalism) and compares against published baselines.
+  all  Run A, B, C, D, E, and G sequentially.
 
 Output:
   JSON printed to stdout.
@@ -147,8 +153,8 @@ async function main(): Promise<void> {
 
   // ── Promote mode ──────────────────────────────────────────────
   if (args.isPromote) {
-    if (!args.experiment || args.experiment === "all" || args.experiment === "e") {
-      fatal("--promote requires --experiment a|b|c|d (not 'all' or 'e')");
+    if (!args.experiment || args.experiment === "all" || args.experiment === "e" || args.experiment === "g") {
+      fatal("--promote requires --experiment a|b|c|d (not 'all', 'e', or 'g')");
     }
     if (!args.runId) {
       fatal("--promote requires --run-id <uuid>");
@@ -253,6 +259,18 @@ async function main(): Promise<void> {
     );
   };
 
+  const runG = async (): Promise<void> => {
+    process.stderr.write("[research] Running Experiment G — CounselBench Quality Evaluator...\n");
+    const result = await runExperimentG(userId).catch((err: unknown) => {
+      fatal(`Experiment G failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    const { json } = formatReportG(result);
+    results.push(json);
+    process.stderr.write(
+      `[research] Experiment G complete. ${result.sessionsAnalyzed} sessions, ${result.exchangesScored} exchanges. Overall: ${result.overallScore.toFixed(3)}.\n`,
+    );
+  };
+
   switch (args.experiment) {
     case "a":
       await runA();
@@ -269,12 +287,16 @@ async function main(): Promise<void> {
     case "e":
       await runE();
       break;
+    case "g":
+      await runG();
+      break;
     case "all":
       await runA();
       await runB();
       await runC();
       await runD();
       await runE();
+      await runG();
       break;
   }
 

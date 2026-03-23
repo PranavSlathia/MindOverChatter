@@ -27,14 +27,14 @@ RESEARCH_ENABLED=true must be set in .env.local to enable all research routes an
   Operator
      │
      ├─ CLI: tsx apps/server/src/research/scripts/run-experiment.ts
-     │        --experiment [a|b|c|d|e] --user <userId>
+     │        --experiment [a|b|c|d|e|g] --user <userId>
      │                OR
      └─ HTTP: POST /api/research/run
               { experiment, userId, candidateContent? }
                     │
           ┌─────────┴──────────┐
           ▼                    ▼
-    runExperimentA()     runExperimentB/C/D/E()
+    runExperimentA()     runExperimentB/C/D/E/G()
           │
           ▼
   [READ-ONLY] Live DB queries
@@ -211,10 +211,45 @@ used and how deeply the attachment/schema/family work is progressing across sess
 
 ---
 
+### Experiment G — CounselBench Quality Evaluator
+
+**File**: `experiments/experiment-g-counselbench.ts`
+**DB Table**: `research_counselbench_scores`
+
+Scores each user-assistant exchange on 6 clinician-validated dimensions from the CounselBench
+benchmark (June 2025). Uses Claude Haiku to evaluate responses on a 1-5 scale per dimension.
+Compares aggregate scores against published baselines for GPT-4o, Claude Sonnet, and Llama-70B.
+
+| Field | Value |
+|-------|-------|
+| LLM | Claude Haiku (spawnClaudeStreaming) |
+| Input | Session messages — user-assistant exchange pairs |
+| Output | Per-exchange scores on 6 dimensions + overall average |
+| Gate criterion | None — monitoring metric only. Flags if scores fall below raw Claude Sonnet baselines. |
+
+**Dimensions tracked** (each 1-5):
+1. `empathy` — attunement to emotional state
+2. `relevance` — directly addresses user's concern
+3. `safety` — appropriate boundaries and resources
+4. `actionability` — concrete, usable guidance
+5. `depth` — explores underlying patterns
+6. `professionalism` — maintains companion (not therapist) framing
+
+**Published baselines**:
+| Model | Empathy | Relevance | Safety | Actionability | Depth | Professionalism |
+|-------|---------|-----------|--------|---------------|-------|-----------------|
+| GPT-4o | 3.8 | 4.1 | 4.5 | 3.5 | 3.2 | 4.3 |
+| Claude Sonnet | 4.0 | 4.2 | 4.6 | 3.3 | 3.5 | 4.5 |
+| Llama-70B | 3.2 | 3.6 | 3.8 | 2.9 | 2.8 | 3.7 |
+
+**No promotion path.** Low scores signal response quality issues to investigate.
+
+---
+
 ## Database Tables
 
 All tables are in the live PostgreSQL instance but are logically isolated from the live stack
-(see `README.md`, Rule 3). Five tables total:
+(see `README.md`, Rule 3). Six tables total:
 
 | Table | Experiment | Purpose |
 |-------|------------|---------|
@@ -223,11 +258,12 @@ All tables are in the live PostgreSQL instance but are logically isolated from t
 | `research_direction_compliance` | C | Per-session compliance scores with active directives |
 | `research_replay_runs` | D | Baseline vs candidate scoring results with turn-level data |
 | `research_developmental_coverage` | E | 5-dimension developmental probing coverage per session |
+| `research_counselbench_scores` | G | Per-exchange quality scores on 6 CounselBench dimensions |
 
 All tables carry `experiment_run_id`, `experiment_version`, `ran_at`, and optional
 `promoted_at` / `promoted_by` columns for auditability.
 
-Schema files: `research/db/schema/research-{calibration-proposals,hypothesis-simulations,direction-compliance,replay-runs,developmental-coverage}.ts`
+Schema files: `research/db/schema/research-{calibration-proposals,hypothesis-simulations,direction-compliance,replay-runs,developmental-coverage,counselbench-scores}.ts`
 
 ---
 
@@ -244,6 +280,7 @@ tsx apps/server/src/research/scripts/run-experiment.ts --experiment b --user <us
 tsx apps/server/src/research/scripts/run-experiment.ts --experiment c --user <userId>
 tsx apps/server/src/research/scripts/run-experiment.ts --experiment d --user <userId>
 tsx apps/server/src/research/scripts/run-experiment.ts --experiment e --user <userId>
+tsx apps/server/src/research/scripts/run-experiment.ts --experiment g --user <userId>
 
 # Run Experiment D with a candidate direction file
 tsx apps/server/src/research/scripts/run-experiment.ts \
@@ -274,7 +311,7 @@ Run one or all experiments for a user.
 ```json
 // Request
 {
-  "experiment": "a" | "b" | "c" | "d" | "e" | "all",
+  "experiment": "a" | "b" | "c" | "d" | "e" | "g" | "all",
   "userId": "<uuid>",
   "candidateContent": "<optional — candidate direction text for experiment D>"
 }
@@ -430,12 +467,17 @@ specific candidate.
 - **Experiment E reports** cannot be reconstructed from a `runId` — each run produces a fresh
   report and the per-run data is stored as individual rows in `research_developmental_coverage`.
   Use `GET /api/research/results/:userId` to list recent runs.
-- **Experiment B and C** have no promotion path — they are monitoring-only metrics. Operator
+- **Experiment B, C, and G** have no promotion path — they are monitoring-only metrics. Operator
   reviews the reports and makes manual decisions.
 - **Experiment D promotion** does not auto-apply the direction file. Operator must manually copy
   the candidate file after promotion is recorded.
-- **Context window**: Experiments that iterate over many sessions (B, C, D, E) can be slow for
+- **Experiment G reports** cannot be reconstructed from a `runId` — each run produces a fresh
+  report and the per-exchange data is stored as individual rows in `research_counselbench_scores`.
+  Use `GET /api/research/results/:userId` to list recent runs.
+- **Context window**: Experiments that iterate over many sessions (B, C, D, E, G) can be slow for
   users with many sessions. The CLI runner prints progress to `stderr`.
+- **Experiment G** makes one Haiku call per exchange — a session with 10 exchanges makes 10 LLM
+  calls. Cost and latency scale linearly with exchange count.
 - **Single-user app**: `userId` must be a valid UUID from the `user_profiles` table. Use
   `GET /api/sessions` and look at `userId` in any session row to find it, or query the DB:
   `SELECT id FROM user_profiles LIMIT 1;`
