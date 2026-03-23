@@ -140,6 +140,20 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
           },
           onTrackStarted: ((track: unknown, participant: unknown) => {
             console.log("[voice] Track started:", { track, participant });
+            // If this is a remote audio track, ensure it plays
+            const p = participant as { local?: boolean };
+            const t = track as MediaStreamTrack;
+            if (!p?.local && t?.kind === "audio") {
+              console.log("[voice] Remote audio track received — attaching to <audio> element");
+              const audio = new Audio();
+              audio.srcObject = new MediaStream([t]);
+              audio.autoplay = true;
+              audio.play().then(() => {
+                console.log("[voice] Audio playback started successfully");
+              }).catch((err) => {
+                console.error("[voice] Audio playback failed:", err);
+              });
+            }
           }) as unknown as () => void,
           onTrackStopped: ((track: unknown, participant: unknown) => {
             console.log("[voice] Track stopped:", { track, participant });
