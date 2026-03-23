@@ -17,7 +17,7 @@ import type { SessionMode } from "@moc/shared";
 // ── Types ─────────────────────────────────────────────────────────
 
 export interface ReviewerResult {
-  reviewer: "claude_haiku" | "gemini" | "codex";
+  reviewer: "primary" | "gemini" | "codex";
   score: number; // 0-1
   issues: Array<{ type: string; severity: string; excerpt: string }>;
   latencyMs: number;
@@ -292,7 +292,7 @@ export async function runMultiModelValidation(
     }).then((result): ReviewerResult => {
       if (!result) {
         return {
-          reviewer: "claude_haiku",
+          reviewer: "primary",
           score: 0,
           issues: [],
           latencyMs: Date.now() - haikuStart,
@@ -300,7 +300,7 @@ export async function runMultiModelValidation(
         };
       }
       return {
-        reviewer: "claude_haiku",
+        reviewer: "primary",
         score: result.score,
         issues: result.issues.map((i) => ({
           type: i.type,
@@ -311,7 +311,7 @@ export async function runMultiModelValidation(
         failed: false,
       };
     }).catch((): ReviewerResult => ({
-      reviewer: "claude_haiku",
+      reviewer: "primary",
       score: 0,
       issues: [],
       latencyMs: Date.now() - haikuStart,
