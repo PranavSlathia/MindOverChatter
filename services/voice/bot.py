@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    TTSSpeakFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -480,6 +481,7 @@ async def create_bot(
     session_id: str,
     moc_session_id: Optional[str],
     system_prompt: str,
+    opening_greeting: Optional[str] = None,
     on_user_text: Any = None,
     on_assistant_text: Any = None,
 ) -> Optional[SessionMetrics]:
@@ -497,6 +499,7 @@ async def create_bot(
         session_id: Voice service session ID (for logging)
         moc_session_id: MindOverChatter app session ID for turn-level safety checks
         system_prompt: Full system prompt (includes memory blocks, therapy plan, skills)
+        opening_greeting: AI greeting to speak when user joins the room
         on_user_text: Callback for user transcriptions
         on_assistant_text: Callback for assistant responses
     """
@@ -644,6 +647,15 @@ async def create_bot(
     async def on_joined(transport: Any, participant: Any) -> None:
         participant_id = participant.get("id", "unknown")
         logger.info("[voice-bot] Participant joined: %s", participant_id)
+
+        # Speak AI-initiated greeting when user joins
+        if opening_greeting:
+            logger.info("[voice-bot] Speaking opening greeting (%d chars)", len(opening_greeting))
+            await task.queue_frame(
+                TTSSpeakFrame(text=opening_greeting, append_to_context=True)
+            )
+            if on_assistant_text:
+                on_assistant_text(opening_greeting)
 
     @transport.event_handler("on_participant_left")
     async def on_left(transport: Any, participant: Any, reason: str) -> None:

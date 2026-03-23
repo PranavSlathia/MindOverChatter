@@ -12,10 +12,10 @@ import { zValidator } from "@hono/zod-validator";
 import { SynthesizeRequestSchema } from "@moc/shared";
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { env } from "../env.js";
 import { db } from "../db/index.js";
-import { sessions, messages } from "../db/schema/index";
+import { sessions, messages, sessionSummaries } from "../db/schema/index";
 import { getOrCreateUser } from "../db/helpers.js";
 import { detectCrisis, getCrisisResponse } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
@@ -28,6 +28,13 @@ import {
   initializeSdkSessionForUser,
 } from "../session/bootstrap.js";
 import { searchMemories } from "../services/memory-client.js";
+import { generateOpeningMessage } from "../services/opening-message.js";
+import type { OpeningMessageContext } from "../services/opening-message.js";
+import { getLatestTherapyPlan } from "../services/therapy-plan-service.js";
+import { getBlocksForUser } from "../services/memory-block-service.js";
+import { getLatestFormulation } from "../services/formulation-service.js";
+import { sql } from "drizzle-orm";
+
 
 const VoiceStartSchema = z.object({
   sessionId: z.string().uuid().optional(),
@@ -253,6 +260,88 @@ const app = new Hono()
         return c.json({ error: "VOICE_PROMPT_UNAVAILABLE", message }, 500);
       }
 
+      // Generate opening greeting for voice (same context as text chat)
+      let openingGreeting: string;
+      try {
+        // Check if this is a first-ever session
+        const [sessionCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(sessions)
+          .where(and(eq(sessions.userId, user.id), eq(sessions.status, "completed")));
+        const isFirstSession = (sessionCount?.count ?? 0) === 0;
+
+        // Get last completed session for returning users
+        let lastSessionSummary: string | null = null;
+        let lastSessionEndedAt: Date | null = null;
+        if (!isFirstSession) {
+          const [lastSession] = await db
+            .select({
+              id: sessions.id,
+              endedAt: sessions.endedAt,
+            })
+            .from(sessions)
+            .where(and(eq(sessions.userId, user.id), eq(sessions.status, "completed")))
+            .orderBy(sql`${sessions.endedAt} DESC NULLS LAST`)
+            .limit(1);
+          if (lastSession) {
+            lastSessionEndedAt = lastSession.endedAt;
+            const [summaryRow] = await db
+              .select({ content: sessionSummaries.content })
+              .from(sessionSummaries)
+              .where(
+                and(
+                  eq(sessionSummaries.sessionId, lastSession.id),
+                  eq(sessionSummaries.level, "session"),
+                ),
+              )
+              .orderBy(sql`${sessionSummaries.createdAt} DESC`)
+              .limit(1);
+            lastSessionSummary = summaryRow?.content ?? null;
+          }
+        }
+
+        const therapyPlanRow = await getLatestTherapyPlan(user.id);
+        const formulation = await getLatestFormulation(user.id);
+        const memoryBlocks = await getBlocksForUser(db, user.id);
+        const memoryBlockMap = new Map<string, string>();
+        for (const block of memoryBlocks) {
+          if (block.content.trim()) {
+            memoryBlockMap.set(block.label, block.content);
+          }
+        }
+
+        // Parse therapy plan safely (same pattern as sessions.ts)
+        let therapyPlan: OpeningMessageContext["therapyPlan"] = null;
+        if (therapyPlanRow?.plan && typeof therapyPlanRow.plan === "object") {
+          therapyPlan = therapyPlanRow.plan as OpeningMessageContext["therapyPlan"];
+        }
+
+        const ctx: OpeningMessageContext = {
+          userId: user.id,
+          isFirstSession,
+          lastSessionEndedAt,
+          lastSessionSummary,
+          therapyPlan,
+          formulation: formulation
+            ? {
+                presentingTheme: formulation.snapshot?.formulation?.presentingTheme as string | undefined,
+                activeStates: formulation.snapshot?.activeStates as
+                  | Array<{ label?: string; domain?: string }>
+                  | undefined,
+              }
+            : null,
+          userName: user.displayName,
+          memoryBlocks: memoryBlockMap,
+        };
+
+        openingGreeting = await generateOpeningMessage(ctx);
+      } catch (err) {
+        console.warn("[voice/start] Opening greeting generation failed, using fallback:", err);
+        openingGreeting = user.displayName
+          ? `Hey ${user.displayName}, good to have you here. What's on your mind?`
+          : "Hey, good to have you here. What's on your mind?";
+      }
+
       try {
         const response = await fetch(`${env.VOICE_SERVICE_URL}/start`, {
           method: "POST",
@@ -260,6 +349,7 @@ const app = new Hono()
           body: JSON.stringify({
             system_prompt: systemPrompt,
             moc_session_id: mocSessionId,
+            opening_greeting: openingGreeting,
           }),
         });
 

@@ -271,6 +271,7 @@ async def _run_bot_session(
     session_id: str,
     moc_session_id: Optional[str],
     system_prompt: str,
+    opening_greeting: Optional[str] = None,
 ) -> None:
     """Run the Pipecat bot, releasing the semaphore on exit."""
     voice_session = _sessions.get(session_id)
@@ -292,6 +293,7 @@ async def _run_bot_session(
             session_id=session_id,
             moc_session_id=moc_session_id,
             system_prompt=system_prompt,
+            opening_greeting=opening_greeting,
             on_user_text=on_user_text,
             on_assistant_text=on_assistant_text,
         )
@@ -318,8 +320,9 @@ async def _run_bot_session(
 
 
 class StartRequest(BaseModel):
-    system_prompt: str = Field(..., description="Full system prompt for Claude")
+    system_prompt: str = Field(..., description="Full system prompt for the LLM")
     moc_session_id: Optional[str] = Field(None, description="MindOverChatter session ID")
+    opening_greeting: Optional[str] = Field(None, description="AI greeting to speak when user joins")
 
 
 class StartResponse(BaseModel):
@@ -381,6 +384,7 @@ async def start_voice_session(
             session_id=session_id,
             moc_session_id=request.moc_session_id,
             system_prompt=request.system_prompt,
+            opening_greeting=request.opening_greeting,
         )
     except Exception:
         _bot_semaphore.release()
