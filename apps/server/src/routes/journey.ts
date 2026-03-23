@@ -5,7 +5,7 @@
 
 import { zValidator } from "@hono/zod-validator";
 import { AssessmentHistoryQuerySchema, JourneyTimelineQuerySchema, TherapyPlanSchema } from "@moc/shared";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getOrCreateUser } from "../db/helpers.js";
 import { db } from "../db/index.js";
@@ -59,6 +59,8 @@ const app = new Hono()
           and(
             eq(sessions.userId, user.id),
             eq(sessions.status, "completed"),
+            // Only show sessions with at least 2 messages (matches history page filter)
+            sql`(SELECT COUNT(*) FROM messages WHERE messages.session_id = ${sessions.id}) >= 2`,
             fromDate ? gte(sessions.startedAt, fromDate) : undefined,
             toDate ? lte(sessions.startedAt, toDate) : undefined,
           ),
