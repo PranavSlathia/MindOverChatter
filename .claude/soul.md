@@ -188,9 +188,13 @@ working code. Each owns a distinct technology domain.
 - Mem0 integration (memory extraction, retrieval, pgvector backend)
 - Python microservice development (`services/whisper/`, `services/emotion/`, `services/tts/`)
 - Therapeutic framework skills (CBT, MI-OARS, crisis protocol)
-- Session Supervisor (`services/session-supervisor.ts`) — pre-response validation, mode constraint enforcement
+- Session Supervisor (`services/session-supervisor.ts`) — pre-response validation, mode constraint enforcement, depth alert detection (surface-level looping → DEPTH ALERT directive injection)
 - Response Validator (`services/response-validator.ts`) — post-stream compliance scoring against active directives
+- Session bootstrap (`session/bootstrap.ts`) — shared session initialization for text + voice (profile, formulation, memories, skills, runOnStart, session goals from formulation questions)
+- Live memory note injection (`routes/sessions.ts`) — keyword-overlap contradiction surfacing before AI response
+- Therapeutic depth system: challenge clause in SYSTEM_PROMPT, `probing-depth.md` always-loaded skill, therapy plan callbacks as obligations, formulation questions as session goals with turn-8 deadline
 - Embedding pipeline (BAAI/bge-m3)
+- Voice pipeline integration: shared bootstrap for voice start, `VoiceEmotionProcessor` in Pipecat pipeline, `CrisisCheckProcessor` for live voice crisis gate
 
 **Neura does NOT touch:** React components, Hono routes (unless SDK-specific), frontend state.
 
@@ -207,10 +211,12 @@ working code. Each owns a distinct technology domain.
   - `probing-general.md` — MI + Person-Centred: opening moves, life-domain coverage (relationships, work, meaning, family, history), thread return. Activates when no clinical presentation dominant.
   - `probing-longitudinal.md` — IPT + Schema: memory-based continuity, pattern recognition, schema-level questions (worth/love/trust), role transitions, interpersonal patterns. Gated: ≥3 turns rapport or returning user with memories.
   - `probing-development.md` — Bowlby attachment + Young schema + Bowen family systems: childhood probing, caregiving quality, family climate, schema formation (worth/love/trust/autonomy), formative events, origin-to-present bridging. Gated: returning users only (≥2nd session). Schema questions require ≥5 turns rapport. Loaded outside the 2-clinical-file cap.
+  - `probing-depth.md` — **Always loaded.** Beneath-the-surface principle: every complaint has deeper structure. Mandatory deepening stems, perspective-shifting scenarios (one per session), 3-turn rule (must deepen by 4th exchange on same topic), surface→medium→deep ladder (must reach deep at least once per session).
   - `probing-{depression,anxiety,grief,panic,relationship}.md` — presentation-specific probing flows with evidence checklists and safety triggers
-  - `therapeutic-direction.md` — Operator-editable session steering (directiveness, deepen-vs-support, mode shifts, multi-dimensional probing standard)
+  - `therapeutic-direction.md` — Operator-editable session steering v2.0: proactive directiveness (offer direction after 2 turns without movement), default-deepen (validate briefly then deepen immediately, support-only reserved for active distress), therapy plan callbacks as obligations (high-priority = MUST address, create opening by turn 8), challenge quota (at least one genuinely challenging moment per session, escalate by turn 10)
   - `therapeutic-safety.md` — crisis protocol, framing rules, helpline numbers
   - `assessment-flow.md` — PHQ-9/GAD-7 branching assessment logic
+- **Therapeutic depth enforcement pipeline**: SYSTEM_PROMPT challenge clause → `probing-depth.md` always-loaded skill → session supervisor depth alert detection → therapy plan callbacks as obligations → formulation questions as session goals → live memory note contradiction surfacing. This pipeline ensures the companion probes beneath the surface rather than staying in a validation loop.
 - Context budget: ~120,000 tokens per session
 
 ---

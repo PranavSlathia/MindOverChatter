@@ -32,6 +32,7 @@ import {
   setSessionMode,
   getSessionAuthority,
   getSessionMessages,
+  getSessionMemories,
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import { runSessionSupervisor } from "../services/session-supervisor.js";
@@ -306,6 +307,38 @@ const app = new Hono()
       event: "ai.thinking",
       data: { status: "thinking" },
     });
+
+    // ── Live Memory Note Injection ──────────────────────────────────
+    // Lightweight keyword overlap check between the user's message and
+    // stored memories. If a memory has significant keyword overlap, inject
+    // it as a context note so the companion can reference or surface
+    // contradictions naturally. No LLM call — just keyword matching.
+    try {
+      const sessionMemories = getSessionMemories(sdkSessionId);
+      if (sessionMemories.length > 0) {
+        const userWords = new Set(
+          text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter((w) => w.length > 3),
+        );
+        const relevantNotes: string[] = [];
+        for (const mem of sessionMemories) {
+          const memWords = mem.content.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter((w) => w.length > 3);
+          const overlap = memWords.filter((w) => userWords.has(w)).length;
+          if (overlap >= 2) {
+            relevantNotes.push(
+              `MEMORY NOTE: You remember: "${mem.content}" (type: ${mem.memoryType}, confidence: ${mem.confidence.toFixed(2)}). If this relates to what the user just said, reference it naturally. If it contradicts what they're saying now, surface the discrepancy warmly.`,
+            );
+          }
+        }
+        if (relevantNotes.length > 0) {
+          injectSessionContext(
+            sdkSessionId,
+            `=== Live Memory Notes ===\n${relevantNotes.slice(0, 3).join("\n")}\n=== End Live Memory Notes ===`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[memory-notes] keyword matching failed:", err);
+    }
 
     // ── Background pipeline: Supervisor → inject → Claude response ─
     // The supervisor MUST complete before streamAiResponse() so that

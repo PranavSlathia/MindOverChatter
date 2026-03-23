@@ -8,7 +8,7 @@ AI-powered mental wellness companion. Single-user personal app, no auth.
 |-------|--------|
 | Frontend | React 19 + Vite 6 + shadcn/ui + Zustand + Tailwind v4 |
 | Backend | Hono 4.x + Drizzle ORM (TypeScript) |
-| AI | Claude Agent SDK + Claude Sonnet 4 |
+| AI | Claude CLI (local) + Claude Sonnet 4 |
 | Database | PostgreSQL 16 + pgvector |
 | Real-time | SSE via Hono `streamSSE` (NOT WebSocket) |
 | Facial emotion | Human.js in-browser (NOT face-api.js) |
@@ -51,7 +51,8 @@ docker compose up -d      # Start all Docker services
 - **onEnd hook order**: `session-summary` (critical, user waits) → `formulation` (background) → `therapy-plan` (background) → `therapeutic-calibration` (background) → `user-memory-blocks` (background)
 - **Session Supervisor**: `services/session-supervisor.ts` — fires in the message handler IIFE before `streamAiResponse()`. Validates session state, enforces mode constraints, and gates messages that would violate therapeutic safety invariants.
 - **Response Validator**: `services/response-validator.ts` — fires fire-and-forget inside `streamAiResponse()` after streaming completes. Scores the AI response against active directives and logs compliance metrics.
-- **Skill files** (`/.claude/skills/*.md`): loaded into every session prompt. Therapeutic skills: `probing-general` (MI/Person-Centred, general exploration + life-domain coverage), `probing-longitudinal` (IPT/Schema, pattern recognition + cross-session continuity, gated ≥3 turns rapport), `probing-development` (Bowlby attachment + Young schema + Bowen family systems, childhood probing, gated ≥2nd session), `probing-{depression,anxiety,grief,panic,relationship}` (presentation-specific), `therapeutic-direction` (Operator-editable session steering), `therapeutic-safety` (crisis + framing rules), `assessment-flow` (PHQ-9/GAD-7)
+- **Skill files** (`/.claude/skills/*.md`): loaded into every session prompt. Therapeutic skills: `probing-general` (MI/Person-Centred, general exploration + life-domain coverage), `probing-longitudinal` (IPT/Schema, pattern recognition + cross-session continuity, gated ≥3 turns rapport), `probing-development` (Bowlby attachment + Young schema + Bowen family systems, childhood probing, gated ≥2nd session), `probing-depth` (always loaded — beneath-the-surface principle, 3-turn rule, deepening stems, perspective-shifting scenarios), `probing-{depression,anxiety,grief,panic,relationship}` (presentation-specific), `therapeutic-direction` (Operator-editable session steering, v2.0: proactive/deepen-default with challenge quota), `therapeutic-safety` (crisis + framing rules), `assessment-flow` (PHQ-9/GAD-7)
+- **Therapeutic depth enforcement**: System prompt includes challenge clause (validation without deepening is not therapy). Session supervisor detects surface-level looping and injects DEPTH ALERT directives. Therapy plan callbacks are obligations (high-priority = MUST ask). Formulation questions injected as session goals with turn-8 pivot deadline. Live memory notes surface contradictions via keyword overlap matching.
 
 ## Therapeutic Safety (NON-NEGOTIABLE)
 

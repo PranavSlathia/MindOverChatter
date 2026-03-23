@@ -77,6 +77,14 @@ What you always do:
 - Respect the user's pace — do not rush to solutions or history before they are ready
 - Pose one question at a time — ask it, then wait and listen fully before the next
 
+What you must also do — validation without deepening is not therapy:
+- After validating an emotion, your NEXT move should deepen: ask when they first felt this way, who else evokes this feeling, or what this pattern protects them from
+- Surface contradictions between what the user says now and what you know from memory — warmly, not accusatorially
+- Do not let a surface topic run for more than 3 exchanges without connecting it to something deeper: a pattern, a relationship, a formative experience, or a core belief
+- When the user offers a mundane observation (watched a show, had a meal, went somewhere), ask what it MEANS — what drew them to it, what need it met, what it says about where they are right now
+- Use these stems naturally: "What does [X] represent for you?", "When was the first time you felt this way?", "You keep coming back to [pattern] — what do you think that's about?"
+- One genuinely challenging question per session is worth more than ten validating reflections
+
 What you never do:
 - Diagnose conditions or prescribe treatments
 - Claim to be a therapist, counselor, or medical professional
@@ -763,11 +771,15 @@ export function selectRelevantSkills(
     ? `=== CURRENT THERAPEUTIC DIRECTION (Operator-editable, read last) ===\n${rawDirection}\n=== END THERAPEUTIC DIRECTION ===`
     : null;
 
+  // ── Depth probing: ALWAYS loaded regardless of formulation state ──
+  const depthContentEarly = allSkills.get("probing-depth.md");
+
   if (!formulation) {
     // New user — no clinical picture yet; general probing provides breadth
     const generalContent = allSkills.get("probing-general.md");
     const base: string[] = [];
     if (generalContent) base.push(generalContent);
+    if (depthContentEarly) base.push(depthContentEarly);
     if (assessmentContent) base.push(assessmentContent);
     return directionContent ? [...base, directionContent] : base;
   }
@@ -850,7 +862,12 @@ export function selectRelevantSkills(
   // is an unreliable proxy here. The skill file rule: "never in a first session".
   const developmentalContent = isReturningUser ? allSkills.get("probing-development.md") : undefined;
 
-  // Build final content array: clinical probing → general (if fallback) → longitudinal → developmental → assessment-flow → therapeutic-direction
+  // ── Depth probing: ALWAYS loaded (like assessment-flow) ──
+  // Teaches the "beneath the surface" principle — deepening on every topic.
+  // Not gated on formulation or returning user status.
+  const depthContent = allSkills.get("probing-depth.md");
+
+  // Build final content array: clinical probing → general (if fallback) → longitudinal → developmental → depth → assessment-flow → therapeutic-direction
   const result: string[] = [];
   for (const filename of clinicalProbingFiles) {
     const content = allSkills.get(filename);
@@ -859,6 +876,7 @@ export function selectRelevantSkills(
   if (includeGeneral && generalContent) result.push(generalContent);
   if (longitudinalContent) result.push(longitudinalContent);
   if (developmentalContent) result.push(developmentalContent);
+  if (depthContent) result.push(depthContent);
   if (assessmentContent) result.push(assessmentContent);
   if (directionContent) result.push(directionContent);
 
@@ -882,6 +900,17 @@ export function resetSkillCache(): void {
 export function getSessionMessages(sdkSessionId: string): ConversationMessage[] {
   const session = sessions.get(sdkSessionId);
   return session ? [...session.messages] : [];
+}
+
+/**
+ * Get the initial memories loaded at session creation time.
+ * Used by the message handler to check for memory contradictions
+ * against the current user message. Returns empty array if session
+ * doesn't exist or no memories were loaded.
+ */
+export function getSessionMemories(sdkSessionId: string): MemoryContextItem[] {
+  const session = sessions.get(sdkSessionId);
+  return session?.initialMemories ? [...session.initialMemories] : [];
 }
 
 /**

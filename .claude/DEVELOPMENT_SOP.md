@@ -65,9 +65,11 @@ This document defines the standard development procedures for MindOverChatter, e
 11. Skills: `.claude/skills/*.md` files. When adding or editing a skill:
     - `probing-general.md` / `probing-longitudinal.md` — general and longitudinal probing (MI, Person-Centred, IPT, Schema-informed)
     - `probing-development.md` — developmental and childhood probing (Bowlby attachment, Young schema, Bowen family systems). Gated: returning users only (≥2nd session). Schema questions require ≥5 turns rapport.
+    - `probing-depth.md` — **Always loaded.** Beneath-the-surface principle, 3-turn rule, deepening stems, perspective-shifting scenarios. Not gated.
     - `probing-{presentation}.md` — presentation-specific flows (depression, anxiety, grief, panic, relationship)
-    - `therapeutic-direction.md` — Operator-editable steering; bump `version:` and `rationale:` on every change
+    - `therapeutic-direction.md` — Operator-editable steering v2.0 (proactive, deepen-default, challenge quota); bump `version:` and `rationale:` on every change
     - Any therapeutic skill change → Vigil safety review MANDATORY before use in production
+11b. **Therapeutic depth enforcement** (new): SYSTEM_PROMPT has challenge clause. Supervisor detects surface-level looping → DEPTH ALERT injection. Therapy plan callbacks are obligations (high-priority = MUST ask). Formulation questions are session goals (turn-8 pivot deadline). Live memory notes surface contradictions via keyword overlap.
 12. Python services: FastAPI + uv, health endpoint required
 13. **Session Supervisor** fires in the message handler IIFE before `streamAiResponse()`. **Response Validator** fires fire-and-forget inside `streamAiResponse()` after streaming completes.
 14. **Any crisis change → Vigil testing MANDATORY**

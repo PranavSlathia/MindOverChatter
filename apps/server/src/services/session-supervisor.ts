@@ -112,7 +112,16 @@ probingDepth rules:
 - medium: topic mentioned 2+ times, or 4-7 turns in
 - deep: 8+ turns or this is the primary presenting concern
 
-contextFocus: be specific (e.g. "User is describing grief about father — explore impact on daily life and sense of identity")
+DEPTH ALERT DETECTION (critical — prevents surface-level looping):
+Analyze the recent conversation for surface-level looping. Surface-level means: the assistant is reflecting/validating but NOT connecting the topic to history, patterns, relationships, core beliefs, or formative experiences.
+Signs of surface-level looping:
+- Assistant responds with variations of "that sounds hard" / "I hear you" / "how does that make you feel?" without deepening
+- The same topic is discussed for 3+ user turns without connecting to when it started, who else is involved, or what it means about the user
+- User shares factual events (mundane daily life, what happened at work, what they watched) and assistant stays at the event level without asking what it represents
+If you detect surface-level looping for 3+ turns on the same topic, set contextFocus to a DEPTH ALERT directive like:
+"DEPTH ALERT: The conversation has stayed surface-level on [topic] for [N] turns. Your next response MUST connect this to either (a) when this pattern started, (b) a relationship dynamic, (c) what it reveals about the user's core belief about themselves, or (d) a memory contradiction."
+
+contextFocus: be specific (e.g. "User is describing grief about father — explore impact on daily life and sense of identity"). When depth alert is warranted, prefix with "DEPTH ALERT:" so the companion treats it as a priority directive.
 
 confidence: 0.9+ = very clear signal, 0.6-0.9 = moderate confidence, below 0.6 = uncertain (fallback to regex)`;
 }

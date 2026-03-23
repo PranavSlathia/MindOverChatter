@@ -347,7 +347,9 @@ export function formatTherapyPlanBlock(plan: TherapyPlan): string {
       ? callbacks
           .map(
             (cb) =>
-              `- When user mentions "${cb.trigger_topic}": "${cb.probe_question}" [${cb.priority}]`,
+              cb.priority === "high"
+                ? `- REQUIRED EXPLORATION: When "${cb.trigger_topic}" comes up, you MUST ask: "${cb.probe_question}". Priority: ${cb.priority}. Do not let the session end without addressing at least one high-priority callback.`
+                : `- When "${cb.trigger_topic}" comes up, ask: "${cb.probe_question}" [${cb.priority}]`,
           )
           .join("\n")
       : "No callbacks configured.";
@@ -395,7 +397,8 @@ ${unexploredBlock}
 GOALS WE'RE WORKING TOWARD:
 ${goalsBlock}
 
-NATURAL CALLBACKS (when the user raises the trigger topic, bridge naturally):
+NATURAL CALLBACKS (when the user raises the trigger topic, bridge to deeper exploration):
+High-priority callbacks are OBLIGATIONS — address at least one per session. If the conversation has not naturally reached a high-priority callback by turn 8, create the opening yourself.
 ${callbacksBlock}
 
 === END INTERNAL THERAPY PLAN ===`;
