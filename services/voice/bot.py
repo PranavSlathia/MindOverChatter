@@ -541,7 +541,6 @@ async def create_bot(
         api_key=settings.CARTESIA_API_KEY,
         voice_id=settings.CARTESIA_VOICE_ID,
         model=settings.CARTESIA_MODEL,
-        sample_rate=24000,
     )
 
     # ── Transport ─────────────────────────────────────────────────────
