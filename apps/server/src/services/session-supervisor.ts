@@ -6,9 +6,8 @@
 // Falls back silently to regex result on failure or low confidence (< 0.6).
 // The supervisor is an enhancement, never a hard dependency.
 
-import { spawn } from "node:child_process";
 import type { SessionMode } from "@moc/shared";
-import { env } from "../env.js";
+import { spawnCliForJson } from "./cli-spawner.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -126,82 +125,14 @@ contextFocus: be specific (e.g. "User is describing grief about father — explo
 confidence: 0.9+ = very clear signal, 0.6-0.9 = moderate confidence, below 0.6 = uncertain (fallback to regex)`;
 }
 
-// ── Haiku Spawner ──────────────────────────────────────────────────
+// ── Haiku Spawner (delegates to shared CLI spawner) ───────────────
 
-/**
- * Spawns Claude Haiku with --output-format stream-json.
- * Parses the newline-delimited result events and returns the `result` text,
- * or null on failure/timeout. Uses stream-json (the proven format) instead
- * of `json` which emits a JSON array incompatible with the envelope parser.
- */
 function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    let lineBuffer = "";
-    let resultText: string | null = null;
-    let settled = false;
-
-    const settle = (val: string | null) => {
-      if (settled) return;
-      settled = true;
-      resolve(val);
-    };
-
-    // Strip CLAUDECODE to avoid nested-session guard
-    const cleanEnv = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    // Use stream-json (the proven format) — `json` emits a JSON array that the
-    // envelope parser misreads, and produces empty stdout in some server contexts.
-    const child = spawn(
-      "claude",
-      [
-        "--model",
-        env.CLAUDE_HAIKU_MODEL,
-        "--print",
-        "--verbose",
-        "--max-turns",
-        "1",
-        "--output-format",
-        "stream-json",
-        "--include-partial-messages",
-      ],
-      { env: cleanEnv, cwd: "/tmp" },
-    );
-
-    child.stdin.write(prompt);
-    child.stdin.end();
-
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      settle(null);
-    }, timeoutMs);
-
-    child.stdout.on("data", (data: Buffer) => {
-      lineBuffer += data.toString();
-      const lines = lineBuffer.split("\n");
-      lineBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const event = JSON.parse(trimmed) as Record<string, unknown>;
-          if (event.type === "result" && typeof event.result === "string") {
-            resultText = event.result;
-          }
-        } catch { /* skip malformed lines */ }
-      }
-    });
-
-    child.on("close", () => {
-      clearTimeout(timer);
-      settle(resultText);
-    });
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      console.warn("[session-supervisor] spawn error:", (err as Error).message);
-      settle(null);
-    });
+  return spawnCliForJson({
+    cli: "claude",
+    prompt,
+    timeoutMs,
+    label: "session-supervisor",
   });
 }
 

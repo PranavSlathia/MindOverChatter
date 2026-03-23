@@ -1,0 +1,1 @@
+ALTER TABLE "turn_events" ADD COLUMN "reviewer_results" jsonb;

@@ -36,7 +36,7 @@ import {
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import { runSessionSupervisor } from "../services/session-supervisor.js";
-import { runResponseValidator } from "../services/response-validator.js";
+import { runMultiModelValidation } from "../services/multi-validator.js";
 import {
   getAllMemories,
   searchMemories,
@@ -369,12 +369,17 @@ const app = new Hono()
     // skill injections and context hints are in the prompt.
     // HTTP response returns immediately; client listens on SSE.
     void (async () => {
+      // Hoist skill names and turn number so they're available for multi-model validation
+      // even if the supervisor block fails.
+      const sdkMessages = getSessionMessages(sdkSessionId);
+      const allSkills = loadSkillFiles();
+      const currentTurnNumber = Math.floor(sdkMessages.length / 2);
+      const skillNames = [...allSkills.keys()];
+
       // ── Session Supervisor (LLM-enhanced mode/skill selection) ──
       // Haiku call that classifies intent, refines mode, and activates dynamic skills.
       // Falls back silently to regex result on failure or low confidence.
       try {
-        const sdkMessages = getSessionMessages(sdkSessionId);
-        const allSkills = loadSkillFiles();
         const formulation = await getLatestFormulation(session.userId);
 
         const originBlock = await db.query.memoryBlocks.findFirst({
@@ -389,13 +394,13 @@ const app = new Hono()
           lastFiveTurns: sdkMessages.slice(-10),
           currentMode: getSessionMode(sdkSessionId),
           formulation: formulation?.snapshot?.formulation ?? null,
-          availableSkills: [...allSkills.keys()],
-          sessionTurnCount: Math.floor(sdkMessages.length / 2),
+          availableSkills: skillNames,
+          sessionTurnCount: currentTurnNumber,
           hasOriginStory,
         });
         const supervisorLatency = Date.now() - supervisorStart;
         collector.setSupervisorResult(supervisorOutput, supervisorLatency);
-        collector.setTurnNumber(Math.floor(sdkMessages.length / 2));
+        collector.setTurnNumber(currentTurnNumber);
 
         if (supervisorOutput && supervisorOutput.confidence >= 0.6) {
           // Override mode only if regex didn't already set one this turn
@@ -426,6 +431,7 @@ const app = new Hono()
       try {
         const { validatorPromise } = await streamAiResponse(
           sessionId, sdkSessionId, text, userMsg!.id, session.userId, collector,
+          skillNames, currentTurnNumber,
         );
         // Wait for the validator to finish so its result is captured in the turn event.
         // This does NOT block the user — the HTTP response was returned long ago.
@@ -742,6 +748,8 @@ async function streamAiResponse(
   userMessageId: string,
   userId: string,
   collector?: TurnEventBuilder,
+  activeSkills?: string[],
+  turnNumber?: number,
 ): Promise<{ validatorPromise: Promise<void> }> {
   const claudeStart = Date.now();
   const fullText = await sdkSendMessage(sdkSessionId, userMessage, (chunk) => {
@@ -825,24 +833,22 @@ async function streamAiResponse(
     { role: "assistant", content: cleanText },
   ]);
 
-  // Fire-and-forget: response validator (therapeutic safety audit)
-  // Catches issues that input-only crisis detection misses.
-  // Never blocks or delays the client response.
-  // The returned validatorPromise lets the caller (IIFE) wait for the result
+  // Fire-and-forget: multi-model validation (therapeutic safety + quality + framework)
+  // Runs Claude Haiku (always) + Gemini (if enabled) + Codex (if enabled, every 3rd turn)
+  // in parallel. Never blocks or delays the client response.
+  // The returned validatorPromise lets the caller (IIFE) wait for the results
   // before persisting the turn event, without blocking the user.
-  const validatorStart = Date.now();
-  const validatorPromise = runResponseValidator({
-    response: cleanText,
-    lastThreeTurns: [
-      { role: "user", content: userMessage },
-      { role: "assistant", content: cleanText },
-    ],
-    sessionMode: getSessionMode(sdkSessionId) ?? "follow_support",
+  const validatorPromise = runMultiModelValidation({
     sessionId,
-  }).then((result) => {
-    collector?.setValidatorResult(result, Date.now() - validatorStart);
+    response: cleanText,
+    userMessage,
+    activeSkills: activeSkills ?? [],
+    currentMode: getSessionMode(sdkSessionId),
+    turnNumber: turnNumber ?? 0,
+  }).then((results) => {
+    collector?.setReviewerResults(results);
   }).catch((err) => {
-    console.error("[response-validator] unhandled error:", err);
+    console.error("[multi-validator] unhandled error:", err);
   });
 
   // Fire-and-forget: text emotion classification (text signal weight = 0.8 per architecture)

@@ -50,6 +50,9 @@ export const turnEvents = pgTable(
     validatorIssues: jsonb("validator_issues"),
     validatorLatencyMs: integer("validator_latency_ms"),
 
+    // -- Multi-reviewer results (Phase 3: multi-model agent team)
+    reviewerResults: jsonb("reviewer_results"), // Array<ReviewerResult>
+
     // -- Context
     activeSkills: text("active_skills").array(),
     memoriesInjectedCount: integer("memories_injected_count"),

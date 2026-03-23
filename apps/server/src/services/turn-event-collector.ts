@@ -10,6 +10,7 @@ import type { NewTurnEvent } from "../db/schema/index";
 import type { CrisisResult } from "../crisis/types.js";
 import type { SupervisorOutput } from "./session-supervisor.js";
 import type { ValidationResult } from "./response-validator.js";
+import type { ReviewerResult } from "./multi-validator.js";
 import type { TextEmotionResult } from "./text-emotion-classifier.js";
 
 // ── Public Interface ────────────────────────────────────────────
@@ -19,6 +20,7 @@ export interface TurnEventBuilder {
   setModeShift(before: string | null, after: string | null, source: "regex" | "supervisor" | "none"): void;
   setSupervisorResult(output: SupervisorOutput | null, latencyMs: number): void;
   setValidatorResult(result: ValidationResult | null, latencyMs: number): void;
+  setReviewerResults(results: ReviewerResult[]): void;
   setActiveSkills(skills: string[]): void;
   setMemoryContext(memoriesCount: number, liveNotesCount: number): void;
   setAssessmentMarkers(markers: string[]): void;
@@ -74,6 +76,24 @@ export function createTurnEventCollector(sessionId: string): TurnEventBuilder {
         data.validatorScore = result.score;
         data.validatorSafe = result.safe;
         data.validatorIssues = result.issues.length > 0 ? result.issues : null;
+      }
+    },
+
+    setReviewerResults(results) {
+      data.reviewerResults = results.length > 0 ? results : null;
+      // Also populate the legacy validator fields from the Haiku result
+      // so existing observability queries continue to work.
+      const haikuResult = results.find((r) => r.reviewer === "claude_haiku");
+      if (haikuResult && !haikuResult.failed) {
+        data.validatorRan = true;
+        data.validatorScore = haikuResult.score;
+        data.validatorSafe = haikuResult.issues.every(
+          (i) => i.severity !== "high",
+        );
+        data.validatorIssues = haikuResult.issues.length > 0
+          ? haikuResult.issues
+          : null;
+        data.validatorLatencyMs = haikuResult.latencyMs;
       }
     },
 

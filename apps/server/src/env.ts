@@ -10,6 +10,10 @@ const envSchema = z.object({
   CLAUDE_MODEL: z.string().default("sonnet"),
   CLAUDE_HAIKU_MODEL: z.string().default("haiku"),
   GROQ_API_KEY: z.string().optional(),
+  GEMINI_ENABLED: z.coerce.boolean().default(false),
+  CODEX_ENABLED: z.coerce.boolean().default(false),
+  GEMINI_MODEL: z.string().default("flash"),
+  CODEX_MODEL: z.string().default("o3-mini"),
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
