@@ -563,55 +563,78 @@ const app = new Hono()
       const currentTurnNumber = sdkMessages.filter((m) => m.role === "user").length;
       const skillNames = [...allSkills.keys()];
 
-      // ── Session Supervisor (LLM-enhanced mode/skill selection) ──
-      // Haiku call that classifies intent, refines mode, and activates dynamic skills.
-      // Falls back silently to regex result on failure or low confidence.
-      try {
-        const formulation = await getLatestFormulation(session.userId);
+      // ── Session Supervisor (NON-BLOCKING, parallel with Claude) ──
+      // Fire supervisor as a background task. If it completes within a short
+      // grace period, inject results before Claude starts. If not, skip —
+      // results feed into telemetry only. This prevents 15-30s blocking.
+      collector.setTurnNumber(currentTurnNumber);
+      const supervisorPromise = (async () => {
+        try {
+          const formulation = await getLatestFormulation(session.userId);
+          const originBlock = await db.query.memoryBlocks.findFirst({
+            where: (mb, { and, eq: eq2 }) =>
+              and(eq2(mb.userId, session.userId), eq2(mb.label, "user/origin_story")),
+            columns: { content: true },
+          });
+          const hasOriginStory = (originBlock?.content ?? "").trim().length > 0;
 
-        const originBlock = await db.query.memoryBlocks.findFirst({
-          where: (mb, { and, eq }) =>
-            and(eq(mb.userId, session.userId), eq(mb.label, "user/origin_story")),
-          columns: { content: true },
-        });
-        const hasOriginStory = (originBlock?.content ?? "").trim().length > 0;
-
-        const supervisorStart = Date.now();
-        const supervisorOutput = await runSessionSupervisor({
-          lastFiveTurns: sdkMessages.slice(-10),
-          currentMode: getSessionMode(sdkSessionId),
-          formulation: formulation?.snapshot?.formulation ?? null,
-          availableSkills: skillNames,
-          sessionTurnCount: currentTurnNumber,
-          hasOriginStory,
-        });
-        const supervisorLatency = Date.now() - supervisorStart;
-        collector.setSupervisorResult(supervisorOutput, supervisorLatency);
-        collector.setTurnNumber(currentTurnNumber);
-
-        if (supervisorOutput && supervisorOutput.confidence >= 0.6) {
-          // Override mode only if regex didn't already set one this turn
-          if (supervisorOutput.recommendedMode && !targetMode) {
-            console.log(`[session-supervisor] mode → ${supervisorOutput.recommendedMode}`);
-            injectSessionContext(sdkSessionId, formatModeShiftBlock(supervisorOutput.recommendedMode));
-            setSessionMode(sdkSessionId, supervisorOutput.recommendedMode);
-            // Update collector with supervisor-driven mode shift
-            collector.setModeShift(currentMode, supervisorOutput.recommendedMode, "supervisor");
-          }
-          // Dynamic skill injection — supervisor has analysed the turn and picked skills
-          for (const skillName of supervisorOutput.activateSkills) {
-            injectSkillDynamically(sdkSessionId, skillName, allSkills);
-          }
-          // Context focus hint — single-sentence steer for this turn
-          if (supervisorOutput.contextFocus) {
-            injectSessionContext(
-              sdkSessionId,
-              `=== Current Focus ===\n${supervisorOutput.contextFocus}\n=== End Current Focus ===`,
-            );
-          }
+          const supervisorStart = Date.now();
+          const supervisorOutput = await runSessionSupervisor({
+            lastFiveTurns: sdkMessages.slice(-10),
+            currentMode: getSessionMode(sdkSessionId),
+            formulation: formulation?.snapshot?.formulation ?? null,
+            availableSkills: skillNames,
+            sessionTurnCount: currentTurnNumber,
+            hasOriginStory,
+          });
+          const supervisorLatency = Date.now() - supervisorStart;
+          collector.setSupervisorResult(supervisorOutput, supervisorLatency);
+          return supervisorOutput;
+        } catch (err) {
+          console.warn("[session-supervisor] error:", err);
+          return null;
         }
-      } catch (err) {
-        console.warn("[session-supervisor] error — falling back to regex only:", err);
+      })();
+
+      // Give supervisor a 2s head start to finish before Claude starts.
+      // If it finishes in time, inject its results. If not, proceed without.
+      let supervisorOutput: Awaited<ReturnType<typeof runSessionSupervisor>> | null = null;
+      try {
+        supervisorOutput = await Promise.race([
+          supervisorPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+        ]);
+      } catch {
+        // Supervisor failed within grace period — continue without
+      }
+
+      // Apply supervisor results if available (finished within 2s grace period)
+      const applySupervisorResults = (output: Awaited<ReturnType<typeof runSessionSupervisor>> | null) => {
+        if (!output || output.confidence < 0.6) return;
+        if (output.recommendedMode && !targetMode) {
+          console.log(`[session-supervisor] mode → ${output.recommendedMode}`);
+          injectSessionContext(sdkSessionId, formatModeShiftBlock(output.recommendedMode));
+          setSessionMode(sdkSessionId, output.recommendedMode);
+          collector.setModeShift(currentMode, output.recommendedMode, "supervisor");
+        }
+        for (const skillName of output.activateSkills) {
+          injectSkillDynamically(sdkSessionId, skillName, allSkills);
+        }
+        if (output.contextFocus) {
+          injectSessionContext(
+            sdkSessionId,
+            `=== Current Focus ===\n${output.contextFocus}\n=== End Current Focus ===`,
+          );
+        }
+      };
+
+      if (supervisorOutput) {
+        console.log(`[session-supervisor] completed in grace period`);
+        applySupervisorResults(supervisorOutput);
+      } else {
+        console.log("[session-supervisor] still running — proceeding without");
+        // Let supervisor complete in background for telemetry only
+        supervisorPromise.then(() => {}).catch(() => {});
       }
 
       // ── Capture actually-active skills for telemetry ────────────
