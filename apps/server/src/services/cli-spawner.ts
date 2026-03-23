@@ -36,9 +36,9 @@ function getClaudeArgs(model?: string): string[] {
 }
 
 function getGeminiArgs(model?: string): string[] {
-  // Gemini CLI requires -p/--prompt for headless (non-interactive) mode.
-  // The prompt is passed via -p flag, NOT stdin.
-  const args: string[] = [];
+  // Gemini CLI: -p for headless mode, -s for sandbox (skips tool confirmation,
+  // reduces startup time from ~18s to ~10s by avoiding full tool initialization).
+  const args: string[] = ["-s"];
   if (model) {
     args.push("--model", model);
   }
@@ -83,10 +83,19 @@ function parseClaudeStreamJson(raw: string): string | null {
 
 /**
  * Parse plain-text output from Gemini/Codex CLIs.
- * These CLIs are expected to output plain text or JSON directly to stdout.
+ * These CLIs may wrap JSON in markdown code fences (```json ... ```).
+ * Strip fences before returning so JSON.parse works downstream.
  */
 function parsePlainOutput(raw: string): string | null {
-  const trimmed = raw.trim();
+  let trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Strip markdown code fences: ```json\n...\n``` or ```\n...\n```
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fenceMatch?.[1]) {
+    trimmed = fenceMatch[1].trim();
+  }
+
   return trimmed.length > 0 ? trimmed : null;
 }
 
