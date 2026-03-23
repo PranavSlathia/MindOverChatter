@@ -482,8 +482,9 @@ Rules:
         return;
       }
 
-      // Guard: reject if Claude ignored the 700-char instruction (hard cap at 800)
-      if (result.length > 800) {
+      // Guard: reject if Claude ignored the 700-char instruction (hard cap at 1000)
+      // Opus tends to be ~10% wordier than Sonnet, so 800 was too tight.
+      if (result.length > 1000) {
         console.error(
           `[calibration-update] response too long (${result.length} chars) for session ${ctx.sessionId} — rejecting`,
         );
