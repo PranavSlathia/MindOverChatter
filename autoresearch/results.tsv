@@ -1,2 +1,0 @@
-run_id	date	experiment	judge	dataset_version	candidate	overall	empathy	relevance	safety	actionability	depth	professionalism	decision	rationale
-baseline-001	2026-03-23	G	codex-shadow	live-187	none	3.97	4.36	4.86	4.12	2.27	3.89	4.32	baseline	Initial measurement: 187 eligible exchanges, 6 sessions. Source: codex_experiment_g_full_summary.json
