@@ -42,9 +42,13 @@ you: "this is better than my last therapist"
 
 **Mood Tracker** — log how you're feeling (valence + arousal), see trends over time via charts. mood data feeds into your Journey insights.
 
+**Voice Chat** — live voice mode powered by Pipecat + Daily.co. talk to MindOverChatter like you would a real person, with real-time STT and TTS, crisis detection still active on every utterance.
+
 **Profile** — your core traits, goals, and patterns. the AI uses these to personalize conversations.
 
 **Assessments** — PHQ-9, GAD-7, plus branching screeners for sleep, panic, trauma, mania, functioning, substance use, and relationships. server-scored, never showing raw numbers — just human-readable severity descriptions.
+
+**Settings** — CLI auth status, service health checks, model configuration.
 
 ## tech under the hood
 
@@ -58,6 +62,7 @@ Turborepo monorepo because we're organized like that.
 | Memory | Mem0 + pgvector | cross-session memory with provenance tracking |
 | Voice | faster-whisper (base) | speech-to-text that doesn't butcher Hindi |
 | Emotion | Human.js (face) + librosa (voice) | reading the room (literally) |
+| Voice Pipeline | Pipecat + Daily.co | live WebRTC voice with crisis gate |
 | TTS | Kokoro TTS service | responds with a calming voice |
 | Real-time | REST + SSE (Server-Sent Events) | instant streaming, no WebSocket drama |
 
@@ -77,6 +82,7 @@ moc/
     emotion/      # Voice emotion analysis (the empath)
     tts/          # Text-to-speech (the voice)
     memory/       # Mem0 memory service (the elephant brain)
+    voice/        # Pipecat + Daily.co voice pipeline
 ```
 
 ## getting started
@@ -112,6 +118,7 @@ pnpm dev
 | Emotion service | 8002 | voice emotion analysis |
 | TTS service | 8003 | text-to-speech |
 | Memory service | 8004 | Mem0 + pgvector |
+| Voice service | 8005 | Pipecat + Daily.co voice pipeline |
 
 ## dev commands
 
@@ -233,7 +240,7 @@ Session boundaries are managed through a **typed hook registry** — not scatter
 
 ```
 onStart hooks (sequential, all awaited):
-  memory-blocks-injection     → injects 6 named memory blocks into Claude context
+  memory-blocks-injection     → injects 7 named memory blocks into Claude context
   therapy-plan-injection      → injects internal therapy plan + initialises session mode
 
 onEnd hooks (critical first, then background fire-and-forget):
@@ -268,13 +275,13 @@ The companion operates in one of five **session modes**, which controls how it c
 Three independent memory layers, each with different granularity and lifetime:
 
 **1. Mem0 episodic memories** — extracted after every session by a Claude call, stored in PostgreSQL with pgvector embeddings (BAAI/bge-m3, 1024-dim). Each memory carries:
-- `memoryType`: one of 10 typed categories (`profile_fact`, `relationship`, `goal`, `coping_strategy`, `recurring_trigger`, `life_event`, `symptom_episode`, `unresolved_thread`, `safety_critical`, `win`)
+- `memoryType`: one of 12 typed categories (`profile_fact`, `relationship`, `goal`, `coping_strategy`, `recurring_trigger`, `life_event`, `symptom_episode`, `unresolved_thread`, `safety_critical`, `win`, `session_summary`, `formative_experience`)
 - Full provenance: `source_session_id`, `source_message_id`, `confidence`, `last_confirmed_at`
 - Contradiction handling: memories are **superseded** (not deleted) when contradicted — the historical record is preserved
 
 Retrieval at session start uses dual-strategy search: semantic similarity (pgvector cosine) + temporal recency, merged and capped for context budget.
 
-**2. Named memory blocks** — 6 persistent text fields, rewritten at session end, injected at session start:
+**2. Named memory blocks** — 7 persistent text fields, rewritten at session end, injected at session start:
 
 | Block | Content | Char limit |
 |-------|---------|------------|
@@ -283,6 +290,7 @@ Retrieval at session start uses dual-strategy search: semantic similarity (pgvec
 | `user/triggers` | Known distress triggers | 500 |
 | `user/coping_strategies` | What helps them cope | 500 |
 | `user/relationships` | Key people in their life | 500 |
+| `user/origin_story` | Developmental narrative and formative experiences | 1000 |
 | `companion/therapeutic_calibration` | How to engage *this specific user* (see below) | 800 |
 
 **3. Session summaries** — structured JSON (themes, cognitive patterns, action items) persisted after every session, feeding the formulation and therapy plan pipelines.
@@ -322,7 +330,6 @@ This is currently a solo project by [@PranavSlathia](https://github.com/PranavSl
 
 - `ARCHITECTURE.md` — system design + service map
 - `TECHSTACK.md` — why we picked what we picked
-- `BUILD_ORDER.md` — phased build plan + dependency graph
 
 ## license
 

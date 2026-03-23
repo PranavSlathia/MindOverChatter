@@ -16,8 +16,8 @@
 | **UI Components** | shadcn/ui + Tailwind CSS v4 | latest |
 | **State Management** | Zustand | 5.x |
 | **Backend** | Hono | 4.x |
-| **AI Engine** | Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) | latest |
-| **AI Models** | Anthropic Claude Sonnet 4 (primary) + Haiku (lightweight) | latest |
+| **AI Engine** | Claude CLI (local binary spawning) | latest |
+| **AI Models** | Anthropic Claude Sonnet 4 (primary) + Haiku (safety/supervisor) | latest |
 | **Real-time** | SSE (Server-Sent Events via Hono `streamSSE`) | latest |
 | **Database** | PostgreSQL 16 + pgvector | pg16, pgvector 0.7+ |
 | **ORM** | Drizzle ORM | latest |
@@ -36,17 +36,17 @@
 │                                                             │
 │  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │
 │  │  apps/web    │   │ apps/server  │   │ packages/     │   │
-│  │  React+Vite  │   │ Hono+SDK     │   │ shared types  │   │
+│  │  React+Vite  │   │ Hono+CLI     │   │ shared types  │   │
 │  │  shadcn/ui   │   │ Drizzle ORM  │   │ validators    │   │
 │  │  Zustand     │   │ SSE stream   │   │ constants     │   │
-│  │  Human.js    │   │ Agent SDK    │   │               │   │
+│  │  Human.js    │   │ Claude CLI   │   │               │   │
 │  └──────┬───────┘   └──────┬───────┘   └───────────────┘   │
 │         │                  │                                │
 │         │    REST + SSE    │                                │
 │         └──────────────────┘                                │
 └─────────────────────────────────────────────────────────────┘
               │                    │
-              │                    │   HTTP / MCP
+              │                    │   HTTP
               │                    │
      ┌────────┴────────┐   ┌──────┴──────────────────┐
      │   PostgreSQL 16  │   │  Python AI Microservices │
@@ -58,8 +58,8 @@
      │  - mood_logs     │   │  └─────────────────┘    │
      │  - embeddings    │   │  ┌─────────────────┐    │
      │                  │   │  │ emotion-service  │    │
-     │                  │   │  │ SenseVoice       │    │
-     │                  │   │  │ + librosa        │    │
+     │                  │   │  │ librosa          │    │
+     │                  │   │  │ (rule-based)     │    │
      │                  │   │  └─────────────────┘    │
      │                  │   │  ┌─────────────────┐    │
      │                  │   │  │ tts-service      │    │
@@ -100,10 +100,9 @@ moc/
 │       ├── src/
 │       │   ├── routes/           # Hono route handlers
 │       │   ├── sse/              # SSE streaming handlers
-│       │   ├── sdk/              # Claude Agent SDK integration
+│       │   ├── sdk/              # Claude CLI integration + session lifecycle
 │       │   ├── db/               # Drizzle schema + migrations
-│       │   ├── services/         # Business logic
-│       │   └── mcp/              # MCP server configs
+│       │   └── services/         # Business logic
 │       ├── drizzle.config.ts
 │       └── package.json
 │
@@ -125,8 +124,14 @@ moc/
 │   │   ├── Dockerfile
 │   │   ├── pyproject.toml
 │   │   └── main.py
-│   └── tts/                      # Text-to-Speech service
-│       ├── Dockerfile
+│   ├── tts/                      # Text-to-Speech service
+│   │   ├── Dockerfile
+│   │   ├── pyproject.toml
+│   │   └── main.py
+│   ├── memory/                  # Mem0 memory service
+│   │   ├── pyproject.toml
+│   │   └── main.py
+│   └── voice/                   # Pipecat + Daily.co voice pipeline
 │       ├── pyproject.toml
 │       └── main.py
 │
@@ -183,30 +188,29 @@ Theme generated via [tweakcn.com](https://tweakcn.com) targeting earth tones and
 | Tool | Purpose | Why |
 |---|---|---|
 | **Hono 4.x** | HTTP framework | Ultra-fast, Web Standards, built-in SSE streaming via `streamSSE` |
-| **Claude Agent SDK** | AI conversation engine | Programmatic Claude Code: session management, tool use, MCP, hooks, streaming |
+| **Claude CLI** | AI conversation engine | Spawns local `claude` binary for session management, streaming, and therapeutic conversations |
 | **SSE (`streamSSE`)** | Real-time streaming | Server-to-client streaming for AI responses; emotion data via POST with keep-alive |
 | **Drizzle ORM** | Database access | Type-safe queries, lightweight, excellent pgvector support |
 | **Zod** | Validation | Shared schemas between frontend and backend |
 
-### Claude Agent SDK Integration
+### Claude CLI Integration
 
-The Agent SDK wraps the **local Claude Code binary** (same one in your terminal). No separate API key management -- uses your existing Claude auth, local file system, and MCP servers.
+The conversation engine spawns the **local Claude Code binary** (`claude`) via `child_process.spawn`. No separate API key management -- uses your existing Claude auth from `claude login`.
 
-**Pattern adopted from 1code (21st.dev):**
+**Spawning pattern:**
 
-- **Local binary resolution**: SDK spawns the Claude binary at `~/.claude/local/claude`
-- **Session isolation**: Per-session config directories at `~/.claude-sessions/{sessionId}`
-- **Async generator streaming**: `for await (const msg of query({...}))` streams responses
-- **Message transformation**: SDK streaming output converted to SSE events for the frontend
+- **Binary spawning**: `child_process.spawn('claude', [...flags])` with prompts piped via stdin (avoids ARG_MAX limits on large therapeutic prompts)
+- **Output streaming**: `--output-format stream-json` + `--verbose` for real-time streaming of assistant responses
+- **Environment isolation**: `CLAUDECODE` env var stripped from child process env (prevents nested session guard rejection)
+- **Working directory**: `cwd` set to `/tmp` to avoid loading the project's own CLAUDE.md and hooks into the wellness companion context
+- **Message transformation**: `stream-json` events parsed and converted to SSE events for the frontend
 
 **Capabilities:**
 
-- **Session management**: `resume: sessionId` for cross-session therapeutic continuity
-- **MCP servers**: PostgreSQL MCP server for Claude to read/write the database natively
-- **Hooks**: `PreToolUse` for crisis detection safety rails, `PostToolUse` for audit logging
-- **Skills**: Therapeutic frameworks (CBT, MI-OARS) defined as `.claude/skills/*.md` files
-- **Allowed tools**: Restrict Claude to safe operations only
-- **Streaming**: Async generator pattern streams responses to frontend via SSE
+- **Session management**: `--print --max-turns 1` per message turn, with full context rebuilt each turn
+- **Skills**: Therapeutic frameworks (CBT, MI-OARS, probing flows) defined as `.claude/skills/*.md` files and loaded into the system prompt
+- **Crisis detection**: Runs on every message before Claude is spawned; response is hard-coded, never AI-generated
+- **Streaming**: `stream-json` output piped through SSE to the frontend in real-time
 
 ### Electron Migration Path
 
@@ -214,7 +218,7 @@ The web app architecture is designed for zero-rewrite Electron migration:
 - **React frontend** -> Electron renderer process (as-is)
 - **Hono server** -> Electron main process (minimal changes)
 - **SSE / REST** -> Electron IPC / tRPC bridge
-- **Claude SDK** -> moves from server to Electron main process (direct binary access)
+- **Claude CLI** -> moves from server to Electron main process (direct binary access)
 
 ### API Design
 
@@ -273,7 +277,7 @@ Each AI model runs as an isolated Python microservice in Docker, managed with `u
 
 | Component | Choice | Details |
 |---|---|---|
-| **STT Engine** | faster-whisper (`large-v3-turbo`) | 4x faster than OpenAI Whisper, CTranslate2 + INT8 quantization |
+| **STT Engine** | faster-whisper (`base`) | 4x faster than OpenAI Whisper, CTranslate2 + INT8 quantization |
 | **Performance** | 13min audio in ~19s (RTX 3070 Ti) | Batch per utterance: record -> transcribe -> respond |
 | **Framework** | FastAPI (thin wrapper) | Single `/transcribe` endpoint |
 | **Dependency mgmt** | uv | Fast, Rust-based |
@@ -282,8 +286,8 @@ Each AI model runs as an isolated Python microservice in Docker, managed with `u
 
 | Component | Choice | Details |
 |---|---|---|
-| **Primary** | SenseVoice-Small | ASR + language ID + emotion + audio events in one pass. 70ms/10s audio. 4 emotions. Apache 2.0 |
-| **Prosody** | librosa | Pitch (pyin), MFCCs, energy (rms), spectral features |
+| **Primary** | librosa (rule-based prosody analysis) | Pitch (pyin), MFCCs, energy (rms), spectral features. No neural model required. |
+| **Prosody** | librosa | Pitch, MFCCs, energy, spectral features extracted and scored by rules |
 | **Framework** | FastAPI | Single `/analyze` endpoint returning emotion + prosody scores |
 | **Dependency mgmt** | uv | |
 
@@ -370,14 +374,16 @@ Decision: Start with **BAAI/bge-m3** self-hosted for zero API cost at personal s
 ```yaml
 services:
   web:        # React frontend (Vite build served by nginx or Hono static)
-  server:     # Hono backend + Claude Agent SDK
+  server:     # Hono backend + Claude CLI
   db:         # pgvector/pgvector:pg16
   whisper:    # Python: faster-whisper STT
-  emotion:    # Python: SenseVoice + librosa
+  emotion:    # Python: librosa (rule-based prosody analysis)
   tts:        # Python: Kokoro TTS
+  memory:     # Python: Mem0 + pgvector memory service
+  voice:      # Python: Pipecat + Daily.co voice pipeline
 ```
 
-6 services total (5 from PRD + emotion split out as dedicated service).
+8 services total.
 
 ---
 
@@ -410,8 +416,8 @@ services:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Full TypeScript vs Python backend | **Full TypeScript** | One language, Claude Agent SDK is native TS, end-to-end type safety with Drizzle + shared package |
-| Claude API vs Agent SDK | **Agent SDK** | Programmatic session control, MCP for DB access, hooks for safety, resume for continuity |
+| Full TypeScript vs Python backend | **Full TypeScript** | One language, end-to-end type safety with Drizzle + shared package |
+| Claude API vs CLI binary | **CLI binary** | No API keys needed, uses local Claude Code auth, spawns `claude` via child_process |
 | FastAPI vs Hono | **Hono** | Full TS stack, ultra-fast, Web Standards, built-in SSE streaming via `streamSSE` |
 | SQLAlchemy vs Drizzle | **Drizzle** | TypeScript-native, type-safe, lightweight, pgvector support |
 | Separate vector DB vs pgvector | **pgvector in PostgreSQL** | Single DB, ACID transactions, combined temporal + vector queries |

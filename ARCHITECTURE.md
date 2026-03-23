@@ -9,7 +9,7 @@
 1. [System Overview](#1-system-overview)
 2. [Service Topology](#2-service-topology)
 3. [Data Flow Diagrams](#3-data-flow-diagrams)
-4. [Claude Agent SDK Architecture](#4-claude-agent-sdk-architecture)
+4. [Claude CLI Architecture](#4-claude-cli-architecture)
 5. [REST + SSE Protocol](#5-rest--sse-protocol)
 6. [Database Architecture](#6-database-architecture)
 7. [Memory Architecture](#7-memory-architecture)
@@ -24,7 +24,7 @@
 
 ## 1. System Overview
 
-MindOverChatter is a multimodal mental wellness app built as a monorepo web application with Python AI microservices. The core conversation engine is the **Claude Agent SDK**, which wraps the local Claude Code binary to drive therapy sessions programmatically.
+MindOverChatter is a multimodal mental wellness app built as a monorepo web application with Python AI microservices. The core conversation engine is the **Claude CLI**, which wraps the local Claude Code binary to drive therapy sessions programmatically.
 
 ### Design Principles
 
@@ -32,7 +32,7 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 - **Browser-side privacy** - Facial emotion detection runs in-browser, zero images leave the device
 - **Typed everything** - End-to-end TypeScript with shared Zod schemas; Python services have typed contracts
 - **No fallbacks** - Primary choices only, no fallback chains
-- **Claude-native** - Agent SDK drives sessions using local Claude binary, MCP for DB access, skills for therapeutic frameworks
+- **Claude-native** - CLI spawns local Claude binary, skills for therapeutic frameworks
 
 ### High-Level System Diagram
 
@@ -63,9 +63,9 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 │   Hono Server    │  │  whisper-   │  │  emotion-   │
 │   (apps/server)  │  │  service    │  │  service    │
 │                  │  │             │  │             │
-│  ┌────────────┐  │  │ faster-     │  │ SenseVoice  │
+│  ┌────────────┐  │  │ faster-     │  │ librosa     │
 │  │ Claude     │  │  │ whisper     │  │ + librosa   │
-│  │ Agent SDK  │  │  │ large-v3-   │  │             │
+│  │ Claude CLI │  │  │ faster-     │  │             │
 │  │            │  │  │ turbo       │  │ POST        │
 │  │ ┌────────┐ │  │  │             │  │ /analyze    │
 │  │ │ Skills │ │  │  │ POST        │  │             │
@@ -92,6 +92,11 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 │  assessments     │
 │  memories        │
 │  user_profiles   │
+│  session_summaries│
+│  user_formulations│
+│  therapy_plans   │
+│  memory_blocks   │
+│  turn_events     │
 └──────────────────┘
 ```
 
@@ -104,24 +109,28 @@ MindOverChatter is a multimodal mental wellness app built as a monorepo web appl
 | Service | Container | Port | Responsibility |
 |---|---|---|---|
 | **web** | `moc-web` | 5173 | React frontend (Vite dev / nginx prod) |
-| **server** | `moc-server` | 3000 | Hono backend + Claude Agent SDK + SSE streaming |
+| **server** | `moc-server` | 3000 | Hono backend + Claude CLI + SSE streaming |
 | **db** | `pgvector/pgvector:pg16` | 5432 | PostgreSQL 16 + pgvector extension |
-| **whisper** | `moc-whisper` | 8001 | faster-whisper STT (large-v3-turbo) |
-| **emotion** | `moc-emotion` | 8002 | SenseVoice voice emotion + librosa prosody |
+| **whisper** | `moc-whisper` | 8001 | faster-whisper STT (base) |
+| **emotion** | `moc-emotion` | 8002 | librosa rule-based prosody analysis |
 | **tts** | `moc-tts` | 8003 | Kokoro TTS (82M params) |
+| **memory** | `moc-memory` | 8004 | Mem0 memory service + pgvector backend |
+| **voice** | `moc-voice` | 8005 | Pipecat + Daily.co voice pipeline |
 
 ### Service Communication Map
 
 ```
 web ──REST/SSE──► server ──Drizzle──► db
  │                   │
- │                   ├──MCP──► db (Claude Agent SDK direct DB access)
+ │                   ├──HTTP──► tts (POST /synthesize)
  │                   │
- │                   └──HTTP──► tts (POST /synthesize)
+ │                   └──HTTP──► memory (Mem0 search/add)
  │
  ├──HTTP──► whisper  (POST /transcribe)
  │
- └──HTTP──► emotion  (POST /analyze)
+ ├──HTTP──► emotion  (POST /analyze)
+ │
+ └──WebRTC──► voice  (Pipecat + Daily.co live voice pipeline)
 ```
 
 **Key pattern**: Frontend sends audio directly to Python services (parallel). Frontend sends the merged results + text to the Hono server via POST /api/sessions/:id/messages. This avoids double-hop latency for audio processing.
@@ -152,7 +161,7 @@ User types message
                                    NO   │   YES
                                    │    │    │
                                    ▼    │    ▼
-                            [Agent SDK] │  [Hard-coded crisis
+                            [Claude CLI] │  [Hard-coded crisis
                              query()    │   response + resources]
                                    │    │
                                    ▼    │
@@ -193,7 +202,7 @@ User records audio utterance
         ├──HTTP POST──► [whisper-service /transcribe]
         │                       │
         │                       ▼
-        │                 faster-whisper (large-v3-turbo)
+        │                 faster-whisper (base)
         │                 CTranslate2 + INT8 quantization
         │                       │
         │                       ▼
@@ -202,8 +211,8 @@ User records audio utterance
         └──HTTP POST──► [emotion-service /analyze]
                                 │
                                 ▼
-                          SenseVoice-Small
-                          (ASR + emotion in one pass, 70ms/10s)
+                          librosa (rule-based)
+                          (prosody analysis)
                                 │
                                 ▼
                           {emotion: "happy"|"sad"|"angry"|"neutral",
@@ -304,7 +313,7 @@ User opens app / starts new session
   (status: active, started_at: now())
         │
         ▼
-  Initialize Claude Agent SDK session:
+  Initialize Claude CLI session:
   - Load system prompt (~2,000 tokens) with therapeutic framework
   - Retrieve user profile from DB (~3,000 tokens)
   - Retrieve session summaries (~3,000 tokens)
@@ -312,7 +321,7 @@ User opens app / starts new session
   - Total context budget: ~120,000 tokens
         │
         ▼
-  SDK session ready, awaiting user input
+  CLI session ready, awaiting user input
         │
         ▼
   ... conversation turns ...
@@ -360,18 +369,18 @@ Each returned session ID triggers the summary generation pipeline asynchronously
 
 ---
 
-## 4. Claude Agent SDK Architecture
+## 4. Claude CLI Architecture
 
-### SDK Integration Layer
+### CLI Integration Layer
 
 ```
 apps/server/src/sdk/
-├── session-manager.ts      # Create, resume, end SDK sessions
-├── message-transformer.ts  # SDK streaming → SSE events
+├── session-manager.ts      # Create, resume, end CLI sessions
+├── message-transformer.ts  # CLI streaming → SSE events
 ├── skill-loader.ts         # Load .claude/skills/*.md as system context
 ├── hook-registry.ts        # Register PreToolUse, PostToolUse hooks
 ├── mcp-config.ts           # MCP server configurations
-└── types.ts                # SDK-related TypeScript types
+└── types.ts                # CLI-related TypeScript types
 ```
 
 ### Session Manager
@@ -381,7 +390,7 @@ apps/server/src/sdk/
 
 interface TherapySession {
   id: string;                    // UUID
-  sdkSessionId: string;          // Claude SDK session ID for resume
+  sdkSessionId: string;          // Claude CLI session ID for resume
   userId: string;                // User identifier
   status: 'active' | 'completed' | 'crisis_escalated';
   contextBudget: {
@@ -395,12 +404,12 @@ interface TherapySession {
 }
 
 // Session lifecycle:
-// 1. createSession() → new SDK query with full context
-// 2. sendMessage()   → stream via SDK async generator
-// 3. endSession()    → generate summary, update Mem0, close SDK session
+// 1. createSession() → new CLI query with full context
+// 2. sendMessage()   → stream via CLI spawn
+// 3. endSession()    → generate summary, update Mem0, close session
 ```
 
-### SDK Query Configuration
+### CLI Query Configuration
 
 ```typescript
 // Conceptual configuration shape
@@ -447,7 +456,7 @@ interface TherapySession {
                            │ PASS
                            ▼
                  ┌─────────────────────┐
-                 │  Claude SDK query() │
+                 │  Claude CLI spawn() │
                  │  (streaming)        │
                  └─────────┬───────────┘
                            │
@@ -704,7 +713,7 @@ Single database, single source of truth. pgvector extension enables vector simil
 {
   id: uuid().primaryKey(),
   userId: uuid().references(userProfiles.id),
-  sdkSessionId: text(),         // Claude Agent SDK session ID
+  sdkSessionId: text(),         // Claude CLI session ID
   status: text(),               // 'active' | 'completed' | 'crisis_escalated'
   summary: text(),              // 300-500 word session summary
   summaryEmbedding: vector(1024),
@@ -770,7 +779,7 @@ Single database, single source of truth. pgvector extension enables vector simil
   id: uuid().primaryKey(),
   userId: uuid().references(userProfiles.id),
   content: text(),              // Extracted fact/memory
-  memoryType: text(),           // 'profile_fact' | 'relationship' | 'goal' | 'coping_strategy' | 'recurring_trigger' | 'life_event' | 'symptom_episode' | 'unresolved_thread' | 'safety_critical' | 'win'
+  memoryType: text(),           // 'profile_fact' | 'relationship' | 'goal' | 'coping_strategy' | 'recurring_trigger' | 'life_event' | 'symptom_episode' | 'unresolved_thread' | 'safety_critical' | 'win' | 'session_summary' | 'formative_experience'
   importance: real(),           // 0-1 importance score
   confidence: real(),           // 0-1 extraction confidence
   embedding: vector(1024),      // For semantic retrieval
@@ -926,7 +935,7 @@ New session starts
   4. Assemble into system prompt
         │
         ▼
-  Context ready for Claude Agent SDK query
+  Context ready for Claude CLI query
 ```
 
 ### User Journey Timeline
@@ -987,12 +996,12 @@ Every memory has provenance (source_session_id, source_message_id) and confidenc
 │                                                                 │
 │  HONO SERVER (Node.js)                                         │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Claude Agent SDK                                        │  │
+│  │  Claude CLI                                        │  │
 │  │  → Claude Sonnet 4 (primary conversation)                │  │
 │  │  → Claude Haiku (lightweight classification)             │  │
 │  │  → Prompt caching: 1hr cache, min 1024 tokens            │  │
 │  │                                                          │  │
-│  │  Mem0 (Node.js SDK)                                      │  │
+│  │  Mem0 (Python microservice)                               │  │
 │  │  → Memory extraction and retrieval                       │  │
 │  │  → pgvector backend                                      │  │
 │  └──────────────────────────────────────────────────────────┘  │
@@ -1001,10 +1010,10 @@ Every memory has provenance (source_session_id, source_message_id) and confidenc
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐  │
 │  │ whisper-service  │ │ emotion-service │ │ tts-service     │  │
 │  │                  │ │                 │ │                 │  │
-│  │ faster-whisper   │ │ SenseVoice-    │ │ Kokoro TTS      │  │
-│  │ large-v3-turbo   │ │ Small          │ │ 82M params      │  │
-│  │ CTranslate2     │ │ (ASR+emotion   │ │                 │  │
-│  │ INT8 quant      │ │  in one pass)  │ │ POST            │  │
+│  │ faster-whisper   │ │ librosa        │ │ Kokoro TTS      │  │
+│  │ (base model)    │ │ (rule-based    │ │ 82M params      │  │
+│  │ CTranslate2     │ │  prosody       │ │                 │  │
+│  │ INT8 quant      │ │  analysis)     │ │ POST            │  │
 │  │                  │ │                 │ │ /synthesize     │  │
 │  │ POST             │ │ librosa        │ │                 │  │
 │  │ /transcribe      │ │ (prosody)      │ │ Input: text,    │  │
@@ -1228,8 +1237,8 @@ volumes/
 │       └── {session_id}/
 │           └── {message_id}.wav
 └── models/                  # Cached AI models
-    ├── whisper/             # faster-whisper large-v3-turbo
-    ├── sensevoice/          # SenseVoice-Small
+    ├── whisper/             # faster-whisper base
+    ├── librosa/             # librosa prosody models
     ├── kokoro/              # Kokoro TTS 82M
     ├── hingroberta/         # HingRoBERTa
     ├── muril/               # MuRIL
@@ -1318,7 +1327,7 @@ When ready to package as a desktop app:
 | **React frontend** | Browser at localhost:5173 | Electron renderer (BrowserWindow) |
 | **Hono server** | Node.js process at localhost:3000 | Electron main process |
 | **REST + SSE** | HTTP over network | Electron IPC bridge (or local HTTP) |
-| **Claude SDK** | Server spawns local binary | Main process has direct binary access |
+| **Claude CLI** | Server spawns local binary | Main process has direct binary access |
 | **Docker services** | Docker Compose | Can keep Docker OR bundle Python with app |
 | **File storage** | Docker volume | App data directory (`userData`) |
 | **Database** | Docker PostgreSQL | Embedded SQLite (switch) OR keep Docker PG |
@@ -1331,7 +1340,7 @@ When ready to package as a desktop app:
 - All shared types and validators
 - Human.js in-browser processing
 - Python microservice APIs (if kept in Docker)
-- Claude Agent SDK integration code
+- Claude CLI integration code
 - Drizzle schema definitions (if staying on PG)
 
 ### Migration Steps
@@ -1339,7 +1348,7 @@ When ready to package as a desktop app:
 1. Add Electron shell (`electron-builder` or `electron-forge`)
 2. Move Hono server into Electron main process
 3. Replace REST + SSE with Electron IPC (or keep local HTTP)
-4. Update Claude SDK binary resolution (use 1code's `env.ts` pattern)
+4. Update Claude CLI binary resolution
 5. Configure auto-updater
 6. Package Python services (or keep Docker requirement)
 
@@ -1370,7 +1379,7 @@ Response:
 }
 
 GET /health
-Response: {"status": "ok", "model": "large-v3-turbo"}
+Response: {"status": "ok", "model": "base"}
 ```
 
 ### emotion-service (port 8002)
@@ -1407,7 +1416,7 @@ Response:
 }
 
 GET /health
-Response: {"status": "ok", "models": ["sensevoice-small", "librosa"]}
+Response: {"status": "ok", "models": ["librosa"]}
 ```
 
 ### tts-service (port 8003)
@@ -1443,6 +1452,8 @@ DATABASE_URL=postgresql://moc:password@db:5432/moc
 WHISPER_SERVICE_URL=http://whisper:8001
 EMOTION_SERVICE_URL=http://emotion:8002
 TTS_SERVICE_URL=http://tts:8003
+MEMORY_SERVICE_URL=http://memory:8004
+VOICE_SERVICE_URL=http://voice:8005
 
 # Claude (uses local binary auth, no API key needed)
 CLAUDE_MODEL=sonnet
@@ -1496,6 +1507,8 @@ services:
       - WHISPER_SERVICE_URL=http://whisper:8001
       - EMOTION_SERVICE_URL=http://emotion:8002
       - TTS_SERVICE_URL=http://tts:8003
+      - MEMORY_SERVICE_URL=http://memory:8004
+      - VOICE_SERVICE_URL=http://voice:8005
     volumes:
       - audio-data:/app/volumes/audio
       - ~/.claude:/root/.claude:ro          # Claude binary + auth
@@ -1558,6 +1571,27 @@ services:
     volumes:
       - audio-data:/app/volumes/audio
       - model-cache:/app/models
+    networks:
+      - moc-net
+
+  memory:
+    build:
+      context: services/memory
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://moc:password@db:5432/moc
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - moc-net
+
+  voice:
+    build:
+      context: services/voice
+    ports:
+      - "8005:8005"
     networks:
       - moc-net
 
