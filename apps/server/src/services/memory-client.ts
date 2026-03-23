@@ -172,7 +172,7 @@ export async function getAllMemories(
  */
 export function addMemoriesAsync(
   userId: string,
-  sessionId: string,
+  sessionId: string | null,
   userMessageId: string,
   messageList: Array<{ role: string; content: string }>,
   metadata?: Record<string, unknown>,
@@ -187,7 +187,7 @@ export function addMemoriesAsync(
 
 async function doAddMemories(
   userId: string,
-  sessionId: string,
+  sessionId: string | null,
   userMessageId: string,
   messageList: Array<{ role: string; content: string }>,
   metadata?: Record<string, unknown>,
@@ -257,7 +257,7 @@ async function doAddMemories(
  */
 async function persistProvenance(
   userId: string,
-  sessionId: string,
+  sessionId: string | null,
   userMessageId: string,
   added: MemoryAddedResult[],
 ): Promise<void> {
@@ -280,6 +280,7 @@ async function persistProvenance(
         "safety_critical",
         "win",
         "session_summary",
+        "formative_experience",
       ] as const;
 
       type ValidMemoryType = (typeof validTypes)[number];

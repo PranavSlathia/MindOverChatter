@@ -188,7 +188,7 @@ const app = new Hono()
     const formulationText = buildFormulationText(type, severity, nextScreener);
     addMemoriesAsync(
       user.id,
-      sessionId ?? "standalone",
+      sessionId ?? null,
       assessment!.id,
       [{ role: "assistant", content: formulationText }],
       { memory_type: "symptom_episode" },

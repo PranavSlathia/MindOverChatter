@@ -209,14 +209,15 @@ const app = new Hono()
 
   // ── GET /health/services — Python Microservice Availability ──
   .get("/health/services", async (c) => {
-    const [whisper, emotion, tts, memory] = await Promise.all([
+    const [whisper, emotion, tts, memory, voice] = await Promise.all([
       pingService(env.WHISPER_SERVICE_URL),
       pingService(env.EMOTION_SERVICE_URL),
       pingService(env.TTS_SERVICE_URL),
       pingService(env.MEMORY_SERVICE_URL),
+      pingService(env.VOICE_SERVICE_URL),
     ]);
 
-    return c.json({ whisper, emotion, tts, memory });
+    return c.json({ whisper, emotion, tts, memory, voice });
   });
 
 // ── Export ─────────────────────────────────────────────────────────

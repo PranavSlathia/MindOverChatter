@@ -1,18 +1,29 @@
 /**
- * VoiceChat — Pipecat + Daily.co voice chat component.
+ * VoiceChat - Pipecat + Daily.co voice chat component.
  *
- * Uses @pipecat-ai/client-js + @pipecat-ai/daily-transport to connect
- * to the MindOverChatter voice service (Pipecat bot) via Daily.co WebRTC.
+ * Attaches to the active chat session and manages the live voice transport.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
+import { PipecatClient } from "@pipecat-ai/client-js";
 import { DailyTransport } from "@pipecat-ai/daily-transport";
-import { API_BASE } from "@/lib/api.js";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { API_BASE, api, type VoiceStartResponse } from "@/lib/api.js";
 
 type VoiceState = "idle" | "connecting" | "connected" | "error";
 
-export function VoiceChat() {
+export interface VoiceChatHandle {
+  stop: (options?: { keepalive?: boolean }) => Promise<void>;
+}
+
+interface VoiceChatProps {
+  sessionId: string;
+  onRequestClose?: () => void | Promise<void>;
+}
+
+export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function VoiceChat(
+  { sessionId, onRequestClose },
+  ref,
+) {
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -20,14 +31,96 @@ export function VoiceChat() {
   const [userTranscript, setUserTranscript] = useState("");
   const [botTranscript, setBotTranscript] = useState("");
   const clientRef = useRef<PipecatClient | null>(null);
+  const voiceSessionIdRef = useRef<string | null>(null);
+  const stopPromiseRef = useRef<Promise<void> | null>(null);
+  const lifecycleTokenRef = useRef(0);
 
-  const startVoice = useCallback(async () => {
-    setState("connecting");
-    setError(null);
+  const resetLocalVoiceState = useCallback(() => {
+    setIsMuted(false);
+    setBotSpeaking(false);
     setUserTranscript("");
     setBotTranscript("");
+  }, []);
+
+  const stopVoice = useCallback(
+    async (options?: { keepalive?: boolean }) => {
+      if (stopPromiseRef.current) {
+        return stopPromiseRef.current;
+      }
+
+      lifecycleTokenRef.current += 1;
+      const token = lifecycleTokenRef.current;
+
+      stopPromiseRef.current = (async () => {
+        const client = clientRef.current;
+        const voiceSessionId = voiceSessionIdRef.current;
+
+        clientRef.current = null;
+        voiceSessionIdRef.current = null;
+
+        if (voiceSessionId) {
+          try {
+            await api.stopVoice(voiceSessionId, { keepalive: options?.keepalive ?? false });
+          } catch (err) {
+            console.warn("[voice] Stop request failed:", err);
+          }
+        }
+
+        if (client) {
+          try {
+            await client.disconnect();
+          } catch (err) {
+            console.warn("[voice] Disconnect failed:", err);
+          }
+        }
+
+        if (token === lifecycleTokenRef.current) {
+          setState("idle");
+          resetLocalVoiceState();
+        }
+      })().finally(() => {
+        if (stopPromiseRef.current) {
+          stopPromiseRef.current = null;
+        }
+      });
+
+      return stopPromiseRef.current;
+    },
+    [resetLocalVoiceState],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      stop: (options) => stopVoice({ keepalive: options?.keepalive }),
+    }),
+    [stopVoice],
+  );
+
+  const startVoice = useCallback(async () => {
+    if (!sessionId) {
+      setError("Missing session");
+      setState("error");
+      return;
+    }
+
+    setState("connecting");
+    setError(null);
+    resetLocalVoiceState();
 
     try {
+      lifecycleTokenRef.current += 1;
+      const token = lifecycleTokenRef.current;
+
+      // Resume AudioContext on user gesture to satisfy Chrome autoplay policy
+      const audioCtx = new AudioContext();
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+        console.log("[voice] AudioContext resumed:", audioCtx.state);
+      }
+      // Close it — Daily creates its own, but this "unlocks" autoplay for the page
+      await audioCtx.close();
+
       const transport = new DailyTransport();
       const client = new PipecatClient({
         transport,
@@ -35,21 +128,29 @@ export function VoiceChat() {
         enableCam: false,
         callbacks: {
           onConnected: () => {
-            console.log("[voice] Connected");
+            console.log("[voice] Connected to Daily room");
             setState("connected");
           },
           onDisconnected: () => {
-            console.log("[voice] Disconnected");
+            console.log("[voice] Disconnected from Daily room");
             setState("idle");
           },
-          onBotStartedSpeaking: () => setBotSpeaking(true),
-          onBotStoppedSpeaking: () => setBotSpeaking(false),
+          onBotStartedSpeaking: () => {
+            console.log("[voice] Bot started speaking");
+            setBotSpeaking(true);
+          },
+          onBotStoppedSpeaking: () => {
+            console.log("[voice] Bot stopped speaking");
+            setBotSpeaking(false);
+          },
           onUserTranscript: (data) => {
             const text = (data as { text?: string })?.text;
+            console.log("[voice] User transcript:", text);
             if (text) setUserTranscript(text);
           },
           onBotTranscript: (data) => {
             const text = (data as { text?: string })?.text;
+            console.log("[voice] Bot transcript:", text);
             if (text) setBotTranscript(text);
           },
           onError: (err) => {
@@ -62,34 +163,43 @@ export function VoiceChat() {
 
       clientRef.current = client;
 
-      // Call the voice service directly (bypasses Hono proxy for lower latency)
-      const VOICE_URL = "http://localhost:8005";
-      await client.startBotAndConnect({
-        endpoint: `${VOICE_URL}/start`,
-        requestData: {
-          system_prompt: "You are a warm wellness companion called MindOverChatter. Keep responses concise (2-3 sentences) for voice. Never claim to be a therapist.",
-          moc_session_id: null,
-        },
+      const startResult = (await client.startBot({
+        endpoint: `${API_BASE}/api/voice/start`,
+        requestData: { sessionId },
+      })) as VoiceStartResponse;
+
+      if (startResult.sessionId !== sessionId) {
+        console.warn(
+          "[voice] Backend returned a different sessionId than requested:",
+          startResult.sessionId,
+          sessionId,
+        );
+      }
+
+      voiceSessionIdRef.current = startResult.voiceSessionId;
+
+      if (token !== lifecycleTokenRef.current) {
+        await stopVoice({ keepalive: true });
+        return;
+      }
+
+      await client.connect({
+        url: startResult.url,
+        token: startResult.token,
       });
+
+      if (token !== lifecycleTokenRef.current) {
+        await stopVoice({ keepalive: true });
+        return;
+      }
     } catch (err) {
       console.error("[voice] Start failed:", err);
+      await stopVoice({ keepalive: true });
       const message = err instanceof Error ? err.message : "Failed to start voice";
       setError(message);
       setState("error");
     }
-  }, []);
-
-  const stopVoice = useCallback(async () => {
-    if (clientRef.current) {
-      try {
-        await clientRef.current.disconnect();
-      } catch {
-        // Ignore
-      }
-    }
-    clientRef.current = null;
-    setState("idle");
-  }, []);
+  }, [resetLocalVoiceState, sessionId, stopVoice]);
 
   const toggleMute = useCallback(() => {
     if (clientRef.current) {
@@ -101,21 +211,16 @@ export function VoiceChat() {
 
   useEffect(() => {
     return () => {
-      if (clientRef.current) {
-        try { clientRef.current.disconnect(); } catch { /* */ }
-        clientRef.current = null;
-      }
+      void stopVoice({ keepalive: true });
     };
-  }, []);
+  }, [stopVoice]);
 
   return (
     <div className="flex flex-col items-center gap-4 p-6">
       {/* Voice state indicator */}
       <div className="flex flex-col items-center gap-2">
         {state === "idle" && (
-          <div className="text-sm text-foreground/40">
-            Click to start voice chat
-          </div>
+          <div className="text-sm text-foreground/40">Click to start voice chat</div>
         )}
         {state === "connecting" && (
           <div className="flex items-center gap-2 text-sm text-amber-600">
@@ -126,7 +231,9 @@ export function VoiceChat() {
         {state === "connected" && (
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-2 text-sm text-emerald-600">
-              <span className={`inline-block h-2 w-2 rounded-full ${botSpeaking ? "animate-pulse bg-blue-500" : "bg-emerald-500"}`} />
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${botSpeaking ? "animate-pulse bg-blue-500" : "bg-emerald-500"}`}
+              />
               {botSpeaking ? "Speaking..." : "Listening..."}
             </div>
             {userTranscript && (
@@ -142,9 +249,7 @@ export function VoiceChat() {
           </div>
         )}
         {state === "error" && (
-          <div className="text-sm text-red-600">
-            {error || "Connection error"}
-          </div>
+          <div className="text-sm text-red-600">{error || "Connection error"}</div>
         )}
       </div>
 
@@ -169,14 +274,27 @@ export function VoiceChat() {
             </button>
             <button
               type="button"
-              onClick={stopVoice}
+              onClick={() => {
+                void stopVoice();
+              }}
               className="rounded-full bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
             >
               End Voice
             </button>
+            {onRequestClose && (
+              <button
+                type="button"
+                onClick={() => {
+                  void onRequestClose();
+                }}
+                className="rounded-full border border-foreground/15 px-4 py-2 text-sm font-medium text-foreground/70 transition-colors hover:bg-muted"
+              >
+                Switch to text
+              </button>
+            )}
           </>
         )}
       </div>
     </div>
   );
-}
+});

@@ -22,11 +22,9 @@ import { detectCrisis } from "../crisis/index.js";
 import { sessionEmitter } from "../sse/emitter.js";
 import type { SSEEventData } from "../sse/emitter.js";
 import {
-  createSdkSession,
   sendMessage as sdkSendMessage,
   endSdkSession,
   loadSkillFiles,
-  selectRelevantSkills,
   injectSessionContext,
   injectSkillDynamically,
   isSessionActive,
@@ -49,6 +47,10 @@ import { classifyTextEmotion } from "../services/text-emotion-classifier.js";
 import { runOnStart, runOnEnd, clearEndedSession } from "../sdk/session-lifecycle.js";
 import { detectModeShift } from "../services/mode-detector.js";
 import { formatModeShiftBlock } from "../sdk/mode-blocks.js";
+import {
+  ensureSdkSessionForStoredSession,
+  initializeSdkSessionForUser,
+} from "../session/bootstrap.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
@@ -123,113 +125,7 @@ const app = new Hono()
   // ── POST / — Create Session ──────────────────────────────────
   .post("/", async (c) => {
     const user = await getOrCreateUser();
-
-    // Fetch the latest formulation to drive skill selection and memory ranking
-    const formulation = await getLatestFormulation(user.id);
-
-    // ── Memory retrieval: formulation-ranked or full fallback ────
-    let mappedMemories: Array<{ content: string; memoryType: string; confidence: number }>;
-
-    if (formulation && formulation.snapshot.formulation?.presentingTheme) {
-      // Ranked search based on presenting theme (top 20)
-      const rankedMemories = await searchMemories(
-        user.id,
-        formulation.snapshot.formulation.presentingTheme,
-        20,
-      );
-      // Always separately fetch safety_critical memories
-      const safetyMemories = await searchMemories(
-        user.id,
-        "safety critical",
-        10,
-        ["safety_critical"],
-      );
-      // Merge, dedup by id
-      const seen = new Set<string>();
-      const combined = [...rankedMemories, ...safetyMemories].filter((m) => {
-        if (seen.has(m.id)) return false;
-        seen.add(m.id);
-        return true;
-      });
-      mappedMemories = combined.map((m) => ({
-        content: m.content,
-        memoryType: m.memoryType,
-        confidence: m.confidence,
-      }));
-    } else {
-      // No formulation (new user) — fall back to all memories
-      const allMemories = await getAllMemories(user.id);
-      mappedMemories = allMemories.map((m) => ({
-        content: m.content,
-        memoryType: m.memoryType,
-        confidence: m.confidence,
-      }));
-    }
-
-    // ── Selective skill loading based on formulation ─────────────
-    // Count prior COMPLETED sessions to determine if this is a returning user.
-    // Do not use formulation presence as proxy — assessments can generate
-    // formulations during a user's first session, incorrectly triggering
-    // developmental probing (probing-development.md rule: ≥2nd session only).
-    const [completedCountRow] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(sessions)
-      .where(and(eq(sessions.userId, user.id), eq(sessions.status, "completed")));
-    const isReturningUser = (completedCountRow?.count ?? 0) > 0;
-
-    const allSkills = loadSkillFiles();
-    const selectedSkills = selectRelevantSkills(allSkills, formulation?.snapshot ?? null, isReturningUser);
-
-    // Create an SDK session with memory context and selectively loaded skills
-    const sdkSessionId = await createSdkSession(
-      mappedMemories.length > 0 ? mappedMemories : undefined,
-      selectedSkills,
-    );
-
-    // Inject user profile context so the AI knows the user's name, traits, patterns, and goals
-    const profileParts: string[] = [];
-    if (user.displayName) profileParts.push(`Name: ${user.displayName}`);
-    if (user.coreTraits && Array.isArray(user.coreTraits) && (user.coreTraits as string[]).length > 0) {
-      profileParts.push(`Core traits (self-described): ${(user.coreTraits as string[]).join(", ")}`);
-    }
-    if (user.patterns && Array.isArray(user.patterns) && (user.patterns as string[]).length > 0) {
-      profileParts.push(`Behavioral patterns (self-described): ${(user.patterns as string[]).join(", ")}`);
-    }
-    if (user.goals && Array.isArray(user.goals) && (user.goals as string[]).length > 0) {
-      profileParts.push(`Goals: ${(user.goals as string[]).join(", ")}`);
-    }
-    if (profileParts.length > 0) {
-      injectSessionContext(
-        sdkSessionId,
-        `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
-      );
-    }
-
-    // ── Inject formulation context (3C) ─────────────────────────
-    if (formulation) {
-      const f = formulation.snapshot;
-      const parts: string[] = [];
-      if (f.formulation?.presentingTheme) {
-        parts.push(`Presenting theme: ${f.formulation.presentingTheme}`);
-      }
-      const activeStates = f.activeStates?.slice(0, 5) ?? [];
-      if (activeStates.length > 0) {
-        parts.push(`Active patterns: ${activeStates.map((s: any) => `${s.label} (${s.domain})`).join(', ')}`);
-      }
-      const actions = formulation.actionRecommendations?.slice(0, 3) ?? [];
-      if (actions.length > 0) {
-        parts.push(`Recommended conversation areas: ${actions.map((a: any) => a.conversationHint).join('; ')}`);
-      }
-      if (parts.length > 0) {
-        injectSessionContext(
-          sdkSessionId,
-          `=== Formulation Context ===\n${parts.join('\n')}\n=== End Formulation Context ===\n\nUse this context to inform your approach. Reference the presenting theme naturally. Prioritize conversation areas marked as recommended.`,
-        );
-      }
-    }
-
-    // ── Run session start hooks (therapy plan injection, etc.) ────
-    await runOnStart({ userId: user.id, sdkSessionId });
+    const sdkSessionId = await initializeSdkSessionForUser(user);
 
     const [session] = await db
       .insert(sessions)
@@ -555,22 +451,29 @@ const app = new Hono()
 
     const endedAt = new Date();
 
-    // End the SDK session and capture conversation history for summary
-    let conversationHistory: ConversationMessage[] = [];
     if (session.sdkSessionId) {
       try {
-        conversationHistory = await endSdkSession(session.sdkSessionId);
+        await endSdkSession(session.sdkSessionId);
       } catch (err) {
         console.error(`Failed to end SDK session ${session.sdkSessionId}:`, err);
       }
     }
 
-    // Count DB messages — sessions with < 2 messages are ephemeral, delete them silently
-    const [msgCountResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
+    const dbHistoryRows = await db
+      .select({
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+        id: messages.id,
+      })
       .from(messages)
-      .where(eq(messages.sessionId, sessionId));
-    const dbMessageCount = msgCountResult?.count ?? 0;
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+    const conversationHistory: ConversationMessage[] = dbHistoryRows.map((row) => ({
+      role: row.role,
+      content: row.content,
+    }));
+    const dbMessageCount = conversationHistory.length;
 
     if (dbMessageCount < 2) {
       // No real conversation happened — delete the session and return cleanly
@@ -725,132 +628,15 @@ const app = new Hono()
         .where(eq(sessions.id, sessionId));
     }
 
-    // Fetch the latest formulation to drive skill selection and memory ranking
-    const formulation = await getLatestFormulation(user.id);
-
-    // ── Memory retrieval: formulation-ranked or full fallback (same pattern as POST /) ────
-    let mappedMemories: Array<{ content: string; memoryType: string; confidence: number }>;
-
-    if (formulation && formulation.snapshot.formulation?.presentingTheme) {
-      const rankedMemories = await searchMemories(
-        user.id,
-        formulation.snapshot.formulation.presentingTheme,
-        20,
-      );
-      const safetyMemories = await searchMemories(
-        user.id,
-        "safety critical",
-        10,
-        ["safety_critical"],
-      );
-      const seen = new Set<string>();
-      const combined = [...rankedMemories, ...safetyMemories].filter((m) => {
-        if (seen.has(m.id)) return false;
-        seen.add(m.id);
-        return true;
-      });
-      mappedMemories = combined.map((m) => ({
-        content: m.content,
-        memoryType: m.memoryType,
-        confidence: m.confidence,
-      }));
-    } else {
-      const allMemories = await getAllMemories(user.id);
-      mappedMemories = allMemories.map((m) => ({
-        content: m.content,
-        memoryType: m.memoryType,
-        confidence: m.confidence,
-      }));
-    }
-
-    // ── Selective skill loading based on formulation ─────────────
-    // Resume: the session being resumed counts as a prior session, so the user
-    // is a returning user by definition (they have at least this session's history).
-    const allSkillsResume = loadSkillFiles();
-    const selectedSkills = selectRelevantSkills(allSkillsResume, formulation?.snapshot ?? null, true);
-
-    // Create a fresh SDK session with memory context and selectively loaded skills
-    const sdkSessionId = await createSdkSession(
-      mappedMemories.length > 0 ? mappedMemories : undefined,
-      selectedSkills,
-    );
-
-    // Inject user profile context (same pattern as POST /)
-    const profileParts: string[] = [];
-    if (user.displayName) profileParts.push(`Name: ${user.displayName}`);
-    if (user.coreTraits && Array.isArray(user.coreTraits) && (user.coreTraits as string[]).length > 0) {
-      profileParts.push(`Core traits (self-described): ${(user.coreTraits as string[]).join(", ")}`);
-    }
-    if (user.patterns && Array.isArray(user.patterns) && (user.patterns as string[]).length > 0) {
-      profileParts.push(`Behavioral patterns (self-described): ${(user.patterns as string[]).join(", ")}`);
-    }
-    if (user.goals && Array.isArray(user.goals) && (user.goals as string[]).length > 0) {
-      profileParts.push(`Goals: ${(user.goals as string[]).join(", ")}`);
-    }
-    if (profileParts.length > 0) {
-      injectSessionContext(
-        sdkSessionId,
-        `=== User Profile ===\n${profileParts.join("\n")}\n=== End User Profile ===\n\nUse this profile to personalize your responses. Address the user by name. Be aware of their self-described traits, patterns, and goals — but treat them as the user's own perspective, not clinical facts.`,
-      );
-    }
-
-    // ── Inject formulation context (3C) ─────────────────────────
-    if (formulation) {
-      const f = formulation.snapshot;
-      const parts: string[] = [];
-      if (f.formulation?.presentingTheme) {
-        parts.push(`Presenting theme: ${f.formulation.presentingTheme}`);
-      }
-      const activeStates = f.activeStates?.slice(0, 5) ?? [];
-      if (activeStates.length > 0) {
-        parts.push(`Active patterns: ${activeStates.map((s: any) => `${s.label} (${s.domain})`).join(', ')}`);
-      }
-      const actions = formulation.actionRecommendations?.slice(0, 3) ?? [];
-      if (actions.length > 0) {
-        parts.push(`Recommended conversation areas: ${actions.map((a: any) => a.conversationHint).join('; ')}`);
-      }
-      if (parts.length > 0) {
-        injectSessionContext(
-          sdkSessionId,
-          `=== Formulation Context ===\n${parts.join('\n')}\n=== End Formulation Context ===\n\nUse this context to inform your approach. Reference the presenting theme naturally. Prioritize conversation areas marked as recommended.`,
-        );
-      }
-    }
-
     // Clear the deduplication guard so this resumed session generates
     // a fresh summary when it ends (the previous cycle already ran its hooks).
     clearEndedSession(sessionId);
-
-    // ── Run session start hooks (therapy plan injection, etc.) ────
-    await runOnStart({ userId: user.id, sdkSessionId });
-
-    // Load existing conversation history from the database
-    const historyRows = await db
-      .select({
-        role: messages.role,
-        content: messages.content,
-        createdAt: messages.createdAt,
-      })
-      .from(messages)
-      .where(eq(messages.sessionId, sessionId))
-      .orderBy(asc(messages.createdAt), asc(messages.id));
-
-    // Inject the conversation history as a context block so Claude has continuity
-    if (historyRows.length > 0) {
-      const historyLines = historyRows.map(
-        (m) => `[${m.role.toUpperCase()}]: ${m.content}`,
-      );
-      injectSessionContext(
-        sdkSessionId,
-        `=== Previous Conversation History (Resumed Session) ===\nThis session is being resumed. Below is the conversation that took place before the session was interrupted. Continue naturally from where you left off.\n\n${historyLines.join("\n\n")}\n=== End Previous Conversation History ===`,
-      );
-    }
-
-    // Update the session's sdkSessionId in the database
-    await db
-      .update(sessions)
-      .set({ sdkSessionId, lastActivityAt: new Date() })
-      .where(eq(sessions.id, sessionId));
+    const sdkSessionId = await ensureSdkSessionForStoredSession({
+      sessionId,
+      sdkSessionId: session.sdkSessionId,
+      user,
+      isReturningUser: true,
+    });
 
     return c.json({
       sessionId: session.id,

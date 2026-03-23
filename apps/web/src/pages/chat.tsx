@@ -11,10 +11,11 @@ import {
   ThinkingBubble,
 } from "@/components/chat/message-bubble.js";
 import { MessageInput } from "@/components/chat/message-input.js";
-import { VoiceChat } from "@/components/voice/VoiceChat.js";
+import { VoiceChat, type VoiceChatHandle } from "@/components/voice/VoiceChat.js";
 import { useServiceHealth } from "@/hooks/use-service-health.js";
 import { API_BASE, api } from "@/lib/api.js";
 import { useEmotionStore } from "@/stores/emotion-store.js";
+import { useServiceHealthStore } from "@/stores/service-health-store.js";
 import { useSessionStore } from "@/stores/session-store.js";
 
 export function ChatPage() {
@@ -50,13 +51,18 @@ export function ChatPage() {
   } = useSessionStore();
 
   const setEmotionFromSSE = useEmotionStore((s) => s.setEmotion);
+  const voiceAvailable = useServiceHealthStore((s) => s.voice.available);
   const [voiceMode, setVoiceMode] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<
     "connected" | "reconnecting" | "disconnected"
   >("connected");
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceChatRef = useRef<VoiceChatHandle | null>(null);
+  const voiceFlushResolverRef = useRef<(() => void) | null>(null);
+  const voiceFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
+  const VOICE_FLUSH_TIMEOUT_MS = 5000;
 
   // Poll service health (whisper, TTS) every 60s so buttons reflect availability
   useServiceHealth();
@@ -70,6 +76,46 @@ export function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent, isCrisis, activeAssessment, isThinking, isEnding]);
+
+  const loadSessionMessages = useCallback(
+    async (sid: string) => {
+      const messagesResult = await api.getSessionMessages(sid);
+      setMessages(
+        messagesResult.messages.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          createdAt: m.createdAt,
+        })),
+      );
+    },
+    [setMessages],
+  );
+
+  const resolveVoiceFlush = useCallback(() => {
+    if (voiceFlushTimeoutRef.current) {
+      clearTimeout(voiceFlushTimeoutRef.current);
+      voiceFlushTimeoutRef.current = null;
+    }
+    const resolve = voiceFlushResolverRef.current;
+    voiceFlushResolverRef.current = null;
+    resolve?.();
+  }, []);
+
+  const waitForVoiceFlush = useCallback(() => {
+    if (!voiceMode) return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      resolveVoiceFlush();
+      voiceFlushResolverRef.current = resolve;
+      voiceFlushTimeoutRef.current = setTimeout(() => {
+        voiceFlushTimeoutRef.current = null;
+        const pendingResolve = voiceFlushResolverRef.current;
+        voiceFlushResolverRef.current = null;
+        pendingResolve?.();
+      }, VOICE_FLUSH_TIMEOUT_MS);
+    });
+  }, [resolveVoiceFlush, voiceMode]);
 
   // Connect SSE for a given session
   const connectSSE = useCallback(
@@ -201,6 +247,16 @@ export function ChatPage() {
         setStatus("completed");
       });
 
+      es.addEventListener("voice.transcript_persisted", () => {
+        void loadSessionMessages(sid)
+          .catch((err) => {
+            console.error("Failed to refresh transcript after voice persistence:", err);
+          })
+          .finally(() => {
+            resolveVoiceFlush();
+          });
+      });
+
       es.addEventListener("assessment.start", (event) => {
         try {
           const data = JSON.parse(event.data) as { assessmentType: string };
@@ -301,11 +357,11 @@ export function ChatPage() {
       completeAssessment,
       dismissAssessment,
       setEmotionFromSSE,
+      loadSessionMessages,
+      resolveVoiceFlush,
     ],
   );
 
-  // Create or resume session on mount
-  // biome-ignore lint/correctness/useExhaustiveDependencies: urlSessionId drives init, store actions are stable
   useEffect(() => {
     let cancelled = false;
 
@@ -320,19 +376,8 @@ export function ChatPage() {
           if (cancelled) return;
           setSessionId(result.sessionId);
           setStatus("active");
-
-          // Load existing messages
-          const messagesResult = await api.getSessionMessages(urlSessionId);
+          await loadSessionMessages(urlSessionId);
           if (cancelled) return;
-          setMessages(
-            messagesResult.messages.map((m) => ({
-              id: m.id,
-              role: m.role as "user" | "assistant",
-              content: m.content,
-              createdAt: m.createdAt,
-            })),
-          );
-
           connectSSE(result.sessionId);
         } catch (err) {
           if (cancelled) return;
@@ -362,9 +407,7 @@ export function ChatPage() {
         try {
           const result = await api.createSession();
           if (cancelled) return;
-          setSessionId(result.sessionId);
-          setStatus("active");
-          connectSSE(result.sessionId);
+          navigate(`/chat/${result.sessionId}`, { replace: true });
         } catch (err) {
           if (cancelled) return;
           console.error("Failed to create session:", err);
@@ -385,8 +428,39 @@ export function ChatPage() {
       cancelled = true;
       eventSourceRef.current?.close();
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      resolveVoiceFlush();
     };
-  }, [urlSessionId]);
+  }, [
+    urlSessionId,
+    navigate,
+    addMessage,
+    setSessionId,
+    setStatus,
+    loadSessionMessages,
+    connectSSE,
+    reset,
+    resolveVoiceFlush,
+  ]);
+
+  const stopVoiceAndClose = useCallback(
+    async (options?: { closeMode?: boolean; keepalive?: boolean; waitForFlush?: boolean }) => {
+      if (!voiceMode) {
+        if (options?.closeMode) setVoiceMode(false);
+        return;
+      }
+
+      const flushPromise =
+        options?.waitForFlush === false ? Promise.resolve() : waitForVoiceFlush();
+
+      await voiceChatRef.current?.stop({ keepalive: options?.keepalive });
+      await flushPromise;
+
+      if (options?.closeMode ?? true) {
+        setVoiceMode(false);
+      }
+    },
+    [voiceMode, waitForVoiceFlush],
+  );
 
   // Beforeunload: best-effort session end via beacon
   useEffect(() => {
@@ -394,6 +468,10 @@ export function ChatPage() {
       const sid = useSessionStore.getState().sessionId;
       const st = useSessionStore.getState().status;
       if (sid && st === "active") {
+        if (voiceMode) {
+          void voiceChatRef.current?.stop({ keepalive: true });
+          return;
+        }
         const url = `${API_BASE}/api/sessions/${sid}/end`;
         navigator.sendBeacon(
           url,
@@ -405,7 +483,14 @@ export function ChatPage() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
+  }, [voiceMode]);
+
+  useEffect(() => {
+    if (!voiceMode) return;
+    if (status !== "active" || !voiceAvailable) {
+      void stopVoiceAndClose({ closeMode: true });
+    }
+  }, [voiceMode, status, voiceAvailable, stopVoiceAndClose]);
 
   const handleSendMessage = useCallback(
     async (text: string) => {
@@ -439,6 +524,7 @@ export function ChatPage() {
     if (!sessionId) return;
 
     try {
+      await stopVoiceAndClose({ closeMode: true });
       await api.endSession(sessionId, "user_ended");
       setStatus("completed");
     } catch (err) {
@@ -449,18 +535,17 @@ export function ChatPage() {
       setEnding(false);
       eventSourceRef.current?.close();
     }
-  }, [sessionId, setStatus, setEnding]);
+  }, [sessionId, setStatus, setEnding, stopVoiceAndClose]);
 
-  const handleNewSession = useCallback(() => {
+  const handleNewSession = useCallback(async () => {
     eventSourceRef.current?.close();
+    await stopVoiceAndClose({ closeMode: true });
     reset();
     // Re-create session
     api
       .createSession()
       .then((result) => {
-        setSessionId(result.sessionId);
-        setStatus("active");
-        connectSSE(result.sessionId);
+        navigate(`/chat/${result.sessionId}`, { replace: true });
       })
       .catch((err) => {
         console.error("Failed to create new session:", err);
@@ -471,7 +556,7 @@ export function ChatPage() {
           createdAt: new Date().toISOString(),
         });
       });
-  }, [reset, setSessionId, setStatus, connectSSE, addMessage]);
+  }, [reset, navigate, addMessage, stopVoiceAndClose]);
 
   const handleRetryConnection = useCallback(() => {
     if (!sessionId) return;
@@ -587,16 +672,11 @@ export function ChatPage() {
       {/* Input area — voice or text mode */}
       {voiceMode ? (
         <div className="border-t border-foreground/10 bg-muted/30">
-          <VoiceChat />
-          <div className="flex justify-center pb-2">
-            <button
-              type="button"
-              onClick={() => setVoiceMode(false)}
-              className="text-xs text-foreground/40 transition-colors hover:text-foreground/70"
-            >
-              Switch to text
-            </button>
-          </div>
+          <VoiceChat
+            ref={voiceChatRef}
+            sessionId={sessionId ?? ""}
+            onRequestClose={() => stopVoiceAndClose({ closeMode: true })}
+          />
         </div>
       ) : (
         <div className="relative">
@@ -605,7 +685,7 @@ export function ChatPage() {
             disabled={inputDisabled}
             placeholder={status === "completed" ? "Session has ended" : "Type a message..."}
           />
-          {status === "active" && (
+          {status === "active" && voiceAvailable && (
             <button
               type="button"
               onClick={() => setVoiceMode(true)}
@@ -613,7 +693,22 @@ export function ChatPage() {
               aria-label="Switch to voice chat"
               title="Voice chat"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <title>Voice chat</title>
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+              </svg>
             </button>
           )}
         </div>

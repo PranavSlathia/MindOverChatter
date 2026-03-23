@@ -57,7 +57,20 @@ export type MoodLogEntry = InferResponseType<
 >["entries"][number];
 
 export type HomeSummary = GetHomeSummarySuccess;
-export type ServiceHealth = GetServiceHealthSuccess;
+
+export interface ServiceStatus {
+  available: boolean;
+}
+
+export interface ServiceHealthResponse {
+  whisper: ServiceStatus;
+  tts: ServiceStatus;
+  emotion: ServiceStatus;
+  memory: ServiceStatus;
+  voice: ServiceStatus;
+}
+
+export type ServiceHealth = ServiceHealthResponse;
 
 // ── Inferred Request Types ─────────────────────────────────────────
 // Derived from the hc client so parameter types stay in sync with the
@@ -100,12 +113,26 @@ type GetTherapyPlanGoalsSuccess = InferResponseType<
   200
 >;
 type GetHomeSummarySuccess = InferResponseType<typeof client.api.home.summary.$get, 200>;
-type GetServiceHealthSuccess = InferResponseType<typeof client.api.home.health.services.$get, 200>;
-type GetAssessmentLibrarySuccess = InferResponseType<typeof client.api.assessments.library.$get, 200>;
+type GetAssessmentLibrarySuccess = InferResponseType<
+  typeof client.api.assessments.library.$get,
+  200
+>;
 type GetAssessmentHistorySuccess = InferResponseType<
   (typeof client.api.assessments.history)[":type"]["$get"],
   200
 >;
+
+export interface VoiceStartResponse {
+  url: string;
+  token: string;
+  sessionId: string;
+  voiceSessionId: string;
+}
+
+export interface VoiceStopResponse {
+  status: string;
+  voiceSessionId: string;
+}
 
 // ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
@@ -280,10 +307,23 @@ export const api = {
     return (await res.json()) as GetHomeSummarySuccess;
   },
 
-  getServiceHealth: async (): Promise<GetServiceHealthSuccess> => {
+  getServiceHealth: async (): Promise<ServiceHealthResponse> => {
     const res = await client.api.home.health.services.$get();
     await throwIfError(res);
-    return (await res.json()) as GetServiceHealthSuccess;
+    return (await res.json()) as ServiceHealthResponse;
+  },
+
+  stopVoice: async (
+    voiceSessionId: string,
+    options?: { keepalive?: boolean },
+  ): Promise<VoiceStopResponse> => {
+    const response = await fetch(`${API_BASE}/api/voice/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voiceSessionId }),
+      keepalive: options?.keepalive ?? false,
+    });
+    return handleResponse<VoiceStopResponse>(response);
   },
 
   getAssessmentLibrary: async (): Promise<GetAssessmentLibrarySuccess> => {

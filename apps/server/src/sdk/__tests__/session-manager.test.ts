@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MemoryContextItem } from "../session-manager.js";
 import {
+  appendMessagesToSession,
   assemblePrompt,
+  assembleVoicePrompt,
   createSdkSession,
   delimit,
   endSdkSession,
@@ -12,6 +14,7 @@ import {
   injectSessionContext,
   isSessionActive,
   loadSkillFiles,
+  renderVoicePromptForSession,
   resetSkillCache,
   selectRelevantSkills,
 } from "../session-manager.js";
@@ -210,6 +213,60 @@ describe("SDK Session Manager", () => {
 
       expect(prompt).not.toContain("=== Therapeutic Skills ===");
       expect(prompt).not.toContain("=== Context Injections ===");
+    });
+  });
+
+  describe("assembleVoicePrompt", () => {
+    it("includes voice modality instructions and conversation history", () => {
+      const prompt = assembleVoicePrompt(
+        [
+          { role: "user", content: "I feel overwhelmed today" },
+          { role: "assistant", content: "Tell me more about what feels heaviest." },
+        ],
+        [{ content: "User is preparing for exams", memoryType: "context", confidence: 0.91 }],
+        ["# Breathing skill\nGuide a short grounding exercise when needed."],
+        ["User prefers direct, calm responses."],
+      );
+
+      expect(prompt).toContain("=== Voice Modality Context ===");
+      expect(prompt).toContain("This is a live voice conversation.");
+      expect(prompt).toContain("Do not generate your own crisis-response script.");
+      expect(prompt).toContain("=== Conversation History ===");
+      expect(prompt).toContain("I feel overwhelmed today");
+      expect(prompt).toContain("Respond naturally to the ongoing voice conversation.");
+      expect(prompt).not.toContain("---BEGIN CURRENT_USER_MESSAGE---");
+    });
+  });
+
+  describe("voice session helpers", () => {
+    it("renders a voice prompt using the active session state", async () => {
+      const id = await createSdkSession(
+        [{ content: "User is worried about job interviews", memoryType: "goal", confidence: 0.9 }],
+        ["# Interview support\nHelp the user prepare without overwhelming them."],
+      );
+
+      injectSessionContext(id, "User profile says they prefer concise responses.");
+      appendMessagesToSession(id, [
+        { role: "user", content: "I have an interview tomorrow" },
+        { role: "assistant", content: "Let's slow it down and focus on one concern first." },
+      ]);
+
+      const prompt = renderVoicePromptForSession(id);
+
+      expect(prompt).toContain("User is worried about job interviews");
+      expect(prompt).toContain("# Interview support");
+      expect(prompt).toContain("User profile says they prefer concise responses.");
+      expect(prompt).toContain("I have an interview tomorrow");
+      expect(prompt).toContain("Let's slow it down and focus on one concern first.");
+      expect(prompt).toContain("=== Voice Modality Context ===");
+
+      await endSdkSession(id);
+    });
+
+    it("throws when rendering a voice prompt for a missing session", () => {
+      expect(() => renderVoicePromptForSession("missing-session")).toThrow(
+        /SDK session not found/,
+      );
     });
   });
 

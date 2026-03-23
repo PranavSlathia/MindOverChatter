@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from pipecat.frames.frames import (
     Frame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -53,15 +54,25 @@ class ClaudeCLIProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMMessagesFrame):
-            await self._handle_llm_request(frame)
+        if isinstance(frame, LLMContextFrame):
+            # Pipecat's universal aggregator emits LLMContextFrame
+            await self._handle_llm_context(frame)
+        elif isinstance(frame, LLMMessagesFrame):
+            # Legacy fallback
+            await self._handle_llm_messages(frame.messages)
         else:
             await self.push_frame(frame, direction)
 
-    async def _handle_llm_request(self, frame: LLMMessagesFrame) -> None:
+    async def _handle_llm_context(self, frame: LLMContextFrame) -> None:
+        """Handle LLMContextFrame from Pipecat's universal aggregator."""
+        context = frame.context
+        messages = context.messages if hasattr(context, 'messages') else []
+        logger.info("[claude-cli] Received LLMContextFrame with %d messages", len(messages))
+        await self._handle_llm_messages(messages)
+
+    async def _handle_llm_messages(self, messages: list) -> None:
         """Process an LLM request by spawning Claude CLI."""
         self._cancel_event.clear()
-        messages = frame.messages
 
         # Build prompt from messages array
         prompt = self._build_prompt(messages)

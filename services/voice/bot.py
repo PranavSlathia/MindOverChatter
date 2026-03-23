@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
+
+import aiohttp
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -78,7 +80,7 @@ class TranscriptLogger(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
+        if isinstance(frame, TranscriptionFrame) and frame.finalized and frame.text.strip():
             if self._on_user_text:
                 self._on_user_text(frame.text)
 
@@ -98,6 +100,77 @@ class TranscriptLogger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class CrisisCheckProcessor(FrameProcessor):
+    """Checks finalized user turns with the backend before they reach Claude."""
+
+    def __init__(
+        self,
+        moc_session_id: Optional[str],
+        on_assistant_text: Any = None,
+    ) -> None:
+        super().__init__()
+        self._moc_session_id = moc_session_id
+        self._on_assistant_text = on_assistant_text
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+
+        if (
+            not isinstance(frame, TranscriptionFrame)
+            or not frame.finalized
+            or not frame.text.strip()
+            or not self._moc_session_id
+        ):
+            await self.push_frame(frame, direction)
+            return
+
+        verdict = await self._check_turn(frame.text.strip())
+        if verdict is None or verdict.get("allow", True):
+            await self.push_frame(frame, direction)
+            return
+
+        response = verdict.get("response") or {}
+        message = response.get(
+            "message",
+            "I want to pause here and make sure you have immediate support available.",
+        )
+
+        logger.warning(
+            "[voice-bot] Crisis gate intercepted live turn for moc_session_id=%s",
+            self._moc_session_id,
+        )
+        if self._on_assistant_text and message.strip():
+            self._on_assistant_text(message)
+
+        await self.push_frame(LLMFullResponseStartFrame(), direction)
+        await self.push_frame(LLMTextFrame(text=message), direction)
+        await self.push_frame(LLMFullResponseEndFrame(), direction)
+
+    async def _check_turn(self, text: str) -> Optional[dict[str, Any]]:
+        timeout = aiohttp.ClientTimeout(total=5)
+        url = f"{settings.MOC_BACKEND_URL}/api/voice/check-turn"
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    url,
+                    json={"sessionId": self._moc_session_id, "text": text},
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+
+                    body = await resp.text()
+                    logger.error(
+                        "[voice-bot] /voice/check-turn failed (%d): %s",
+                        resp.status,
+                        body[:200],
+                    )
+        except Exception as exc:
+            logger.error("[voice-bot] /voice/check-turn error: %s", exc)
+
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Bot creation
 # ---------------------------------------------------------------------------
@@ -107,6 +180,7 @@ async def create_bot(
     room_url: str,
     token: str,
     session_id: str,
+    moc_session_id: Optional[str],
     system_prompt: str,
     on_user_text: Any = None,
     on_assistant_text: Any = None,
@@ -118,7 +192,8 @@ async def create_bot(
     Args:
         room_url: Daily.co room URL
         token: Daily.co meeting token
-        session_id: MindOverChatter session ID (for logging)
+        session_id: Voice service session ID (for logging)
+        moc_session_id: MindOverChatter app session ID for turn-level safety checks
         system_prompt: Full system prompt (includes memory blocks, therapy plan, skills)
         on_user_text: Callback for user transcriptions
         on_assistant_text: Callback for assistant responses
@@ -154,6 +229,7 @@ async def create_bot(
         api_key=settings.CARTESIA_API_KEY,
         voice_id=settings.CARTESIA_VOICE_ID,
         model=settings.CARTESIA_MODEL,
+        sample_rate=24000,
     )
 
     # ── Transport ─────────────────────────────────────────────────────
@@ -165,6 +241,8 @@ async def create_bot(
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_sample_rate=24000,
+            audio_in_sample_rate=16000,
         ),
     )
 
@@ -191,6 +269,10 @@ async def create_bot(
         on_user_text=on_user_text,
         on_assistant_text=on_assistant_text,
     )
+    crisis_check = CrisisCheckProcessor(
+        moc_session_id=moc_session_id,
+        on_assistant_text=on_assistant_text,
+    )
 
     # ── Pipeline ──────────────────────────────────────────────────────
 
@@ -199,6 +281,7 @@ async def create_bot(
             transport.input(),
             stt,
             transcript_logger,
+            crisis_check,
             context_aggregator.user(),
             llm,
             tts,

@@ -120,6 +120,26 @@ export function assemblePrompt(
   skillContent?: string[],
   contextInjections?: string[],
 ): string {
+  const parts = buildPromptSections(
+    history,
+    memories,
+    skillContent,
+    contextInjections,
+  );
+
+  parts.push(delimit("CURRENT_USER_MESSAGE", userMessage));
+  parts.push("");
+  parts.push("Respond to the current user message above. Be warm, empathetic, and natural.");
+
+  return parts.join("\n");
+}
+
+function buildPromptSections(
+  history: ConversationMessage[],
+  memories?: MemoryContextItem[],
+  skillContent?: string[],
+  contextInjections?: string[],
+): string[] {
   const parts: string[] = [SYSTEM_PROMPT, ""];
 
   parts.push(
@@ -129,7 +149,6 @@ export function assemblePrompt(
   );
   parts.push("");
 
-  // Inject memory context AFTER the delimiter notice, with each memory delimited
   if (memories && memories.length > 0) {
     parts.push("=== Relevant Memory Context ===");
     for (let i = 0; i < memories.length; i++) {
@@ -145,7 +164,6 @@ export function assemblePrompt(
     parts.push("");
   }
 
-  // Inject skill content (loaded once at startup, included in every prompt)
   if (skillContent && skillContent.length > 0) {
     parts.push("=== Therapeutic Skills ===");
     for (let i = 0; i < skillContent.length; i++) {
@@ -155,7 +173,6 @@ export function assemblePrompt(
     parts.push("");
   }
 
-  // Inject context blocks (dynamic, added during the session lifecycle)
   if (contextInjections && contextInjections.length > 0) {
     parts.push("=== Context Injections ===");
     for (let i = 0; i < contextInjections.length; i++) {
@@ -165,7 +182,6 @@ export function assemblePrompt(
     parts.push("");
   }
 
-  // Append conversation history with delimited messages
   if (history.length > 0) {
     parts.push("=== Conversation History ===");
     for (let i = 0; i < history.length; i++) {
@@ -177,10 +193,31 @@ export function assemblePrompt(
     parts.push("");
   }
 
-  parts.push(delimit("CURRENT_USER_MESSAGE", userMessage));
-  parts.push("");
-  parts.push("Respond to the current user message above. Be warm, empathetic, and natural.");
+  return parts;
+}
 
+export function assembleVoicePrompt(
+  history: ConversationMessage[],
+  memories?: MemoryContextItem[],
+  skillContent?: string[],
+  contextInjections?: string[],
+): string {
+  const voiceContext = [
+    "=== Voice Modality Context ===",
+    "This is a live voice conversation.",
+    "Keep responses concise, natural, and easy to speak aloud.",
+    "Use short paragraphs and avoid lists unless absolutely necessary.",
+    "Do not generate your own crisis-response script. The platform handles live safety escalation separately.",
+    "=== End Voice Modality Context ===",
+  ].join("\n");
+
+  const parts = buildPromptSections(
+    history,
+    memories,
+    skillContent,
+    [...(contextInjections ?? []), voiceContext],
+  );
+  parts.push("Respond naturally to the ongoing voice conversation. Keep the reply brief and speakable.");
   return parts.join("\n");
 }
 
@@ -507,6 +544,32 @@ export async function endSdkSession(sdkSessionId: string): Promise<ConversationM
   const history = [...session.messages];
   sessions.delete(sdkSessionId);
   return history;
+}
+
+export function appendMessagesToSession(
+  sdkSessionId: string,
+  newMessages: ConversationMessage[],
+): void {
+  const session = sessions.get(sdkSessionId);
+  if (!session) {
+    console.warn(`[session-manager] appendMessagesToSession: session ${sdkSessionId} not found`);
+    return;
+  }
+  session.messages.push(...newMessages);
+}
+
+export function renderVoicePromptForSession(sdkSessionId: string): string {
+  const session = sessions.get(sdkSessionId);
+  if (!session) {
+    throw new Error(`SDK session not found: ${sdkSessionId}`);
+  }
+
+  return assembleVoicePrompt(
+    session.messages,
+    session.initialMemories,
+    session.skillContent,
+    session.contextInjections,
+  );
 }
 
 /**

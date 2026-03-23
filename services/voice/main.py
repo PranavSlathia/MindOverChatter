@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -89,8 +89,13 @@ async def _create_daily_room() -> str:
             return data["url"]
 
 
-async def _create_daily_token(room_name: str) -> str:
-    """Create a meeting token for a Daily room."""
+async def _create_daily_token(room_name: str, *, is_owner: bool = False) -> str:
+    """Create a meeting token for a Daily room.
+
+    Args:
+        room_name: Name of the Daily room.
+        is_owner: If True, grants owner privileges (needed for bot to send audio).
+    """
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{settings.DAILY_API_URL}/meeting-tokens",
@@ -99,7 +104,7 @@ async def _create_daily_token(room_name: str) -> str:
                 "properties": {
                     "room_name": room_name,
                     "exp": int(datetime.now(timezone.utc).timestamp() + 3600),
-                    "is_owner": False,
+                    "is_owner": is_owner,
                 }
             },
         ) as resp:
@@ -110,6 +115,77 @@ async def _create_daily_token(room_name: str) -> str:
             return data["token"]
 
 
+# ── Transcript Persistence ────────────────────────────────────────────
+
+
+async def _persist_transcript(voice_session: Optional["VoiceSession"]) -> None:
+    """POST interleaved transcript to the MindOverChatter backend."""
+    if not voice_session or not voice_session.moc_session_id:
+        logger.info("No moc_session_id — skipping transcript persistence")
+        return
+
+    user_turns = voice_session.user_turns
+    assistant_turns = voice_session.assistant_turns
+
+    if not user_turns and not assistant_turns:
+        logger.info("[session=%s] Empty transcript — skipping", voice_session.session_id)
+        return
+
+    # Interleave turns: user[0], assistant[0], user[1], assistant[1], ...
+    turns: list[dict[str, str]] = []
+    max_len = max(len(user_turns), len(assistant_turns))
+    base_time = voice_session.created_at
+    turn_idx = 0
+    for i in range(max_len):
+        if i < len(user_turns):
+            offset = base_time + timedelta(seconds=turn_idx)
+            turns.append({
+                "role": "user",
+                "content": user_turns[i],
+                "createdAt": offset.isoformat().replace("+00:00", "Z"),
+            })
+            turn_idx += 1
+        if i < len(assistant_turns):
+            offset = base_time + timedelta(seconds=turn_idx)
+            turns.append({
+                "role": "assistant",
+                "content": assistant_turns[i],
+                "createdAt": offset.isoformat().replace("+00:00", "Z"),
+            })
+            turn_idx += 1
+
+    url = f"{settings.MOC_BACKEND_URL}/api/voice/transcript"
+    payload = {
+        "sessionId": voice_session.moc_session_id,
+        "turns": turns,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.post(url, json=payload) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    logger.info(
+                        "[session=%s] Transcript persisted: %d turns",
+                        voice_session.session_id,
+                        result.get("count", 0),
+                    )
+                else:
+                    body = await resp.text()
+                    logger.error(
+                        "[session=%s] Transcript POST failed (%d): %s",
+                        voice_session.session_id,
+                        resp.status,
+                        body[:200],
+                    )
+    except Exception as e:
+        logger.error(
+            "[session=%s] Transcript POST error: %s",
+            voice_session.session_id,
+            e,
+        )
+
+
 # ── Bot Runner ────────────────────────────────────────────────────────
 
 
@@ -118,6 +194,7 @@ async def _run_bot_session(
     room_url: str,
     token: str,
     session_id: str,
+    moc_session_id: Optional[str],
     system_prompt: str,
 ) -> None:
     """Run the Pipecat bot, releasing the semaphore on exit."""
@@ -138,6 +215,7 @@ async def _run_bot_session(
             room_url=room_url,
             token=token,
             session_id=session_id,
+            moc_session_id=moc_session_id,
             system_prompt=system_prompt,
             on_user_text=on_user_text,
             on_assistant_text=on_assistant_text,
@@ -145,12 +223,12 @@ async def _run_bot_session(
     except Exception as e:
         logger.error("[session=%s] Bot error: %s", session_id, e)
     finally:
+        # Persist transcript before cleanup
+        await _persist_transcript(voice_session)
+
         semaphore.release()
         _sessions.pop(session_id, None)
         logger.info("[session=%s] Session cleaned up", session_id)
-
-        # TODO: Persist transcript to MindOverChatter backend
-        # POST /api/sessions/:id/voice-transcript with user_turns + assistant_turns
 
 
 # ── API Schemas ───────────────────────────────────────────────────────
@@ -199,13 +277,16 @@ async def start_voice_session(
     try:
         room_url = await _create_daily_room()
         room_name = room_url.split("/")[-1]
-        token = await _create_daily_token(room_name)
+        # Bot token: is_owner=True so bot can send audio into the room
+        bot_token = await _create_daily_token(room_name, is_owner=True)
+        # Client token: regular participant
+        client_token = await _create_daily_token(room_name, is_owner=False)
         session_id = str(uuid4())
 
         _sessions[session_id] = VoiceSession(
             session_id=session_id,
             room_url=room_url,
-            token=token,
+            token=bot_token,
             moc_session_id=request.moc_session_id,
         )
 
@@ -213,8 +294,9 @@ async def start_voice_session(
             _run_bot_session,
             _bot_semaphore,
             room_url=room_url,
-            token=token,
+            token=bot_token,
             session_id=session_id,
+            moc_session_id=request.moc_session_id,
             system_prompt=request.system_prompt,
         )
     except Exception:
@@ -229,7 +311,7 @@ async def start_voice_session(
 
     return StartResponse(
         room_url=room_url,
-        token=token,
+        token=client_token,
         session_id=session_id,
     )
 

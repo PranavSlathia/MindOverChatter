@@ -1,14 +1,53 @@
 // ── Voice Routes ────────────────────────────────────────────────
-// POST /transcribe      — Proxy audio to whisper service for STT
-// POST /tts             — Proxy text to TTS service, return audio
-// POST /voice/start     — Start voice session (Daily.co + Pipecat)
-// POST /voice/stop      — Stop voice session
+// POST /transcribe        — Proxy audio to whisper service for STT
+// POST /tts               — Proxy text to TTS service, return audio
+// POST /voice/start       — Start voice session (Daily.co + Pipecat)
+// POST /voice/stop        — Stop voice session
+// POST /voice/transcript  — Persist voice transcript to DB
 
 import { zValidator } from "@hono/zod-validator";
 import { SynthesizeRequestSchema } from "@moc/shared";
 import { Hono } from "hono";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import { env } from "../env.js";
+import { db } from "../db/index.js";
+import { sessions, messages } from "../db/schema/index";
+import { getOrCreateUser } from "../db/helpers.js";
+import { detectCrisis, getCrisisResponse } from "../crisis/index.js";
+import { sessionEmitter } from "../sse/emitter.js";
+import {
+  appendMessagesToSession,
+  renderVoicePromptForSession,
+} from "../sdk/session-manager.js";
+import {
+  ensureSdkSessionForStoredSession,
+  initializeSdkSessionForUser,
+} from "../session/bootstrap.js";
+
+const VoiceStartSchema = z.object({
+  sessionId: z.string().uuid().optional(),
+});
+
+const VoiceStopSchema = z.object({
+  voiceSessionId: z.string().min(1),
+});
+
+const VoiceCheckTurnSchema = z.object({
+  sessionId: z.string().uuid(),
+  text: z.string().trim().min(1).max(10000),
+});
+
+const VoiceTranscriptSchema = z.object({
+  sessionId: z.string().uuid(),
+  turns: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+});
 
 const app = new Hono()
 
@@ -104,25 +143,67 @@ const app = new Hono()
   // ── POST /voice/start — Start voice chat session ──────────────
   .post(
     "/voice/start",
-    zValidator(
-      "json",
-      z.object({
-        sessionId: z.string().uuid().optional(),
-      }),
-    ),
+    zValidator("json", VoiceStartSchema),
     async (c) => {
-      // Build the system prompt from session context
-      // For now, use a minimal prompt; Phase V2 will wire up memory blocks + therapy plan
-      const systemPrompt = [
-        "You are a warm, empathetic wellness companion called MindOverChatter.",
-        "You speak naturally in a conversational tone, as if talking to a close friend.",
-        "Keep responses concise (2-4 sentences) since this is a voice conversation.",
-        "Never claim to be a therapist. You are a wellness companion.",
-        "If the user expresses suicidal thoughts, self-harm, or immediate danger:",
-        "  - Say: 'I hear you, and I want you to know support is available right now.'",
-        "  - Provide: 988 Suicide & Crisis Lifeline (call or text 988)",
-        "  - Provide: iCall: 9152987821, Vandrevala Foundation: 1860-2662-345",
-      ].join("\n");
+      const user = await getOrCreateUser();
+      const { sessionId: requestedSessionId } = c.req.valid("json");
+
+      let mocSessionId: string;
+      let sdkSessionId: string;
+
+      if (requestedSessionId) {
+        const [existingSession] = await db
+          .select({
+            id: sessions.id,
+            status: sessions.status,
+            sdkSessionId: sessions.sdkSessionId,
+          })
+          .from(sessions)
+          .where(and(eq(sessions.id, requestedSessionId), eq(sessions.userId, user.id)))
+          .limit(1);
+
+        if (!existingSession) {
+          return c.json({ error: "SESSION_NOT_FOUND", message: "Session not found" }, 404);
+        }
+
+        if (existingSession.status !== "active") {
+          return c.json(
+            { error: "SESSION_NOT_ACTIVE", message: "Voice can only attach to an active session" },
+            409,
+          );
+        }
+
+        mocSessionId = existingSession.id;
+        sdkSessionId = await ensureSdkSessionForStoredSession({
+          sessionId: existingSession.id,
+          sdkSessionId: existingSession.sdkSessionId,
+          user,
+          isReturningUser: true,
+        });
+        await db
+          .update(sessions)
+          .set({ lastActivityAt: new Date() })
+          .where(eq(sessions.id, existingSession.id));
+      } else {
+        sdkSessionId = await initializeSdkSessionForUser(user);
+        const [createdSession] = await db
+          .insert(sessions)
+          .values({
+            userId: user.id,
+            sdkSessionId,
+            status: "active",
+          })
+          .returning({ id: sessions.id });
+        mocSessionId = createdSession!.id;
+      }
+
+      let systemPrompt: string;
+      try {
+        systemPrompt = renderVoicePromptForSession(sdkSessionId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Voice prompt unavailable";
+        return c.json({ error: "VOICE_PROMPT_UNAVAILABLE", message }, 500);
+      }
 
       try {
         const response = await fetch(`${env.VOICE_SERVICE_URL}/start`, {
@@ -130,7 +211,7 @@ const app = new Hono()
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             system_prompt: systemPrompt,
-            moc_session_id: c.req.valid("json").sessionId ?? null,
+            moc_session_id: mocSessionId,
           }),
         });
 
@@ -143,7 +224,12 @@ const app = new Hono()
         }
 
         const result = await response.json();
-        return c.json(result);
+        return c.json({
+          url: result.room_url,
+          token: result.token,
+          sessionId: mocSessionId,
+          voiceSessionId: result.session_id,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         return c.json(
@@ -157,13 +243,13 @@ const app = new Hono()
   // ── POST /voice/stop — Stop voice chat session ───────────────
   .post(
     "/voice/stop",
-    zValidator("json", z.object({ sessionId: z.string() })),
+    zValidator("json", VoiceStopSchema),
     async (c) => {
       try {
         const response = await fetch(`${env.VOICE_SERVICE_URL}/stop`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: c.req.valid("json").sessionId }),
+          body: JSON.stringify({ session_id: c.req.valid("json").voiceSessionId }),
         });
 
         if (!response.ok) {
@@ -175,7 +261,10 @@ const app = new Hono()
         }
 
         const result = await response.json();
-        return c.json(result);
+        return c.json({
+          status: result.status ?? "stopping",
+          voiceSessionId: result.session_id ?? c.req.valid("json").voiceSessionId,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         return c.json(
@@ -183,6 +272,141 @@ const app = new Hono()
           503,
         );
       }
+    },
+  )
+
+  // ── POST /voice/check-turn — Live crisis gate for voice turns ─
+  .post(
+    "/voice/check-turn",
+    zValidator("json", VoiceCheckTurnSchema),
+    async (c) => {
+      const { sessionId, text } = c.req.valid("json");
+      const user = await getOrCreateUser();
+
+      const [session] = await db
+        .select({
+          id: sessions.id,
+          status: sessions.status,
+        })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+        .limit(1);
+
+      if (!session) {
+        return c.json({ error: "SESSION_NOT_FOUND", message: "Session not found" }, 404);
+      }
+
+      if (session.status === "completed") {
+        return c.json(
+          { allow: false, crisis: false, error: "SESSION_ENDED" },
+          409,
+        );
+      }
+
+      if (session.status === "crisis_escalated") {
+        return c.json({
+          allow: false,
+          crisis: true,
+          response: getCrisisResponse("elevated", text),
+        });
+      }
+
+      const crisisResult = await detectCrisis(text);
+      if (crisisResult.isCrisis) {
+        await db
+          .update(sessions)
+          .set({
+            status: "crisis_escalated",
+            lastActivityAt: new Date(),
+          })
+          .where(eq(sessions.id, sessionId));
+
+        sessionEmitter.emit(sessionId, {
+          event: "session.crisis",
+          data: {
+            message: crisisResult.response!.message,
+            helplines: crisisResult.response!.helplines,
+          },
+        });
+
+        return c.json({
+          allow: false,
+          crisis: true,
+          response: crisisResult.response,
+        });
+      }
+
+      await db
+        .update(sessions)
+        .set({ lastActivityAt: new Date() })
+        .where(eq(sessions.id, sessionId));
+
+      return c.json({ allow: true, crisis: false });
+    },
+  )
+
+  // ── POST /voice/transcript — Persist voice transcript ─────────
+  .post(
+    "/voice/transcript",
+    zValidator("json", VoiceTranscriptSchema),
+    async (c) => {
+      const { sessionId, turns } = c.req.valid("json");
+      const user = await getOrCreateUser();
+
+      const [session] = await db
+        .select({
+          id: sessions.id,
+          sdkSessionId: sessions.sdkSessionId,
+        })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, user.id)))
+        .limit(1);
+
+      if (!session) {
+        return c.json({ error: "SESSION_NOT_FOUND", message: "Session not found" }, 404);
+      }
+
+      if (turns.length === 0) {
+        return c.json({ status: "ok", count: 0 });
+      }
+
+      const sortedTurns = [...turns].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+
+      await db.insert(messages).values(
+        sortedTurns.map((turn) => ({
+          sessionId,
+          role: turn.role as "user" | "assistant",
+          content: turn.content,
+          createdAt: new Date(turn.createdAt),
+        })),
+      );
+
+      if (session.sdkSessionId) {
+        appendMessagesToSession(
+          session.sdkSessionId,
+          sortedTurns.map((turn) => ({
+            role: turn.role,
+            content: turn.content,
+          })),
+        );
+      }
+
+      const lastCreatedAt = sortedTurns.at(-1)?.createdAt;
+      await db
+        .update(sessions)
+        .set({
+          lastActivityAt: lastCreatedAt ? new Date(lastCreatedAt) : new Date(),
+        })
+        .where(eq(sessions.id, sessionId));
+
+      sessionEmitter.emit(sessionId, {
+        event: "voice.transcript_persisted",
+        data: { count: sortedTurns.length },
+      });
+
+      return c.json({ status: "ok", count: sortedTurns.length });
     },
   );
 

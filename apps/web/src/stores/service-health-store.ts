@@ -10,19 +10,21 @@ interface ServiceHealthState {
   tts: ServiceStatus;
   emotion: ServiceStatus;
   memory: ServiceStatus;
+  voice: ServiceStatus;
   lastCheckedAt: string | null;
   isChecking: boolean;
 
   checkHealth: () => Promise<void>;
 }
 
-const DEFAULT_AVAILABLE: ServiceStatus = { available: true };
+const DEFAULT_UNAVAILABLE: ServiceStatus = { available: false };
 
 export const useServiceHealthStore = create<ServiceHealthState>((set, get) => ({
-  whisper: DEFAULT_AVAILABLE,
-  tts: DEFAULT_AVAILABLE,
-  emotion: DEFAULT_AVAILABLE,
-  memory: DEFAULT_AVAILABLE,
+  whisper: DEFAULT_UNAVAILABLE,
+  tts: DEFAULT_UNAVAILABLE,
+  emotion: DEFAULT_UNAVAILABLE,
+  memory: DEFAULT_UNAVAILABLE,
+  voice: DEFAULT_UNAVAILABLE,
   lastCheckedAt: null,
   isChecking: false,
 
@@ -37,13 +39,20 @@ export const useServiceHealthStore = create<ServiceHealthState>((set, get) => ({
         tts: result.tts,
         emotion: result.emotion,
         memory: result.memory,
+        voice: result.voice,
         lastCheckedAt: new Date().toISOString(),
         isChecking: false,
       });
     } catch {
-      // If health endpoint itself is unreachable, default to available
-      // so we don't block the user unnecessarily
-      set({ isChecking: false });
+      // Health endpoint unreachable — mark all services as unavailable
+      set({
+        whisper: DEFAULT_UNAVAILABLE,
+        tts: DEFAULT_UNAVAILABLE,
+        emotion: DEFAULT_UNAVAILABLE,
+        memory: DEFAULT_UNAVAILABLE,
+        voice: DEFAULT_UNAVAILABLE,
+        isChecking: false,
+      });
     }
   },
 }));

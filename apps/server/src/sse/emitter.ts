@@ -21,6 +21,7 @@ export type SSEEventData =
     }
   | { event: "session.ending"; data: Record<string, never> }
   | { event: "session.ended"; data: Record<string, never> }
+  | { event: "voice.transcript_persisted"; data: { count: number } }
   | { event: "assessment.start"; data: { assessmentType: string } }
   | {
       event: "assessment.complete";
