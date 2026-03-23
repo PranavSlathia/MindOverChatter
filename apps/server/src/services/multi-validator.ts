@@ -35,8 +35,8 @@ export interface MultiValidationInput {
 
 // ── Constants ─────────────────────────────────────────────────────
 
-const GEMINI_TIMEOUT_MS = 10_000;
-const CODEX_TIMEOUT_MS = 10_000;
+const GEMINI_TIMEOUT_MS = 20_000;
+const CODEX_TIMEOUT_MS = 20_000;
 
 // ── Prompt Builders ───────────────────────────────────────────────
 
