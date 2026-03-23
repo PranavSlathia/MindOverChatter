@@ -9,7 +9,7 @@
 // BOLT scores: console.log for technique observability.
 
 import type { SessionMode } from "@moc/shared";
-import { spawnCliForJson } from "./cli-spawner.js";
+import { spawnWithGeminiFallback } from "./cli-spawner.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -223,8 +223,7 @@ Be calibrated on BOLT. Score what you actually observe in the response text.`;
 // ── Haiku Spawner (delegates to shared CLI spawner) ───────────────
 
 function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | null> {
-  return spawnCliForJson({
-    cli: "claude",
+  return spawnWithGeminiFallback({
     prompt,
     timeoutMs,
     label: "response-validator",

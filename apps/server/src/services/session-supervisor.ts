@@ -7,7 +7,7 @@
 // The supervisor is an enhancement, never a hard dependency.
 
 import type { SessionMode } from "@moc/shared";
-import { spawnCliForJson } from "./cli-spawner.js";
+import { spawnWithGeminiFallback } from "./cli-spawner.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -128,8 +128,7 @@ confidence: 0.9+ = very clear signal, 0.6-0.9 = moderate confidence, below 0.6 =
 // ── Haiku Spawner (delegates to shared CLI spawner) ───────────────
 
 function spawnHaikuJson(prompt: string, timeoutMs: number): Promise<string | null> {
-  return spawnCliForJson({
-    cli: "claude",
+  return spawnWithGeminiFallback({
     prompt,
     timeoutMs,
     label: "session-supervisor",

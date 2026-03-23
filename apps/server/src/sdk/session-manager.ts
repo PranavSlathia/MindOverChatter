@@ -259,8 +259,10 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
 
     // Strip CLAUDECODE from env to avoid "nested session" guard when
     // the server is launched from within a Claude Code terminal.
+    // Disable global plugins (claude-mem SessionEnd hook adds latency).
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDECODE;
+    cleanEnv.CLAUDE_PLUGIN_ROOT = "/dev/null";
 
     console.log(`[claude-spawn] Spawning claude (model=${getClaudeModel()}, prompt=${prompt.length} chars)`);
 

@@ -12,7 +12,7 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().optional(),
   GEMINI_ENABLED: z.coerce.boolean().default(false),
   CODEX_ENABLED: z.coerce.boolean().default(false),
-  GEMINI_MODEL: z.string().default("flash"),
+  GEMINI_MODEL: z.string().default("gemini-2.5-flash-lite"),
   CODEX_MODEL: z.string().default("o3-mini"),
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

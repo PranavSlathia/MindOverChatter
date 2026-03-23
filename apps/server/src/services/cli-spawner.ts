@@ -113,9 +113,12 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
       resolve(val);
     };
 
-    // Strip CLAUDECODE to avoid nested-session guard
+    // Strip CLAUDECODE to avoid nested-session guard.
+    // Set CLAUDE_PLUGIN_ROOT to /dev/null to prevent global plugins
+    // (like claude-mem) from loading and firing hooks on sub-spawns.
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDECODE;
+    cleanEnv.CLAUDE_PLUGIN_ROOT = "/dev/null";
 
     // Build CLI-specific args
     let binary: string;
@@ -179,4 +182,57 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
       settle(null);
     });
   });
+}
+
+/**
+ * Try Gemini first, fall back to Claude Haiku if Gemini fails.
+ *
+ * Use this for supervisor and validator tasks where we want the fastest
+ * available model but need reliability. Gemini is preferred (free tier)
+ * but may hit rate limits (429) or capacity issues. Claude Haiku is the
+ * reliable fallback.
+ *
+ * @returns The raw output string, or null if both fail.
+ */
+export async function spawnWithGeminiFallback(options: {
+  prompt: string;
+  timeoutMs: number;
+  label: string;
+}): Promise<string | null> {
+  const { prompt, timeoutMs, label } = options;
+
+  // Try Gemini first (if enabled)
+  if (env.GEMINI_ENABLED) {
+    const geminiResult = await spawnCliForJson({
+      cli: "gemini",
+      model: env.GEMINI_MODEL,
+      prompt,
+      timeoutMs,
+      label: `${label}/gemini`,
+    });
+
+    if (geminiResult) {
+      console.log(`[${label}] Gemini succeeded`);
+      return geminiResult;
+    }
+
+    console.log(`[${label}] Gemini failed — falling back to Claude Haiku`);
+  }
+
+  // Fallback: Claude Haiku
+  const haikuResult = await spawnCliForJson({
+    cli: "claude",
+    model: env.CLAUDE_HAIKU_MODEL,
+    prompt,
+    timeoutMs,
+    label: `${label}/haiku`,
+  });
+
+  if (haikuResult) {
+    console.log(`[${label}] Haiku succeeded`);
+  } else {
+    console.warn(`[${label}] Both Gemini and Haiku failed`);
+  }
+
+  return haikuResult;
 }
