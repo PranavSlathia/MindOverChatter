@@ -163,30 +163,24 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
 
       clientRef.current = client;
 
+      // Start bot — get room credentials from backend
       const startResult = (await client.startBot({
         endpoint: `${API_BASE}/api/voice/start`,
         requestData: { sessionId },
-      })) as VoiceStartResponse;
+      })) as unknown as VoiceStartResponse;
 
-      if (startResult.sessionId !== sessionId) {
-        console.warn(
-          "[voice] Backend returned a different sessionId than requested:",
-          startResult.sessionId,
-          sessionId,
-        );
+      if (startResult?.sessionId !== sessionId) {
+        console.warn("[voice] Backend returned different sessionId:", startResult?.sessionId, sessionId);
       }
-
-      voiceSessionIdRef.current = startResult.voiceSessionId;
+      voiceSessionIdRef.current = startResult?.voiceSessionId ?? null;
 
       if (token !== lifecycleTokenRef.current) {
         await stopVoice({ keepalive: true });
         return;
       }
 
-      await client.connect({
-        url: startResult.url,
-        token: startResult.token,
-      });
+      // Connect to Daily room — this subscribes to audio tracks
+      await client.connect();
 
       if (token !== lifecycleTokenRef.current) {
         await stopVoice({ keepalive: true });
