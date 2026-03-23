@@ -99,7 +99,7 @@ class SessionMetrics:
         # (monotonically increasing, shared by both observers)
         self._next_turn_index: int = 0
 
-    async def setup(self) -> None:
+    async def setup(self, *args, **kwargs) -> None:
         """No-op — required by Pipecat PipelineTask for objects in the pipeline graph."""
         pass
 
