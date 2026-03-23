@@ -13,6 +13,7 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/history": { title: "Session History", subtitle: "Review past conversations" },
   "/mood": { title: "Mood Tracker", subtitle: "Track how you feel over time" },
   "/profile": { title: "Profile", subtitle: "Manage your preferences" },
+  "/observability": { title: "Observability", subtitle: "Pipeline health and turn-level metrics" },
 };
 
 function getPageInfo(pathname: string): { title: string; subtitle: string } {

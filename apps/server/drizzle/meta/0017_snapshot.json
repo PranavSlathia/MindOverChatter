@@ -1,7 +1,223 @@
 {
+  "id": "643b01e5-ea9c-40e2-829f-5b2351a98223",
+  "prevId": "ee98d27d-248d-4311-b3fa-6399810dc5ef",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.assessments": {
+      "name": "assessments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "assessment_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answers": {
+          "name": "answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_score": {
+          "name": "total_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "severity": {
+          "name": "severity",
+          "type": "assessment_severity",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_assessment_id": {
+          "name": "parent_assessment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "assessments_session_id_sessions_id_fk": {
+          "name": "assessments_session_id_sessions_id_fk",
+          "tableFrom": "assessments",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "assessments_user_id_user_profiles_id_fk": {
+          "name": "assessments_user_id_user_profiles_id_fk",
+          "tableFrom": "assessments",
+          "tableTo": "user_profiles",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessments_parent_assessment_id_assessments_id_fk": {
+          "name": "assessments_parent_assessment_id_assessments_id_fk",
+          "tableFrom": "assessments",
+          "tableTo": "assessments",
+          "columnsFrom": [
+            "parent_assessment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.emotion_readings": {
+      "name": "emotion_readings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "emotion_channel",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emotion_label": {
+          "name": "emotion_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signal_weight": {
+          "name": "signal_weight",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_scores": {
+          "name": "raw_scores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prosody_data": {
+          "name": "prosody_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "emotion_readings_message_id_messages_id_fk": {
+          "name": "emotion_readings_message_id_messages_id_fk",
+          "tableFrom": "emotion_readings",
+          "tableTo": "messages",
+          "columnsFrom": [
+            "message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "emotion_readings_session_id_sessions_id_fk": {
+          "name": "emotion_readings_session_id_sessions_id_fk",
+          "tableFrom": "emotion_readings",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.user_profiles": {
       "name": "user_profiles",
       "schema": "",
@@ -231,109 +447,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.emotion_readings": {
-      "name": "emotion_readings",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "channel": {
-          "name": "channel",
-          "type": "emotion_channel",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "emotion_label": {
-          "name": "emotion_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "confidence": {
-          "name": "confidence",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "signal_weight": {
-          "name": "signal_weight",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "raw_scores": {
-          "name": "raw_scores",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "prosody_data": {
-          "name": "prosody_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "emotion_readings_message_id_messages_id_fk": {
-          "name": "emotion_readings_message_id_messages_id_fk",
-          "tableFrom": "emotion_readings",
-          "tableTo": "messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "emotion_readings_session_id_sessions_id_fk": {
-          "name": "emotion_readings_session_id_sessions_id_fk",
-          "tableFrom": "emotion_readings",
-          "tableTo": "sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.mood_logs": {
       "name": "mood_logs",
       "schema": "",
@@ -410,117 +523,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.assessments": {
-      "name": "assessments",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "assessment_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "answers": {
-          "name": "answers",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_score": {
-          "name": "total_score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "severity": {
-          "name": "severity",
-          "type": "assessment_severity",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent_assessment_id": {
-          "name": "parent_assessment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "assessments_session_id_sessions_id_fk": {
-          "name": "assessments_session_id_sessions_id_fk",
-          "tableFrom": "assessments",
-          "tableTo": "sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "assessments_user_id_user_profiles_id_fk": {
-          "name": "assessments_user_id_user_profiles_id_fk",
-          "tableFrom": "assessments",
-          "tableTo": "user_profiles",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "assessments_parent_assessment_id_assessments_id_fk": {
-          "name": "assessments_parent_assessment_id_assessments_id_fk",
-          "tableFrom": "assessments",
-          "tableTo": "assessments",
-          "columnsFrom": [
-            "parent_assessment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1057,6 +1059,307 @@
             "id"
           ],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.turn_events": {
+      "name": "turn_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_message_id": {
+          "name": "user_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assistant_message_id": {
+          "name": "assistant_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "turn_number": {
+          "name": "turn_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "crisis_detected": {
+          "name": "crisis_detected",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "crisis_severity": {
+          "name": "crisis_severity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "crisis_stages": {
+          "name": "crisis_stages",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "crisis_matched_phrases": {
+          "name": "crisis_matched_phrases",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode_before": {
+          "name": "mode_before",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode_after": {
+          "name": "mode_after",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode_shift_source": {
+          "name": "mode_shift_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_ran": {
+          "name": "supervisor_ran",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "supervisor_confidence": {
+          "name": "supervisor_confidence",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_depth": {
+          "name": "supervisor_depth",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_skills": {
+          "name": "supervisor_skills",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_focus": {
+          "name": "supervisor_focus",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_latency_ms": {
+          "name": "supervisor_latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "depth_alert_fired": {
+          "name": "depth_alert_fired",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "validator_ran": {
+          "name": "validator_ran",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "validator_score": {
+          "name": "validator_score",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "validator_safe": {
+          "name": "validator_safe",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "validator_issues": {
+          "name": "validator_issues",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "validator_latency_ms": {
+          "name": "validator_latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active_skills": {
+          "name": "active_skills",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "memories_injected_count": {
+          "name": "memories_injected_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "memory_notes_injected": {
+          "name": "memory_notes_injected",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assessment_markers": {
+          "name": "assessment_markers",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text_emotion_label": {
+          "name": "text_emotion_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text_emotion_confidence": {
+          "name": "text_emotion_confidence",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_pipeline_ms": {
+          "name": "total_pipeline_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claude_response_ms": {
+          "name": "claude_response_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "turn_events_session_turn_idx": {
+          "name": "turn_events_session_turn_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "turn_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "turn_events_created_at_idx": {
+          "name": "turn_events_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "turn_events_depth_alert_idx": {
+          "name": "turn_events_depth_alert_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "depth_alert_fired = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "turn_events_validator_unsafe_idx": {
+          "name": "turn_events_validator_unsafe_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "validator_safe = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "turn_events_session_id_sessions_id_fk": {
+          "name": "turn_events_session_id_sessions_id_fk",
+          "tableFrom": "turn_events",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1797,42 +2100,167 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.research_developmental_coverage": {
+      "name": "research_developmental_coverage",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "experiment_run_id": {
+          "name": "experiment_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "developmental_dimension",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "score": {
+          "name": "score",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "experiment_version": {
+          "name": "experiment_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evaluated_at": {
+          "name": "evaluated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "research_dev_coverage_user_run_idx": {
+          "name": "research_dev_coverage_user_run_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "experiment_run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "research_dev_coverage_session_idx": {
+          "name": "research_dev_coverage_session_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "research_dev_coverage_dimension_idx": {
+          "name": "research_dev_coverage_dimension_idx",
+          "columns": [
+            {
+              "expression": "dimension",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "research_developmental_coverage_user_id_user_profiles_id_fk": {
+          "name": "research_developmental_coverage_user_id_user_profiles_id_fk",
+          "tableFrom": "research_developmental_coverage",
+          "tableTo": "user_profiles",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "research_developmental_coverage_session_id_sessions_id_fk": {
+          "name": "research_developmental_coverage_session_id_sessions_id_fk",
+          "tableFrom": "research_developmental_coverage",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
-    "public.session_status": {
-      "name": "session_status",
+    "public.assessment_severity": {
+      "name": "assessment_severity",
       "schema": "public",
       "values": [
-        "active",
-        "completed",
-        "crisis_escalated"
-      ]
-    },
-    "public.message_role": {
-      "name": "message_role",
-      "schema": "public",
-      "values": [
-        "user",
-        "assistant"
-      ]
-    },
-    "public.emotion_channel": {
-      "name": "emotion_channel",
-      "schema": "public",
-      "values": [
-        "text",
-        "voice",
-        "face"
-      ]
-    },
-    "public.mood_source": {
-      "name": "mood_source",
-      "schema": "public",
-      "values": [
-        "user_input",
-        "ai_inferred",
-        "assessment"
+        "minimal",
+        "mild",
+        "moderate",
+        "moderately_severe",
+        "severe"
       ]
     },
     "public.assessment_type": {
@@ -1866,15 +2294,39 @@
         "cbt_thought_record"
       ]
     },
-    "public.assessment_severity": {
-      "name": "assessment_severity",
+    "public.emotion_channel": {
+      "name": "emotion_channel",
       "schema": "public",
       "values": [
-        "minimal",
-        "mild",
-        "moderate",
-        "moderately_severe",
-        "severe"
+        "text",
+        "voice",
+        "face"
+      ]
+    },
+    "public.session_status": {
+      "name": "session_status",
+      "schema": "public",
+      "values": [
+        "active",
+        "completed",
+        "crisis_escalated"
+      ]
+    },
+    "public.message_role": {
+      "name": "message_role",
+      "schema": "public",
+      "values": [
+        "user",
+        "assistant"
+      ]
+    },
+    "public.mood_source": {
+      "name": "mood_source",
+      "schema": "public",
+      "values": [
+        "user_input",
+        "ai_inferred",
+        "assessment"
       ]
     },
     "public.memory_type": {
@@ -1891,7 +2343,8 @@
         "unresolved_thread",
         "safety_critical",
         "win",
-        "session_summary"
+        "session_summary",
+        "formative_experience"
       ]
     },
     "public.summary_level": {
@@ -1904,6 +2357,17 @@
         "monthly",
         "profile"
       ]
+    },
+    "public.developmental_dimension": {
+      "name": "developmental_dimension",
+      "schema": "public",
+      "values": [
+        "attachment_quality",
+        "family_climate",
+        "schema_formation",
+        "formative_events",
+        "origin_to_present"
+      ]
     }
   },
   "schemas": {},
@@ -1912,10 +2376,8 @@
   "policies": {},
   "views": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
-  },
-  "id": "0a679d4f-6e29-48c2-947d-58d0ae046f2b",
-  "prevId": "a99c84a0-080a-4cce-9af1-5706b5985234"
+    "tables": {}
+  }
 }

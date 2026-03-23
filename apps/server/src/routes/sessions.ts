@@ -52,6 +52,8 @@ import {
   ensureSdkSessionForStoredSession,
   initializeSdkSessionForUser,
 } from "../session/bootstrap.js";
+import { createTurnEventCollector } from "../services/turn-event-collector.js";
+import type { TurnEventBuilder } from "../services/turn-event-collector.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
@@ -222,8 +224,13 @@ const app = new Hono()
       );
     }
 
+    // ── Observability Collector ────────────────────────────────────
+    const collector = createTurnEventCollector(sessionId);
+    const pipelineStart = Date.now();
+
     // ── Crisis Detection (NON-NEGOTIABLE: runs BEFORE any Claude call) ──
     const crisisResult = await detectCrisis(text);
+    collector.setCrisisResult(crisisResult);
 
     if (crisisResult.isCrisis) {
       // Persist user message
@@ -256,6 +263,11 @@ const app = new Hono()
           helplines: crisisResult.response!.helplines,
         },
       });
+
+      // Persist turn event for crisis path
+      collector.setMessageIds(userMsg!.id, assistantMsg!.id);
+      collector.setTotalPipeline(Date.now() - pipelineStart);
+      collector.persist();
 
       return c.json({
         userMessageId: userMsg!.id,
@@ -301,6 +313,11 @@ const app = new Hono()
       injectSessionContext(sdkSessionId, formatModeShiftBlock(targetMode));
       setSessionMode(sdkSessionId, targetMode);
     }
+    collector.setModeShift(
+      currentMode,
+      targetMode ?? currentMode,
+      targetMode !== null ? "regex" : "none",
+    );
 
     // Notify SSE subscribers that the AI is processing (immediate — before supervisor)
     sessionEmitter.emit(sessionId, {
@@ -313,8 +330,11 @@ const app = new Hono()
     // stored memories. If a memory has significant keyword overlap, inject
     // it as a context note so the companion can reference or surface
     // contradictions naturally. No LLM call — just keyword matching.
+    let liveNotesCount = 0;
+    let memoriesCount = 0;
     try {
       const sessionMemories = getSessionMemories(sdkSessionId);
+      memoriesCount = sessionMemories.length;
       if (sessionMemories.length > 0) {
         const userWords = new Set(
           text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter((w) => w.length > 3),
@@ -330,15 +350,19 @@ const app = new Hono()
           }
         }
         if (relevantNotes.length > 0) {
+          const injectedNotes = relevantNotes.slice(0, 3);
+          liveNotesCount = injectedNotes.length;
           injectSessionContext(
             sdkSessionId,
-            `=== Live Memory Notes ===\n${relevantNotes.slice(0, 3).join("\n")}\n=== End Live Memory Notes ===`,
+            `=== Live Memory Notes ===\n${injectedNotes.join("\n")}\n=== End Live Memory Notes ===`,
           );
         }
       }
     } catch (err) {
       console.warn("[memory-notes] keyword matching failed:", err);
     }
+    collector.setMemoryContext(memoriesCount, liveNotesCount);
+    collector.setMessageIds(userMsg!.id);
 
     // ── Background pipeline: Supervisor → inject → Claude response ─
     // The supervisor MUST complete before streamAiResponse() so that
@@ -360,6 +384,7 @@ const app = new Hono()
         });
         const hasOriginStory = (originBlock?.content ?? "").trim().length > 0;
 
+        const supervisorStart = Date.now();
         const supervisorOutput = await runSessionSupervisor({
           lastFiveTurns: sdkMessages.slice(-10),
           currentMode: getSessionMode(sdkSessionId),
@@ -368,6 +393,9 @@ const app = new Hono()
           sessionTurnCount: Math.floor(sdkMessages.length / 2),
           hasOriginStory,
         });
+        const supervisorLatency = Date.now() - supervisorStart;
+        collector.setSupervisorResult(supervisorOutput, supervisorLatency);
+        collector.setTurnNumber(Math.floor(sdkMessages.length / 2));
 
         if (supervisorOutput && supervisorOutput.confidence >= 0.6) {
           // Override mode only if regex didn't already set one this turn
@@ -375,6 +403,8 @@ const app = new Hono()
             console.log(`[session-supervisor] mode → ${supervisorOutput.recommendedMode}`);
             injectSessionContext(sdkSessionId, formatModeShiftBlock(supervisorOutput.recommendedMode));
             setSessionMode(sdkSessionId, supervisorOutput.recommendedMode);
+            // Update collector with supervisor-driven mode shift
+            collector.setModeShift(currentMode, supervisorOutput.recommendedMode, "supervisor");
           }
           // Dynamic skill injection — supervisor has analysed the turn and picked skills
           for (const skillName of supervisorOutput.activateSkills) {
@@ -393,13 +423,23 @@ const app = new Hono()
       }
 
       // ── Claude response (supervisor context is now injected) ────
-      streamAiResponse(sessionId, sdkSessionId, text, userMsg!.id, session.userId).catch((err) => {
+      try {
+        const { validatorPromise } = await streamAiResponse(
+          sessionId, sdkSessionId, text, userMsg!.id, session.userId, collector,
+        );
+        // Wait for the validator to finish so its result is captured in the turn event.
+        // This does NOT block the user — the HTTP response was returned long ago.
+        await validatorPromise;
+      } catch (err) {
         console.error(`AI streaming error for session ${sessionId}:`, err);
         sessionEmitter.emit(sessionId, {
           event: "ai.error",
           data: { error: "Failed to get AI response" },
         });
-      });
+      } finally {
+        collector.setTotalPipeline(Date.now() - pipelineStart);
+        collector.persist();
+      }
     })();
 
     return c.json({ userMessageId: userMsg!.id, crisis: false });
@@ -701,13 +741,16 @@ async function streamAiResponse(
   userMessage: string,
   userMessageId: string,
   userId: string,
-): Promise<void> {
+  collector?: TurnEventBuilder,
+): Promise<{ validatorPromise: Promise<void> }> {
+  const claudeStart = Date.now();
   const fullText = await sdkSendMessage(sdkSessionId, userMessage, (chunk) => {
     sessionEmitter.emit(sessionId, {
       event: "ai.chunk",
       data: { content: chunk },
     });
   });
+  collector?.setClaudeLatency(Date.now() - claudeStart);
 
   // Guard against empty AI response
   if (!fullText.trim()) {
@@ -715,7 +758,7 @@ async function streamAiResponse(
       event: "ai.error",
       data: { error: "AI returned an empty response. Please try again." },
     });
-    return;
+    return { validatorPromise: Promise.resolve() };
   }
 
   // Strip [ASSESSMENT_READY:type] markers before persistence/SSE
@@ -732,11 +775,16 @@ async function streamAiResponse(
     return "";
   }).trim();
 
+  if (cbtReady) assessmentMarkers.push("cbt_thought_record");
+  collector?.setAssessmentMarkers(assessmentMarkers);
+
   // Persist the cleaned AI response (no markers)
   const [assistantMsg] = await db
     .insert(messages)
     .values({ sessionId, role: "assistant", content: cleanText })
     .returning();
+
+  collector?.setMessageIds(userMessageId, assistantMsg!.id);
 
   // Signal completion
   sessionEmitter.emit(sessionId, {
@@ -746,6 +794,7 @@ async function streamAiResponse(
 
   // Emit assessment.start for each detected marker (guarded against re-trigger)
   for (const assessmentType of assessmentMarkers) {
+    if (assessmentType === "cbt_thought_record") continue; // handled below
     const emittedForSession = emittedAssessments.get(sessionId) ?? new Set<string>();
     if (!emittedForSession.has(assessmentType)) {
       emittedForSession.add(assessmentType);
@@ -779,7 +828,10 @@ async function streamAiResponse(
   // Fire-and-forget: response validator (therapeutic safety audit)
   // Catches issues that input-only crisis detection misses.
   // Never blocks or delays the client response.
-  runResponseValidator({
+  // The returned validatorPromise lets the caller (IIFE) wait for the result
+  // before persisting the turn event, without blocking the user.
+  const validatorStart = Date.now();
+  const validatorPromise = runResponseValidator({
     response: cleanText,
     lastThreeTurns: [
       { role: "user", content: userMessage },
@@ -787,12 +839,15 @@ async function streamAiResponse(
     ],
     sessionMode: getSessionMode(sdkSessionId) ?? "follow_support",
     sessionId,
+  }).then((result) => {
+    collector?.setValidatorResult(result, Date.now() - validatorStart);
   }).catch((err) => {
     console.error("[response-validator] unhandled error:", err);
   });
 
   // Fire-and-forget: text emotion classification (text signal weight = 0.8 per architecture)
   const textEmotionResult = classifyTextEmotion(userMessage);
+  collector?.setTextEmotion(textEmotionResult);
   if (textEmotionResult) {
     db.insert(emotionReadings).values({
       sessionId,
@@ -813,6 +868,8 @@ async function streamAiResponse(
   checkAssessmentEligibility(sessionId, userId).catch((err) => {
     console.error("Assessment eligibility check failed:", err);
   });
+
+  return { validatorPromise };
 }
 
 // ── Assessment Signal Detection ──────────────────────────────────

@@ -72,6 +72,21 @@ export interface ServiceHealthResponse {
 
 export type ServiceHealth = ServiceHealthResponse;
 
+// ── CLI Status Types ─────────────────────────────────────────────
+
+export interface CliToolStatus {
+  installed: boolean;
+  loggedIn: boolean;
+  email?: string;
+  model?: string;
+}
+
+export interface CliStatusResponse {
+  claude: CliToolStatus;
+  gemini: CliToolStatus;
+  codex: CliToolStatus;
+}
+
 // ── Inferred Request Types ─────────────────────────────────────────
 // Derived from the hc client so parameter types stay in sync with the
 // server's Zod validators. No manual duplication.
@@ -121,6 +136,24 @@ type GetAssessmentHistorySuccess = InferResponseType<
   (typeof client.api.assessments.history)[":type"]["$get"],
   200
 >;
+
+// ── Observability Types ────────────────────────────────────────────
+type GetObservabilityStatsSuccess = InferResponseType<
+  typeof client.api.observability.stats.$get,
+  200
+>;
+type GetObservabilityTurnsSuccess = InferResponseType<
+  typeof client.api.observability.turns.$get,
+  200
+>;
+type GetObservabilityAlertsSuccess = InferResponseType<
+  typeof client.api.observability.alerts.$get,
+  200
+>;
+
+export type ObservabilityStats = GetObservabilityStatsSuccess;
+export type ObservabilityTurn = GetObservabilityTurnsSuccess["turns"][number];
+export type ObservabilityAlert = GetObservabilityAlertsSuccess["alerts"][number];
 
 export interface VoiceStartResponse {
   url: string;
@@ -313,6 +346,12 @@ export const api = {
     return (await res.json()) as ServiceHealthResponse;
   },
 
+  /** Fetch CLI tool auth status (Claude, Gemini, Codex). Uses plain fetch — not typed by Hono RPC. */
+  getCliStatus: async (): Promise<CliStatusResponse> => {
+    const response = await fetch(`${API_BASE}/api/settings/cli-status`);
+    return handleResponse<CliStatusResponse>(response);
+  },
+
   stopVoice: async (
     voiceSessionId: string,
     options?: { keepalive?: boolean },
@@ -344,5 +383,53 @@ export const api = {
     const res = await client.api.journey["therapy-plan"].$get();
     await throwIfError(res);
     return (await res.json()) as GetTherapyPlanGoalsSuccess;
+  },
+
+  // ── Observability ──────────────────────────────────────────────────
+
+  getObservabilityStats: async (params?: {
+    sessionId?: string;
+    from?: string;
+    to?: string;
+  }): Promise<GetObservabilityStatsSuccess> => {
+    const query: Record<string, string> = {};
+    if (params?.sessionId) query.sessionId = params.sessionId;
+    if (params?.from) query.from = params.from;
+    if (params?.to) query.to = params.to;
+    const res = await client.api.observability.stats.$get({ query });
+    await throwIfError(res);
+    return (await res.json()) as GetObservabilityStatsSuccess;
+  },
+
+  getObservabilityTurns: async (params?: {
+    sessionId?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<GetObservabilityTurnsSuccess> => {
+    const query: Record<string, string> = {};
+    if (params?.sessionId) query.sessionId = params.sessionId;
+    if (params?.from) query.from = params.from;
+    if (params?.to) query.to = params.to;
+    if (params?.limit != null) query.limit = String(params.limit);
+    if (params?.offset != null) query.offset = String(params.offset);
+    const res = await client.api.observability.turns.$get({ query });
+    await throwIfError(res);
+    return (await res.json()) as GetObservabilityTurnsSuccess;
+  },
+
+  getObservabilityAlerts: async (params?: {
+    type?: "depth" | "unsafe" | "all";
+    limit?: number;
+    offset?: number;
+  }): Promise<GetObservabilityAlertsSuccess> => {
+    const query: Record<string, string> = {};
+    if (params?.type) query.type = params.type;
+    if (params?.limit != null) query.limit = String(params.limit);
+    if (params?.offset != null) query.offset = String(params.offset);
+    const res = await client.api.observability.alerts.$get({ query });
+    await throwIfError(res);
+    return (await res.json()) as GetObservabilityAlertsSuccess;
   },
 };

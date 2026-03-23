@@ -226,10 +226,10 @@ function parseValidatorOutput(raw: string, sessionId: string): ValidationResult 
 /**
  * Validate a completed AI response for therapeutic safety issues.
  *
- * Always fire-and-forget — the caller does NOT await this.
+ * Returns the ValidationResult on success, or null on failure/timeout.
  * High-severity issues trigger console.error for immediate dev awareness.
  */
-export async function runResponseValidator(input: ValidatorInput): Promise<void> {
+export async function runResponseValidator(input: ValidatorInput): Promise<ValidationResult | null> {
   const prompt = buildValidatorPrompt(input);
 
   const raw = await spawnHaikuJson(prompt, VALIDATOR_TIMEOUT_MS);
@@ -237,7 +237,7 @@ export async function runResponseValidator(input: ValidatorInput): Promise<void>
     console.warn(
       `[response-validator] no Haiku response for session ${input.sessionId} — skipping`,
     );
-    return;
+    return null;
   }
 
   const result = parseValidatorOutput(raw, input.sessionId);
@@ -246,14 +246,14 @@ export async function runResponseValidator(input: ValidatorInput): Promise<void>
       `[response-validator] failed to parse output for session ${input.sessionId}:`,
       raw.slice(0, 200),
     );
-    return;
+    return null;
   }
 
   if (result.issues.length === 0) {
     console.log(
       `[response-validator] session=${input.sessionId} score=${result.score.toFixed(2)} safe=true`,
     );
-    return;
+    return result;
   }
 
   const highSeverity = result.issues.filter((i) => i.severity === "high");
@@ -267,4 +267,6 @@ export async function runResponseValidator(input: ValidatorInput): Promise<void>
   console.log(
     `[response-validator] session=${input.sessionId} score=${result.score.toFixed(2)} safe=${result.safe} issues=${JSON.stringify(result.issues)}`,
   );
+
+  return result;
 }

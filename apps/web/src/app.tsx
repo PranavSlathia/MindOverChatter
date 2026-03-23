@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AppShell } from "./components/layout/app-shell.js";
 import { AssessmentFlowPage } from "./pages/assessment-flow.js";
 import { AssessmentsPage } from "./pages/assessments.js";
@@ -7,7 +7,8 @@ import { HistoryPage } from "./pages/history.js";
 import { HomePage } from "./pages/home.js";
 import { JourneyPage } from "./pages/journey.js";
 import { MoodPage } from "./pages/mood.js";
-import { ProfilePage } from "./pages/profile.js";
+import { ObservabilityPage } from "./pages/observability.js";
+import { SettingsPage } from "./pages/settings.js";
 
 export function App() {
   return (
@@ -22,7 +23,9 @@ export function App() {
           <Route path="/journey" element={<JourneyPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/mood" element={<MoodPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/observability" element={<ObservabilityPage />} />
+          <Route path="/profile" element={<Navigate to="/settings" replace />} />
         </Routes>
       </AppShell>
     </BrowserRouter>
