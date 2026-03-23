@@ -154,7 +154,7 @@ services:
       - CARTESIA_VOICE_ID=${CARTESIA_VOICE_ID:-95d51f79-c397-46f9-b49a-23763d3eaa2d}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-sonnet}
       - GROQ_LLM_MODEL=${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
-      - MOC_BACKEND_URL=http://server:3000
+      - MOC_BACKEND_URL=http://host.docker.internal:3000
       - EMOTION_SERVICE_URL=http://emotion:8002
       - VOICE_PORT=8005
     volumes:

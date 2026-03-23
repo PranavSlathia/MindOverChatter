@@ -103,6 +103,10 @@ class SessionMetrics:
         """No-op — required by Pipecat PipelineTask for objects in the pipeline graph."""
         pass
 
+    async def cleanup(self, *args, **kwargs) -> None:
+        """No-op — required by Pipecat PipelineTask for cleanup."""
+        pass
+
     # -- Public mutation methods (thread-safe) --
 
     def add_turn(self, turn: TurnMetrics) -> None:
