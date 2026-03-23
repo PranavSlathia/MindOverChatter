@@ -553,8 +553,6 @@ async def create_bot(
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            audio_out_sample_rate=24000,
-            audio_in_sample_rate=16000,
         ),
     )
 
