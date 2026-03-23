@@ -35,6 +35,9 @@ class Settings:
     # MindOverChatter backend (for session management)
     MOC_BACKEND_URL: str = os.getenv("MOC_BACKEND_URL", "http://localhost:3000")
 
+    # Emotion analysis service (librosa prosody)
+    EMOTION_SERVICE_URL: str = os.getenv("EMOTION_SERVICE_URL", "http://localhost:8002")
+
     # Service
     PORT: int = int(os.getenv("VOICE_PORT", "8005"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

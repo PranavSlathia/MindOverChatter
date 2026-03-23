@@ -54,10 +54,10 @@ Turborepo monorepo because we're organized like that.
 |-------|------|-----|
 | Frontend | React 19 + Vite 6 + Tailwind v4 + Zustand | fast, pretty, no drama |
 | Backend | Hono 4.x + Drizzle ORM + PostgreSQL 16 | type-safe from DB to UI via Hono RPC |
-| AI Brain | Claude Agent SDK + Claude Sonnet 4 | conversations that actually think |
+| AI Brain | Claude CLI (local) + Claude Sonnet 4 | conversations that actually think |
 | Memory | Mem0 + pgvector | cross-session memory with provenance tracking |
-| Voice | Faster Whisper | speech-to-text that doesn't butcher Hindi |
-| Emotion | Human.js (face) + SenseVoice (voice) | reading the room (literally) |
+| Voice | faster-whisper (base) | speech-to-text that doesn't butcher Hindi |
+| Emotion | Human.js (face) + librosa (voice) | reading the room (literally) |
 | TTS | Kokoro TTS service | responds with a calming voice |
 | Real-time | REST + SSE (Server-Sent Events) | instant streaming, no WebSocket drama |
 
