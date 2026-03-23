@@ -12,7 +12,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { eq, and, desc, asc, sql, or } from "drizzle-orm";
-import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema } from "@moc/shared";
+import { SendMessageSchema, EndSessionSchema, SessionHistoryQuerySchema, TherapyPlanSchema } from "@moc/shared";
 import { ERROR_CODES } from "@moc/shared";
 import { db } from "../db/index.js";
 import { env } from "../env.js";
@@ -34,6 +34,7 @@ import {
   getSessionMessages,
   getSessionMemories,
   getActiveSkillNames,
+  appendMessagesToSession,
 } from "../sdk/session-manager.js";
 import type { ConversationMessage } from "../sdk/session-manager.js";
 import { runSessionSupervisor } from "../services/session-supervisor.js";
@@ -55,11 +56,180 @@ import {
 } from "../session/bootstrap.js";
 import { createTurnEventCollector } from "../services/turn-event-collector.js";
 import type { TurnEventBuilder } from "../services/turn-event-collector.js";
+import { generateOpeningMessage } from "../services/opening-message.js";
+import type { OpeningMessageContext } from "../services/opening-message.js";
+import { getLatestTherapyPlan } from "../services/therapy-plan-service.js";
+import { getBlocksForUser } from "../services/memory-block-service.js";
 
 // ── Assessment Re-trigger Guard ──────────────────────────────────
 // Tracks which assessment types have been emitted per session to prevent
 // re-triggering when the eligibility check fires on subsequent messages.
 const emittedAssessments = new Map<string, Set<string>>();
+
+// ── Opening Message Helper ──────────────────────────────────────
+// Gathers therapeutic context and fires the AI opening message via SSE.
+// Runs as a background async task — the HTTP response is returned first.
+// The opening message is persisted to the messages table and added to
+// the SDK session history so subsequent turns have context.
+
+/**
+ * Waits briefly for the SSE subscriber to connect (up to ~2s, polling every 100ms).
+ * Returns true if a subscriber was found.
+ */
+async function waitForSseSubscriber(sessionId: string, maxWaitMs = 2000): Promise<boolean> {
+  const interval = 100;
+  let waited = 0;
+  while (waited < maxWaitMs) {
+    if (sessionEmitter.hasSubscribers(sessionId)) return true;
+    await new Promise((resolve) => setTimeout(resolve, interval));
+    waited += interval;
+  }
+  return sessionEmitter.hasSubscribers(sessionId);
+}
+
+async function fireOpeningMessage(
+  sessionId: string,
+  sdkSessionId: string,
+  userId: string,
+  displayName: string | null,
+): Promise<void> {
+  try {
+    // Wait for SSE subscriber before emitting events
+    const hasSubscriber = await waitForSseSubscriber(sessionId);
+    if (!hasSubscriber) {
+      console.warn(`[opening-message] No SSE subscriber for session ${sessionId} after waiting`);
+    }
+
+    // Emit thinking indicator
+    sessionEmitter.emit(sessionId, {
+      event: "ai.thinking",
+      data: { status: "thinking" },
+    });
+
+    // Gather context in parallel
+    const [therapyPlanRow, formulation, blocks, lastCompletedSession] = await Promise.all([
+      getLatestTherapyPlan(userId),
+      getLatestFormulation(userId),
+      getBlocksForUser(db, userId),
+      // Last completed session for gap + summary
+      db
+        .select({
+          endedAt: sessions.endedAt,
+          id: sessions.id,
+        })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.userId, userId),
+            eq(sessions.status, "completed"),
+          ),
+        )
+        .orderBy(desc(sessions.endedAt))
+        .limit(1),
+    ]);
+
+    // Get session count to determine if this is the first session ever
+    const [sessionCountRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sessions)
+      .where(eq(sessions.userId, userId));
+    // count includes the current session, so first session = count === 1
+    const isFirstSession = (sessionCountRow?.count ?? 1) <= 1;
+
+    // Get last session summary if there was a previous session
+    let lastSessionSummary: string | null = null;
+    const lastSession = lastCompletedSession[0];
+    if (lastSession) {
+      const [summaryRow] = await db
+        .select({ content: sessionSummaries.content })
+        .from(sessionSummaries)
+        .where(
+          and(
+            eq(sessionSummaries.sessionId, lastSession.id),
+            eq(sessionSummaries.level, "session"),
+          ),
+        )
+        .orderBy(desc(sessionSummaries.createdAt))
+        .limit(1);
+      lastSessionSummary = summaryRow?.content ?? null;
+    }
+
+    // Build memory blocks map
+    const memoryBlockMap = new Map<string, string>();
+    for (const block of blocks) {
+      if (block.content.trim()) {
+        memoryBlockMap.set(block.label, block.content);
+      }
+    }
+
+    // Build formulation context for opening message
+    const formulationCtx = formulation
+      ? {
+          presentingTheme: formulation.snapshot?.formulation?.presentingTheme as string | undefined,
+          activeStates: formulation.snapshot?.activeStates as
+            | Array<{ label?: string; domain?: string }>
+            | undefined,
+        }
+      : null;
+
+    const ctx: OpeningMessageContext = {
+      userId,
+      isFirstSession,
+      lastSessionEndedAt: lastSession?.endedAt ?? null,
+      lastSessionSummary,
+      therapyPlan: (() => {
+        if (!therapyPlanRow) return null;
+        const parsed = TherapyPlanSchema.safeParse(therapyPlanRow.plan);
+        return parsed.success ? parsed.data : null;
+      })(),
+      formulation: formulationCtx,
+      userName: displayName,
+      memoryBlocks: memoryBlockMap,
+    };
+
+    // Generate the opening message, streaming chunks to SSE
+    const openingText = await generateOpeningMessage(ctx, (chunk) => {
+      sessionEmitter.emit(sessionId, {
+        event: "ai.chunk",
+        data: { content: chunk },
+      });
+    });
+
+    // Persist to messages table
+    const [assistantMsg] = await db
+      .insert(messages)
+      .values({
+        sessionId,
+        role: "assistant",
+        content: openingText,
+      })
+      .returning();
+
+    // Add to SDK session history so subsequent turns have context
+    appendMessagesToSession(sdkSessionId, [
+      { role: "assistant", content: openingText },
+    ]);
+
+    // Emit response complete
+    if (assistantMsg) {
+      sessionEmitter.emit(sessionId, {
+        event: "ai.response_complete",
+        data: { messageId: assistantMsg.id },
+      });
+    }
+
+    console.log(
+      `[opening-message] Delivered opening for session ${sessionId} ` +
+      `(${openingText.length} chars, first=${isFirstSession})`,
+    );
+  } catch (err) {
+    console.error(`[opening-message] Failed for session ${sessionId}:`, err);
+    sessionEmitter.emit(sessionId, {
+      event: "ai.error",
+      data: { error: "Failed to generate opening message" },
+    });
+  }
+}
 
 // ── Route Definitions ────────────────────────────────────────────
 
@@ -139,6 +309,14 @@ const app = new Hono()
         status: "active",
       })
       .returning();
+
+    // Fire opening message in background — client will receive it via SSE
+    void fireOpeningMessage(
+      session!.id,
+      sdkSessionId,
+      user.id,
+      user.displayName,
+    );
 
     return c.json(
       {
@@ -730,6 +908,16 @@ const app = new Hono()
       user,
       isReturningUser: true,
     });
+
+    // If the session has no messages, generate an opening message
+    const [msgCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId));
+
+    if ((msgCount?.count ?? 0) === 0) {
+      void fireOpeningMessage(sessionId, sdkSessionId, user.id, user.displayName);
+    }
 
     return c.json({
       sessionId: session.id,
