@@ -68,7 +68,7 @@ export interface ValidatorInput {
 
 // ── Constants ─────────────────────────────────────────────────────
 
-const VALIDATOR_TIMEOUT_MS = 8_000;
+const VALIDATOR_TIMEOUT_MS = 15_000;
 
 const VALID_ISSUE_TYPES = new Set<string>([
   "diagnosis_framing",

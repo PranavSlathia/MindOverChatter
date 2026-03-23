@@ -37,7 +37,7 @@ export interface SupervisorOutput {
 
 // ── Constants ─────────────────────────────────────────────────────
 
-const SUPERVISOR_TIMEOUT_MS = 6_000;
+const SUPERVISOR_TIMEOUT_MS = 15_000;
 
 const VALID_MODES = new Set<string | null>([
   "follow_support",
