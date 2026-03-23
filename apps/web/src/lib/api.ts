@@ -79,6 +79,12 @@ export interface CliToolStatus {
   loggedIn: boolean;
   email?: string;
   model?: string;
+  loginCommand?: string;
+}
+
+export interface CliLoginResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface CliStatusResponse {
@@ -350,6 +356,15 @@ export const api = {
   getCliStatus: async (): Promise<CliStatusResponse> => {
     const response = await fetch(`${API_BASE}/api/settings/cli-status`);
     return handleResponse<CliStatusResponse>(response);
+  },
+
+  triggerCliLogin: async (tool: "claude" | "gemini" | "codex"): Promise<CliLoginResponse> => {
+    const response = await fetch(`${API_BASE}/api/settings/cli-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool }),
+    });
+    return handleResponse<CliLoginResponse>(response);
   },
 
   stopVoice: async (

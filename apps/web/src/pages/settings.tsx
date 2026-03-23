@@ -419,16 +419,30 @@ function ServiceHealthSection() {
 
 // ── CLI Authentication Section ───────────────────────────────────
 
-const CLI_LABELS: Record<string, string> = {
-  claude: "Claude",
-  gemini: "Gemini",
-  codex: "Codex",
+const CLI_META: Record<string, { label: string; description: string; role: string }> = {
+  claude: {
+    label: "Claude",
+    description: "Primary therapist (Sonnet) + safety validator (Haiku)",
+    role: "Required",
+  },
+  gemini: {
+    label: "Gemini",
+    description: "Quality reviewer — probing depth + conversational quality",
+    role: "Optional",
+  },
+  codex: {
+    label: "Codex",
+    description: "Framework reviewer — MI-OARS + skill adherence",
+    role: "Optional",
+  },
 };
 
 function CliAuthSection() {
   const [cliStatus, setCliStatus] = useState<CliStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loginMessage, setLoginMessage] = useState<{ tool: string; text: string; success: boolean } | null>(null);
+  const [loginInProgress, setLoginInProgress] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -448,8 +462,35 @@ function CliAuthSection() {
     fetchStatus();
   }, [fetchStatus]);
 
+  const handleLogin = useCallback(async (tool: "claude" | "gemini" | "codex") => {
+    setLoginInProgress(tool);
+    setLoginMessage(null);
+    try {
+      const result = await api.triggerCliLogin(tool);
+      setLoginMessage({ tool, text: result.message, success: result.success });
+      // Re-check status after a short delay to pick up the login
+      if (result.success) {
+        setTimeout(() => {
+          fetchStatus();
+        }, 3000);
+      }
+    } catch (err) {
+      setLoginMessage({
+        tool,
+        text: err instanceof Error ? err.message : "Failed to start login",
+        success: false,
+      });
+    } finally {
+      setLoginInProgress(null);
+    }
+  }, [fetchStatus]);
+
   return (
-    <Section title="CLI Authentication">
+    <Section title="AI Agent Team">
+      <p className="text-xs text-foreground/50 -mt-1 mb-3">
+        Claude is the main therapist. Gemini and Codex are optional parallel reviewers that grade each response.
+      </p>
+
       {isLoading && !cliStatus && (
         <div className="flex h-20 items-center justify-center">
           <p className="text-sm text-foreground/50">Checking CLI tools...</p>
@@ -463,28 +504,88 @@ function CliAuthSection() {
       )}
 
       {cliStatus && (
-        <div className="space-y-3">
-          <ul className="space-y-3">
-            {(["claude", "gemini", "codex"] as const).map((tool) => {
-              const status = cliStatus[tool];
-              return (
-                <li key={tool} className="flex items-center justify-between py-1">
+        <div className="space-y-4">
+          {(["claude", "gemini", "codex"] as const).map((tool) => {
+            const status = cliStatus[tool];
+            const meta = CLI_META[tool] ?? { label: tool, description: "", role: "Optional" };
+            return (
+              <div
+                key={tool}
+                className="rounded-lg border border-foreground/10 p-3 space-y-2"
+              >
+                <div className="flex items-start justify-between">
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-foreground/80">
-                      {CLI_LABELS[tool]}
-                    </span>
-                    {tool === "claude" && status.loggedIn && (
-                      <span className="text-xs text-foreground/50">
-                        {status.email && `${status.email} · `}
-                        {status.model && `Model: ${status.model}`}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground/80">
+                        {meta.label}
                       </span>
-                    )}
+                      <span className={cn(
+                        "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+                        meta.role === "Required"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-foreground/5 text-foreground/40",
+                      )}>
+                        {meta.role}
+                      </span>
+                    </div>
+                    <span className="text-xs text-foreground/50">{meta.description}</span>
                   </div>
                   <CliBadge status={status} />
-                </li>
-              );
-            })}
-          </ul>
+                </div>
+
+                {/* Details when logged in */}
+                {status.loggedIn && (
+                  <div className="text-xs text-foreground/50 pl-0.5">
+                    {status.email && <span>{status.email}</span>}
+                    {status.email && status.model && <span> · </span>}
+                    {status.model && <span>Model: {status.model}</span>}
+                  </div>
+                )}
+
+                {/* Login action when not logged in */}
+                {status.installed && !status.loggedIn && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleLogin(tool)}
+                        disabled={loginInProgress === tool}
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {loginInProgress === tool ? "Starting..." : "Login"}
+                      </button>
+                      <span className="text-[10px] text-foreground/40">
+                        Opens browser for authentication
+                      </span>
+                    </div>
+                    {loginMessage?.tool === tool && (
+                      <output className={cn(
+                        "block text-xs p-2 rounded-md",
+                        loginMessage.success
+                          ? "bg-primary/5 text-primary"
+                          : "bg-destructive/5 text-destructive",
+                      )}>
+                        {loginMessage.text}
+                      </output>
+                    )}
+                  </div>
+                )}
+
+                {/* Install instructions when not installed */}
+                {!status.installed && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-foreground/40">Not installed. Run in terminal:</p>
+                    <code className="block text-xs bg-foreground/5 text-foreground/70 rounded-md px-3 py-2 font-mono select-all">
+                      {status.loginCommand ?? `npm install -g ${tool}`}
+                    </code>
+                    <p className="text-xs text-foreground/40">
+                      Then click "Check Status" below to verify.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           <div className="flex items-center justify-end border-t border-foreground/10 pt-3">
             <button
