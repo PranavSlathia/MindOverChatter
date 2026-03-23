@@ -643,19 +643,30 @@ async def create_bot(
 
     # ── Event Handlers ────────────────────────────────────────────────
 
+    _greeting_spoken = False  # one-shot guard for opening greeting
+
     @transport.event_handler("on_participant_joined")
     async def on_joined(transport: Any, participant: Any) -> None:
+        nonlocal _greeting_spoken
         participant_id = participant.get("id", "unknown")
-        logger.info("[voice-bot] Participant joined: %s", participant_id)
+        is_bot = participant.get("info", {}).get("isLocal", False)
+        logger.info("[voice-bot] Participant joined: %s (isBot=%s)", participant_id, is_bot)
 
-        # Speak AI-initiated greeting when user joins
-        if opening_greeting:
-            logger.info("[voice-bot] Speaking opening greeting (%d chars)", len(opening_greeting))
-            await task.queue_frame(
-                TTSSpeakFrame(text=opening_greeting, append_to_context=True)
-            )
-            if on_assistant_text:
-                on_assistant_text(opening_greeting)
+        # Skip greeting for the bot itself and prevent replays on reconnect
+        if is_bot or _greeting_spoken or not opening_greeting:
+            return
+
+        _greeting_spoken = True
+        logger.info("[voice-bot] Speaking opening greeting (%d chars)", len(opening_greeting))
+
+        # Record in metrics so it appears in /voice/session-complete transcript
+        session_metrics.record_greeting(opening_greeting)
+
+        await task.queue_frame(
+            TTSSpeakFrame(text=opening_greeting, append_to_context=True)
+        )
+        if on_assistant_text:
+            on_assistant_text(opening_greeting)
 
     @transport.event_handler("on_participant_left")
     async def on_left(transport: Any, participant: Any, reason: str) -> None:

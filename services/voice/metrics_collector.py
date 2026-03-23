@@ -116,6 +116,28 @@ class SessionMetrics:
         with self._lock:
             self.interruption_count += 1
 
+    def record_greeting(self, text: str) -> None:
+        """Record the AI-initiated opening greeting as the first assistant turn.
+
+        Must be called before any pipeline frames arrive so the greeting
+        appears as turn_index=0 in the persisted transcript.
+        """
+        with self._lock:
+            idx = self._next_turn_index
+            self._next_turn_index += 1
+            now = time.time()
+            self.turns.append(TurnMetrics(
+                turn_index=idx,
+                role="assistant",
+                started_at=now,
+                ended_at=now,
+                duration_secs=0.0,
+                word_count=len(text.split()),
+                text=text,
+                pause_before_secs=0.0,
+                was_interrupted=False,
+            ))
+
     def allocate_turn_index(self) -> int:
         with self._lock:
             idx = self._next_turn_index

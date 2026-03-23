@@ -133,27 +133,49 @@ async def _persist_transcript(voice_session: Optional["VoiceSession"]) -> None:
         logger.info("[session=%s] Empty transcript — skipping", voice_session.session_id)
         return
 
-    # Interleave turns: user[0], assistant[0], user[1], assistant[1], ...
+    # Build chronological turn list.
+    # The first assistant turn may be the AI greeting (before any user speech),
+    # so we can't blindly interleave user[0] before assistant[0].
+    # Strategy: if assistant_turns has more entries than user_turns, the first
+    # assistant turn is the greeting and should come first.
     turns: list[dict[str, str]] = []
-    max_len = max(len(user_turns), len(assistant_turns))
     base_time = voice_session.created_at
     turn_idx = 0
-    for i in range(max_len):
-        if i < len(user_turns):
+
+    greeting_first = len(assistant_turns) > len(user_turns)
+    u_idx = 0
+    a_idx = 0
+
+    # If greeting exists, emit it first
+    if greeting_first and a_idx < len(assistant_turns):
+        offset = base_time + timedelta(seconds=turn_idx)
+        turns.append({
+            "role": "assistant",
+            "content": assistant_turns[a_idx],
+            "createdAt": offset.isoformat().replace("+00:00", "Z"),
+        })
+        a_idx += 1
+        turn_idx += 1
+
+    # Interleave remaining: user, assistant, user, assistant...
+    while u_idx < len(user_turns) or a_idx < len(assistant_turns):
+        if u_idx < len(user_turns):
             offset = base_time + timedelta(seconds=turn_idx)
             turns.append({
                 "role": "user",
-                "content": user_turns[i],
+                "content": user_turns[u_idx],
                 "createdAt": offset.isoformat().replace("+00:00", "Z"),
             })
+            u_idx += 1
             turn_idx += 1
-        if i < len(assistant_turns):
+        if a_idx < len(assistant_turns):
             offset = base_time + timedelta(seconds=turn_idx)
             turns.append({
                 "role": "assistant",
-                "content": assistant_turns[i],
+                "content": assistant_turns[a_idx],
                 "createdAt": offset.isoformat().replace("+00:00", "Z"),
             })
+            a_idx += 1
             turn_idx += 1
 
     url = f"{settings.MOC_BACKEND_URL}/api/voice/transcript"
