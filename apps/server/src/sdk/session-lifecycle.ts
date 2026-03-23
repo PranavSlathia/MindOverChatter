@@ -17,6 +17,13 @@ export interface OnEndContext {
   sessionId: string;
   conversationHistory: ConversationMessage[];
   safeReason?: string;
+  voiceAnalysis?: {
+    observations: string[];
+    contradictions: string[];
+    engagementAssessment: string;
+    therapyPlanRecommendations: string[];
+    emotionArcNarrative: string;
+  };
 }
 
 // ── Hook Types ───────────────────────────────────────────────────

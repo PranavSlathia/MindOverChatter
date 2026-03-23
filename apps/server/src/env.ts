@@ -9,6 +9,7 @@ const envSchema = z.object({
   VOICE_SERVICE_URL: z.string().url().default("http://localhost:8005"),
   CLAUDE_MODEL: z.string().default("sonnet"),
   CLAUDE_HAIKU_MODEL: z.string().default("haiku"),
+  CLAUDE_OPUS_MODEL: z.string().default("opus"),
   GROQ_API_KEY: z.string().optional(),
   GEMINI_ENABLED: z.coerce.boolean().default(false),
   CODEX_ENABLED: z.coerce.boolean().default(false),

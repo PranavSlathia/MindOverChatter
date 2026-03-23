@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   timestamp,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
 import { userProfiles } from "./user-profiles";
@@ -27,6 +28,7 @@ export const sessions = pgTable("sessions", {
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow().notNull(),
+  voiceMetrics: jsonb("voice_metrics"), // Voice V2: enriched metrics from voice session
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
