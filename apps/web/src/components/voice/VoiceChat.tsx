@@ -163,24 +163,29 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
 
       clientRef.current = client;
 
-      // Start bot — get room credentials from backend
-      const startResult = (await client.startBot({
-        endpoint: `${API_BASE}/api/voice/start`,
-        requestData: { sessionId },
-      })) as unknown as VoiceStartResponse;
-
-      if (startResult?.sessionId !== sessionId) {
-        console.warn("[voice] Backend returned different sessionId:", startResult?.sessionId, sessionId);
+      // Fetch voice start manually to capture voiceSessionId,
+      // then connect the transport with the returned room credentials.
+      const startRes = await fetch(`${API_BASE}/api/voice/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!startRes.ok) {
+        throw new Error(`Voice start failed: ${startRes.status}`);
       }
-      voiceSessionIdRef.current = startResult?.voiceSessionId ?? null;
+      const startData = (await startRes.json()) as VoiceStartResponse;
+      voiceSessionIdRef.current = startData.voiceSessionId;
 
       if (token !== lifecycleTokenRef.current) {
         await stopVoice({ keepalive: true });
         return;
       }
 
-      // Connect to Daily room — this subscribes to audio tracks
-      await client.connect();
+      // Connect transport with room URL and token from backend
+      await client.connect({
+        url: startData.url,
+        token: startData.token,
+      });
 
       if (token !== lifecycleTokenRef.current) {
         await stopVoice({ keepalive: true });
