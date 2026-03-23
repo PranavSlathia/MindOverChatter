@@ -83,7 +83,7 @@ export function createTurnEventCollector(sessionId: string): TurnEventBuilder {
       data.reviewerResults = results.length > 0 ? results : null;
       // Also populate the legacy validator fields from the Haiku result
       // so existing observability queries continue to work.
-      const haikuResult = results.find((r) => r.reviewer === "claude_haiku");
+      const haikuResult = results.find((r) => r.reviewer === "primary");
       if (haikuResult && !haikuResult.failed) {
         data.validatorRan = true;
         data.validatorScore = haikuResult.score;
