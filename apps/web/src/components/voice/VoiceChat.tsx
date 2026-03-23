@@ -130,7 +130,20 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
           onConnected: () => {
             console.log("[voice] Connected to Daily room");
             setState("connected");
+            // Track-level debugging: check if bot audio track exists
+            try {
+              const tracks = (client as unknown as { tracks: () => unknown }).tracks?.();
+              console.log("[voice] Tracks after connect:", JSON.stringify(tracks, null, 2));
+            } catch (e) {
+              console.log("[voice] Could not read tracks:", e);
+            }
           },
+          onTrackStarted: ((track: unknown, participant: unknown) => {
+            console.log("[voice] Track started:", { track, participant });
+          }) as unknown as () => void,
+          onTrackStopped: ((track: unknown, participant: unknown) => {
+            console.log("[voice] Track stopped:", { track, participant });
+          }) as unknown as () => void,
           onDisconnected: () => {
             console.log("[voice] Disconnected from Daily room");
             setState("idle");
