@@ -34,7 +34,7 @@ class Settings:
     VAD_MIN_VOLUME: float = float(os.getenv("VAD_MIN_VOLUME", "0.6"))
     VAD_START_SECS: float = float(os.getenv("VAD_START_SECS", "0.8"))
     VAD_STOP_SECS: float = float(os.getenv("VAD_STOP_SECS", "0.6"))
-    USER_SPEECH_TIMEOUT: float = float(os.getenv("USER_SPEECH_TIMEOUT", "1.2"))
+    USER_SPEECH_TIMEOUT: float = float(os.getenv("USER_SPEECH_TIMEOUT", "2.0"))
     # Pipecat's controller-level fallback must stay above the speech timeout.
     # The previous 1.0s setting was truncating normal pauses with
     # "User stopped speaking (strategy: None)".

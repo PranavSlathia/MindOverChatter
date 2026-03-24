@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -390,9 +391,15 @@ class MetricsOutputObserver(FrameProcessor):
     - Bot speaking timing
     """
 
-    def __init__(self, session_metrics: SessionMetrics, **kwargs) -> None:
+    def __init__(
+        self,
+        session_metrics: SessionMetrics,
+        on_assistant_text: Any = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._metrics = session_metrics
+        self._on_assistant_text = on_assistant_text
 
         # Assistant turn state
         self._in_response: bool = False
@@ -430,6 +437,10 @@ class MetricsOutputObserver(FrameProcessor):
         )
         self._metrics.add_turn(turn)
         self._last_turn_end = end_time
+
+        # Persist assistant text via the callback (for the simple transcript path)
+        if full_text.strip() and self._on_assistant_text:
+            self._on_assistant_text(full_text)
 
         logger.debug(
             "[metrics] Assistant turn %d: %d words, %.1fs%s",

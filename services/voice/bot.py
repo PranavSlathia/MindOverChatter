@@ -655,7 +655,10 @@ async def create_bot(
     # ── Metrics Observers (passive frame observers) ────────────────
 
     metrics_input = MetricsInputObserver(session_metrics)
-    metrics_output = MetricsOutputObserver(session_metrics)
+    metrics_output = MetricsOutputObserver(
+        session_metrics,
+        on_assistant_text=on_assistant_text,
+    )
 
     # ── Pipeline ──────────────────────────────────────────────────────
     # voice_emotion sits between transport.input() and stt so it can
