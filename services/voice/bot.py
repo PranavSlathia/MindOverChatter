@@ -587,10 +587,11 @@ async def create_bot(
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
                 min_volume=settings.VAD_MIN_VOLUME,
-                # Require 0.4s of speech before confirming voice start (default 0.2s).
-                # This filters out brief noise bursts and echo artifacts that
-                # were causing false interruptions.
-                start_secs=0.4,
+                # Require 0.8s of sustained speech before confirming voice start.
+                # 0.4s was still too sensitive — bot's own TTS output was
+                # triggering VAD despite echo cancellation, causing constant
+                # interruptions (6 user turns, all fragments).
+                start_secs=0.8,
             )
         ),
         user_turn_stop_timeout=settings.USER_TURN_STOP_TIMEOUT,

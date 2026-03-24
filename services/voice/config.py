@@ -28,9 +28,9 @@ class Settings:
     # Groq LLM (main conversation model)
     GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
 
-    # VAD — 0.5 reduces false positives from background noise / TTS echo.
-    # Previous default 0.3 caused ~10 self-interruptions per short session.
-    VAD_MIN_VOLUME: float = float(os.getenv("VAD_MIN_VOLUME", "0.5"))
+    # VAD — 0.6 reduces false positives from TTS echo and background noise.
+    # History: 0.3 → 10 interruptions, 0.5 → still fragmenting user speech.
+    VAD_MIN_VOLUME: float = float(os.getenv("VAD_MIN_VOLUME", "0.6"))
     USER_TURN_STOP_TIMEOUT: float = float(os.getenv("USER_TURN_STOP_TIMEOUT", "1.0"))
 
     # MindOverChatter backend (for session management)
