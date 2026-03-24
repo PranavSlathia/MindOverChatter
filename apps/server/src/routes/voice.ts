@@ -612,6 +612,8 @@ const app = new Hono()
         })
         .where(eq(sessions.id, sessionId));
 
+      // Emit both events: session_complete for analytics consumers,
+      // transcript_persisted so the chat UI reloads messages.
       sessionEmitter.emit(sessionId, {
         event: "voice.session_complete",
         data: {
@@ -619,6 +621,13 @@ const app = new Hono()
           emotionCount: emotions.length,
           interruptionCount: sessionSummary.interruptionCount,
         },
+      });
+
+      // The frontend listens for this event to reload messages into the chat UI.
+      // Without it, enriched transcripts land in the DB but never appear on screen.
+      sessionEmitter.emit(sessionId, {
+        event: "voice.transcript_persisted",
+        data: { count: transcript.length },
       });
 
       return c.json({

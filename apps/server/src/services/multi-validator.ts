@@ -2,22 +2,24 @@
 // Runs multiple AI reviewers in parallel after a response is streamed.
 // Always fire-and-forget — never blocks the user response.
 //
-// Claude Haiku: safety issues (existing validator, always runs)
-// Gemini: conversational quality + probing depth (opt-in via GEMINI_ENABLED)
+// Gemini: conversational quality + probing depth + safety (always runs when enabled)
 // Codex: therapeutic framework adherence (opt-in via CODEX_ENABLED, every 3rd turn)
+//
+// The "primary" (Claude Haiku) reviewer was removed — it failed 100% of the
+// time (0/13 success), wasting a CLI spawn per turn. Gemini handles safety
+// validation effectively (9/13 success, score 1.0).
 //
 // Results collected via Promise.allSettled — one reviewer failing
 // never affects the others.
 
 import { env } from "../env.js";
 import { spawnCliForJson } from "./cli-spawner.js";
-import { runResponseValidator } from "./response-validator.js";
 import type { SessionMode } from "@moc/shared";
 
 // ── Types ─────────────────────────────────────────────────────────
 
 export interface ReviewerResult {
-  reviewer: "primary" | "gemini" | "codex";
+  reviewer: "gemini" | "codex";
   score: number; // 0-1
   issues: Array<{ type: string; severity: string; excerpt: string }>;
   latencyMs: number;
@@ -265,8 +267,12 @@ async function runCodexReviewer(input: MultiValidationInput): Promise<ReviewerRe
 // ── Public API ────────────────────────────────────────────────────
 
 /**
- * Run all enabled reviewers in parallel. Always includes Claude Haiku.
- * Gemini and Codex are controlled by env vars (default: disabled).
+ * Run all enabled reviewers in parallel.
+ * Gemini is the primary reviewer (controlled by GEMINI_ENABLED, default: disabled).
+ * Codex is opt-in (CODEX_ENABLED, every 3rd turn).
+ *
+ * The former Claude Haiku "primary" reviewer was removed because it failed
+ * 100% of the time (0/13), wasting a CLI spawn per turn.
  *
  * Returns an array of ReviewerResult. Failed reviewers are included
  * with `failed: true` — callers can filter as needed.
@@ -278,48 +284,7 @@ export async function runMultiModelValidation(
 ): Promise<ReviewerResult[]> {
   const promises: Promise<ReviewerResult>[] = [];
 
-  // ── Claude Haiku (always runs) ──────────────────────────────────
-  const haikuStart = Date.now();
-  promises.push(
-    runResponseValidator({
-      response: input.response,
-      lastThreeTurns: [
-        { role: "user", content: input.userMessage },
-        { role: "assistant", content: input.response },
-      ],
-      sessionMode: input.currentMode ?? "follow_support",
-      sessionId: input.sessionId,
-    }).then((result): ReviewerResult => {
-      if (!result) {
-        return {
-          reviewer: "primary",
-          score: 0,
-          issues: [],
-          latencyMs: Date.now() - haikuStart,
-          failed: true,
-        };
-      }
-      return {
-        reviewer: "primary",
-        score: result.score,
-        issues: result.issues.map((i) => ({
-          type: i.type,
-          severity: i.severity,
-          excerpt: i.excerpt,
-        })),
-        latencyMs: Date.now() - haikuStart,
-        failed: false,
-      };
-    }).catch((): ReviewerResult => ({
-      reviewer: "primary",
-      score: 0,
-      issues: [],
-      latencyMs: Date.now() - haikuStart,
-      failed: true,
-    })),
-  );
-
-  // ── Gemini (opt-in, every turn) ─────────────────────────────────
+  // ── Gemini (primary reviewer, every turn) ─────────────────────
   if (env.GEMINI_ENABLED) {
     promises.push(runGeminiReviewer(input));
   }
@@ -328,6 +293,11 @@ export async function runMultiModelValidation(
   // Codex runs every 3rd turn (1-based: turn 3, 6, 9...). Never on turn 1.
   if (env.CODEX_ENABLED && input.turnNumber >= 3 && input.turnNumber % 3 === 0) {
     promises.push(runCodexReviewer(input));
+  }
+
+  // If no reviewers are enabled, return empty
+  if (promises.length === 0) {
+    return [];
   }
 
   // Run all reviewers in parallel — one failure never affects others

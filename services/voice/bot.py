@@ -552,6 +552,12 @@ async def create_bot(
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            # Tell Daily that the bot is outputting live audio. This enables
+            # server-side echo cancellation so the bot's own TTS playback
+            # is not picked up by the mic and misinterpreted as user speech.
+            # Without this, VAD triggers on the bot's own output causing
+            # self-interruptions (~10 per short session at VAD_MIN_VOLUME=0.3).
+            audio_out_is_live=True,
         ),
     )
 
@@ -562,7 +568,13 @@ async def create_bot(
 
     user_aggregator_params = LLMUserAggregatorParams(
         vad_analyzer=SileroVADAnalyzer(
-            params=VADParams(min_volume=settings.VAD_MIN_VOLUME)
+            params=VADParams(
+                min_volume=settings.VAD_MIN_VOLUME,
+                # Require 0.4s of speech before confirming voice start (default 0.2s).
+                # This filters out brief noise bursts and echo artifacts that
+                # were causing false interruptions.
+                start_secs=0.4,
+            )
         ),
         user_turn_stop_timeout=settings.USER_TURN_STOP_TIMEOUT,
     )

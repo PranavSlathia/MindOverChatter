@@ -81,19 +81,19 @@ export function createTurnEventCollector(sessionId: string): TurnEventBuilder {
 
     setReviewerResults(results) {
       data.reviewerResults = results.length > 0 ? results : null;
-      // Also populate the legacy validator fields from the Haiku result
-      // so existing observability queries continue to work.
-      const haikuResult = results.find((r) => r.reviewer === "primary");
-      if (haikuResult && !haikuResult.failed) {
+      // Populate the legacy validator fields from the first successful reviewer
+      // (Gemini is now the primary reviewer; the old "primary" Haiku path was removed).
+      const primaryResult = results.find((r) => !r.failed);
+      if (primaryResult) {
         data.validatorRan = true;
-        data.validatorScore = haikuResult.score;
-        data.validatorSafe = haikuResult.issues.every(
+        data.validatorScore = primaryResult.score;
+        data.validatorSafe = primaryResult.issues.every(
           (i) => i.severity !== "high",
         );
-        data.validatorIssues = haikuResult.issues.length > 0
-          ? haikuResult.issues
+        data.validatorIssues = primaryResult.issues.length > 0
+          ? primaryResult.issues
           : null;
-        data.validatorLatencyMs = haikuResult.latencyMs;
+        data.validatorLatencyMs = primaryResult.latencyMs;
       }
     },
 
