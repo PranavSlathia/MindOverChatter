@@ -601,6 +601,10 @@ async def create_bot(
         user_params=user_aggregator_params,
     )
 
+    # ── Session Metrics (shared data store for voice analytics) ──────
+
+    session_metrics = SessionMetrics(session_id=moc_session_id or session_id)
+
     # ── Transcript Logger ─────────────────────────────────────────────
 
     transcript_logger = TranscriptLogger(
@@ -612,10 +616,6 @@ async def create_bot(
         moc_session_id=moc_session_id,
         on_assistant_text=on_assistant_text,
     )
-
-    # ── Session Metrics (shared data store for voice analytics) ──────
-
-    session_metrics = SessionMetrics(session_id=moc_session_id or session_id)
 
     # ── Voice Emotion Processor (fire-and-forget prosody analysis) ─
 
