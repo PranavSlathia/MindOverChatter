@@ -18,10 +18,12 @@ export interface VoiceChatHandle {
 interface VoiceChatProps {
   sessionId: string;
   onRequestClose?: () => void | Promise<void>;
+  /** Called with each finalized transcript so the parent can display it in the chat message list. */
+  onLiveTranscript?: (role: "user" | "assistant", text: string) => void;
 }
 
 export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function VoiceChat(
-  { sessionId, onRequestClose },
+  { sessionId, onRequestClose, onLiveTranscript },
   ref,
 ) {
   const [state, setState] = useState<VoiceState>("idle");
@@ -34,6 +36,8 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
   const voiceSessionIdRef = useRef<string | null>(null);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
   const lifecycleTokenRef = useRef(0);
+  // Accumulate bot transcript chunks; flush to parent on BotStoppedSpeaking
+  const botTextAccRef = useRef<string[]>([]);
 
   const resetLocalVoiceState = useCallback(() => {
     setIsMuted(false);
@@ -165,20 +169,35 @@ export const VoiceChat = forwardRef<VoiceChatHandle, VoiceChatProps>(function Vo
           onBotStartedSpeaking: () => {
             console.log("[voice] Bot started speaking");
             setBotSpeaking(true);
+            // Reset accumulator for a new bot utterance
+            botTextAccRef.current = [];
           },
           onBotStoppedSpeaking: () => {
             console.log("[voice] Bot stopped speaking");
             setBotSpeaking(false);
+            // Flush accumulated bot text to parent as a complete message
+            const full = botTextAccRef.current.join("").trim();
+            if (full && onLiveTranscript) {
+              onLiveTranscript("assistant", full);
+            }
+            botTextAccRef.current = [];
           },
           onUserTranscript: (data) => {
             const text = (data as { text?: string })?.text;
             console.log("[voice] User transcript:", text);
-            if (text) setUserTranscript(text);
+            if (text) {
+              setUserTranscript(text);
+              onLiveTranscript?.("user", text);
+            }
           },
           onBotTranscript: (data) => {
             const text = (data as { text?: string })?.text;
             console.log("[voice] Bot transcript:", text);
-            if (text) setBotTranscript(text);
+            if (text) {
+              setBotTranscript(text);
+              // Accumulate — will flush on BotStoppedSpeaking
+              botTextAccRef.current.push(text);
+            }
           },
           onError: (err) => {
             console.error("[voice] Error:", err);

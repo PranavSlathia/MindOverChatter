@@ -676,6 +676,14 @@ export function ChatPage() {
             ref={voiceChatRef}
             sessionId={sessionId ?? ""}
             onRequestClose={() => stopVoiceAndClose({ closeMode: true })}
+            onLiveTranscript={(role, text) => {
+              addMessage({
+                id: crypto.randomUUID(),
+                role,
+                content: text,
+                createdAt: new Date().toISOString(),
+              });
+            }}
           />
         </div>
       ) : (
