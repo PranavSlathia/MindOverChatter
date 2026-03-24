@@ -396,10 +396,38 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           ),
         });
       } else {
-        settle({ ok: true, text: fullResponse.trim() });
+        // Strip hook contamination: global UserPromptSubmit hooks inject
+        // routing instructions (e.g., "[Category 6] — Direct task...") into
+        // the LLM's context. The LLM echoes them at the start of its response.
+        const cleaned = stripHookContamination(fullResponse.trim());
+        settle({ ok: true, text: cleaned });
       }
     });
   });
+}
+
+/**
+ * Strip contamination from global Claude CLI hooks.
+ *
+ * When the server spawns `claude --print`, global hooks from
+ * ~/.claude/settings.json inject routing instructions into the LLM
+ * context (e.g., "MANDATORY AGENT ROUTING SEQUENCE"). The LLM then
+ * echoes "[Category N] — agent — reason" at the start of its response.
+ *
+ * This function strips that prefix so the wellness companion's
+ * response is clean.
+ */
+function stripHookContamination(text: string): string {
+  // Pattern: "[Category N] — description\n\n" at the start of response
+  // Also handles: "[Category N] — agent — reason\n\n---\n\n"
+  const cleaned = text.replace(
+    /^\[Category \d+\]\s*[-—]+\s*[^\n]*(?:\n+(?:---\n+)?)?/,
+    "",
+  );
+  // Also strip "Direct task — no agent needed" prefix
+  return cleaned
+    .replace(/^Direct task\s*[-—]+\s*no agent needed\.?\s*\n*/i, "")
+    .trim();
 }
 
 /**
