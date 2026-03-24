@@ -12,19 +12,12 @@ COPY uv.lock* .
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Pre-download the embedding model to avoid cold start latency.
-ENV HF_HOME=/app/models
-RUN uv run python -c "\
-from sentence_transformers import SentenceTransformer; \
-model = SentenceTransformer('BAAI/bge-small-en-v1.5'); \
-print(f'Model downloaded: {model.get_sentence_embedding_dimension()} dims')"
-
 # Copy application
 COPY . .
 
 EXPOSE 8004
 
-# Point HF_HOME to the volume mount so the model cache persists across rebuilds
+# Point HF_HOME to the runtime volume mount so model downloads persist across restarts
 ENV HF_HOME=/app/models
 
 CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]
