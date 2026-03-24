@@ -23,7 +23,6 @@ export interface CliSpawnOptions {
 
 function getClaudeArgs(model?: string): string[] {
   return [
-    "--bare",
     "--model",
     model ?? env.CLAUDE_HAIKU_MODEL,
     "--print",
@@ -71,6 +70,8 @@ function parseClaudeStreamJson(raw: string): string | null {
     if (!trimmed) continue;
     try {
       const event = JSON.parse(trimmed) as Record<string, unknown>;
+      // Skip auth error results — "Not logged in" must never be treated as valid output
+      if (event.is_error === true) continue;
       if (event.type === "result" && typeof event.result === "string") {
         resultText = event.result;
       }

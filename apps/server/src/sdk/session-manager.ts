@@ -270,7 +270,6 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
     const child = spawn("claude", [
       "--model",
       model,
-      "--bare",
       "--print",
       "--verbose",
       "--max-turns",
@@ -433,6 +432,8 @@ function extractTextFromEvent(
       onChunk(chunk);
     }
   } else if (event.type === "assistant") {
+    // Skip auth error events — "Not logged in" must never leak as response text
+    if (event.error === "authentication_failed") return;
     // assistant event: { type: "assistant", message: { content: [{type: "text", text: "..."}] } }
     // With --include-partial-messages, these arrive incrementally with growing text
     const message = event.message as Record<string, unknown> | undefined;
@@ -461,6 +462,8 @@ function extractTextFromEvent(
       }
     }
   } else if (event.type === "result") {
+    // Skip error results (auth failures, etc.)
+    if (event.is_error === true) return;
     // result event: { type: "result", result: "full response string" }
     const resultText = event.result;
     if (typeof resultText === "string" && resultText.trim() && !getAccumulated()) {
