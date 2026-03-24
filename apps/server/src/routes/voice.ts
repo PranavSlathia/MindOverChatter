@@ -517,6 +517,7 @@ const app = new Hono()
           sessionId,
           role: turn.role as "user" | "assistant",
           content: turn.content,
+          source: "voice" as const,
           createdAt: new Date(turn.createdAt),
         })),
       );
@@ -587,6 +588,7 @@ const app = new Hono()
             sessionId,
             role: turn.role as "user" | "assistant",
             content: turn.content,
+            source: "voice" as const,
             createdAt: new Date(turn.createdAt),
           })),
         );

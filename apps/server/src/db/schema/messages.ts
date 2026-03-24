@@ -8,6 +8,7 @@ import {
 import { sessions } from "./sessions";
 
 export const messageRoleEnum = pgEnum("message_role", ["user", "assistant"]);
+export const messageSourceEnum = pgEnum("message_source", ["text", "voice"]);
 
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -16,7 +17,8 @@ export const messages = pgTable("messages", {
     .references(() => sessions.id, { onDelete: "cascade" }),
   role: messageRoleEnum("role").notNull(),
   content: text("content").notNull(),
-  audioFilePath: text("audio_file_path"), // Path to audio file if voice
+  source: messageSourceEnum("source").default("text"),
+  audioFilePath: text("audio_file_path"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
