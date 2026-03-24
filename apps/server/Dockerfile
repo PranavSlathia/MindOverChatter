@@ -15,5 +15,6 @@ COPY --from=deps /app/apps/server/node_modules ./apps/server/node_modules
 COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY . .
 WORKDIR /app/apps/server
+RUN chmod +x docker-entrypoint.sh
 EXPOSE 3000
-CMD ["pnpm", "dev"]
+CMD ["sh", "./docker-entrypoint.sh"]
