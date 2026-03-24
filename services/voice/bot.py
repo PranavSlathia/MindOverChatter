@@ -657,7 +657,18 @@ async def create_bot(
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(allow_interruptions=True),
+        params=PipelineParams(
+            # Disable interruptions: the bot's TTS audio bleeds into the mic
+            # despite echo cancellation (audio_out_is_live=True), causing
+            # SileroVAD to trigger false "user speaking" events that kill
+            # the bot's response mid-sentence. This results in:
+            # - User turns fragmented into 0.2-0.7s chunks
+            # - Bot responses interrupted before completion
+            # - Transcript showing 6 user turns / 1 assistant turn
+            # With interruptions off, user must wait for bot to finish,
+            # but conversations actually complete properly.
+            allow_interruptions=False,
+        ),
     )
 
     # ── Reflection Manager (therapeutic pauses + memory refresh) ──────
