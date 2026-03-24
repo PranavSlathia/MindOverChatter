@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
@@ -406,6 +408,41 @@ class MetricsOutputObserver(FrameProcessor):
         # Track last turn end for pause calculation
         self._last_turn_end: float = session_metrics.started_at
 
+    def _finalize_assistant_turn(self, *, interrupted: bool) -> None:
+        if not self._in_response:
+            return
+
+        end_time = time.time()
+        full_text = "".join(self._response_text_chunks)
+        duration = max(0.0, end_time - self._response_start)
+        pause = max(0.0, self._response_start - self._last_turn_end)
+
+        turn = TurnMetrics(
+            turn_index=self._assistant_turn_index,
+            role="assistant",
+            started_at=self._response_start,
+            ended_at=end_time,
+            duration_secs=duration,
+            word_count=len(full_text.split()) if full_text.strip() else 0,
+            text=full_text,
+            pause_before_secs=pause,
+            was_interrupted=interrupted,
+        )
+        self._metrics.add_turn(turn)
+        self._last_turn_end = end_time
+
+        logger.debug(
+            "[metrics] Assistant turn %d: %d words, %.1fs%s",
+            turn.turn_index,
+            turn.word_count,
+            turn.duration_secs,
+            " (interrupted)" if turn.was_interrupted else "",
+        )
+
+        self._in_response = False
+        self._assistant_interrupted = False
+        self._response_text_chunks = []
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
@@ -450,43 +487,18 @@ class MetricsOutputObserver(FrameProcessor):
             self._response_text_chunks.append(frame.text)
 
         elif isinstance(frame, LLMFullResponseEndFrame):
-            if self._in_response:
-                end_time = time.time()
-                full_text = "".join(self._response_text_chunks)
-                duration = max(0.0, end_time - self._response_start)
-                pause = max(0.0, self._response_start - self._last_turn_end)
-
-                turn = TurnMetrics(
-                    turn_index=self._assistant_turn_index,
-                    role="assistant",
-                    started_at=self._response_start,
-                    ended_at=end_time,
-                    duration_secs=duration,
-                    word_count=len(full_text.split()) if full_text.strip() else 0,
-                    text=full_text,
-                    pause_before_secs=pause,
-                    was_interrupted=self._assistant_interrupted,
-                )
-                self._metrics.add_turn(turn)
-                self._last_turn_end = end_time
-
-                logger.debug(
-                    "[metrics] Assistant turn %d: %d words, %.1fs%s",
-                    turn.turn_index,
-                    turn.word_count,
-                    turn.duration_secs,
-                    " (interrupted)" if turn.was_interrupted else "",
-                )
-
-                self._in_response = False
-                self._response_text_chunks = []
+            self._finalize_assistant_turn(interrupted=self._assistant_interrupted)
 
         # --- Interruption ---
         elif isinstance(frame, InterruptionFrame):
             self._metrics.increment_interruptions()
             if self._in_response:
                 self._assistant_interrupted = True
+                self._finalize_assistant_turn(interrupted=True)
             logger.debug("[metrics] Interruption detected (total: %d)", self._metrics.interruption_count)
+
+        elif isinstance(frame, (EndFrame, CancelFrame)) and self._in_response:
+            self._finalize_assistant_turn(interrupted=self._assistant_interrupted)
 
         # --- Bot speaking (for latency measurement / future use) ---
         elif isinstance(frame, BotStartedSpeakingFrame):

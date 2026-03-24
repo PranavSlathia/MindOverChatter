@@ -28,10 +28,17 @@ class Settings:
     # Groq LLM (main conversation model)
     GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
 
-    # VAD — 0.6 reduces false positives from TTS echo and background noise.
-    # History: 0.3 → 10 interruptions, 0.5 → still fragmenting user speech.
+    # Voice turn detection. Keep start detection conservative enough to avoid
+    # the bot hearing its own TTS, but give stop detection more slack so
+    # natural mid-sentence pauses are not finalized as complete turns.
     VAD_MIN_VOLUME: float = float(os.getenv("VAD_MIN_VOLUME", "0.6"))
-    USER_TURN_STOP_TIMEOUT: float = float(os.getenv("USER_TURN_STOP_TIMEOUT", "1.0"))
+    VAD_START_SECS: float = float(os.getenv("VAD_START_SECS", "0.8"))
+    VAD_STOP_SECS: float = float(os.getenv("VAD_STOP_SECS", "0.6"))
+    USER_SPEECH_TIMEOUT: float = float(os.getenv("USER_SPEECH_TIMEOUT", "1.2"))
+    # Pipecat's controller-level fallback must stay above the speech timeout.
+    # The previous 1.0s setting was truncating normal pauses with
+    # "User stopped speaking (strategy: None)".
+    USER_TURN_STOP_TIMEOUT: float = float(os.getenv("USER_TURN_STOP_TIMEOUT", "3.0"))
 
     # MindOverChatter backend (for session management)
     MOC_BACKEND_URL: str = os.getenv("MOC_BACKEND_URL", "http://localhost:3000")

@@ -18,8 +18,11 @@ import aiohttp
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -40,6 +43,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.turns.user_start import VADUserTurnStartStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from config import settings
 from reflection_manager import ReflectionManager
@@ -108,6 +114,14 @@ class TranscriptLogger(FrameProcessor):
         """Set the ReflectionManager after PipelineTask is created."""
         self._reflection_manager = manager
 
+    def _flush_assistant_text(self) -> None:
+        """Persist the current assistant text, even if the response was cut off."""
+        self._in_response = False
+        full_text = "".join(self._current_assistant_text).strip()
+        self._current_assistant_text = []
+        if full_text and self._on_assistant_text:
+            self._on_assistant_text(full_text)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
@@ -136,10 +150,10 @@ class TranscriptLogger(FrameProcessor):
             self._current_assistant_text.append(frame.text)
 
         elif isinstance(frame, LLMFullResponseEndFrame):
-            self._in_response = False
-            full_text = "".join(self._current_assistant_text)
-            if full_text.strip() and self._on_assistant_text:
-                self._on_assistant_text(full_text)
+            self._flush_assistant_text()
+
+        elif isinstance(frame, (InterruptionFrame, EndFrame, CancelFrame)) and self._in_response:
+            self._flush_assistant_text()
 
         await self.push_frame(frame, direction)
 
@@ -583,15 +597,28 @@ async def create_bot(
     messages = [{"role": "system", "content": system_prompt}]
     context = LLMContext(messages=messages)
 
+    # Use explicit VAD + timeout-based turn control instead of Pipecat's
+    # default LocalSmartTurnAnalyzerV3. In practice the hidden default plus a
+    # 1.0s controller timeout was finalizing normal mid-sentence pauses and
+    # producing fragmented user turns.
+    user_turn_strategies = UserTurnStrategies(
+        start=[
+            VADUserTurnStartStrategy(enable_interruptions=False),
+        ],
+        stop=[
+            SpeechTimeoutUserTurnStopStrategy(
+                user_speech_timeout=settings.USER_SPEECH_TIMEOUT,
+            ),
+        ],
+    )
+
     user_aggregator_params = LLMUserAggregatorParams(
+        user_turn_strategies=user_turn_strategies,
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
                 min_volume=settings.VAD_MIN_VOLUME,
-                # Require 0.8s of sustained speech before confirming voice start.
-                # 0.4s was still too sensitive — bot's own TTS output was
-                # triggering VAD despite echo cancellation, causing constant
-                # interruptions (6 user turns, all fragments).
-                start_secs=0.8,
+                start_secs=settings.VAD_START_SECS,
+                stop_secs=settings.VAD_STOP_SECS,
             )
         ),
         user_turn_stop_timeout=settings.USER_TURN_STOP_TIMEOUT,
