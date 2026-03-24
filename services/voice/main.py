@@ -244,6 +244,16 @@ async def _persist_session_complete(voice_session: Optional["VoiceSession"]) -> 
 
     # Check there is actual content to persist
     transcript = bundle.get("transcript", [])
+    user_turns = [t for t in transcript if t.get("role") == "user"]
+    assistant_turns = [t for t in transcript if t.get("role") == "assistant"]
+    logger.info(
+        "[session=%s] Enriched bundle: %d total turns (%d user, %d assistant), %d emotions",
+        voice_session.session_id,
+        len(transcript),
+        len(user_turns),
+        len(assistant_turns),
+        len(bundle.get("emotions", [])),
+    )
     if not transcript:
         logger.info(
             "[session=%s] Empty enriched transcript — skipping session-complete",

@@ -146,6 +146,39 @@ class SessionMetrics:
                 was_interrupted=False,
             ))
 
+    def complete_pending_user_turn(self, text: str) -> None:
+        """Complete the pending user turn with transcription text.
+
+        Called from TranscriptLogger (which sits before context_aggregator.user()
+        and therefore reliably sees TranscriptionFrame). MetricsOutputObserver's
+        TranscriptionFrame handler is a no-op because context_aggregator.user()
+        consumes the frame before it reaches the output observer.
+        """
+        with self._lock:
+            pending = self._pending_user_turn
+            if pending is None:
+                return
+            self._pending_user_turn = None
+
+        turn = TurnMetrics(
+            turn_index=pending.turn_index,
+            role="user",
+            started_at=pending.started_at,
+            ended_at=pending.ended_at,
+            duration_secs=pending.duration_secs,
+            word_count=len(text.split()),
+            text=text,
+            pause_before_secs=pending.pause_before_secs,
+            was_interrupted=False,
+        )
+        self.add_turn(turn)
+        logger.info(
+            "[metrics] User turn %d completed: %d words, %.1fs",
+            turn.turn_index,
+            turn.word_count,
+            turn.duration_secs,
+        )
+
     def allocate_turn_index(self) -> int:
         with self._lock:
             idx = self._next_turn_index

@@ -83,12 +83,23 @@ def get_daily_import_error() -> Optional[str]:
 
 
 class TranscriptLogger(FrameProcessor):
-    """Captures user transcriptions and assistant responses for persistence."""
+    """Captures user transcriptions and assistant responses for persistence.
 
-    def __init__(self, on_user_text: Any = None, on_assistant_text: Any = None) -> None:
+    Also completes pending user turns in SessionMetrics (if wired).
+    MetricsOutputObserver cannot do this because context_aggregator.user()
+    consumes TranscriptionFrame before it reaches the output observer.
+    """
+
+    def __init__(
+        self,
+        on_user_text: Any = None,
+        on_assistant_text: Any = None,
+        session_metrics: Optional["SessionMetrics"] = None,
+    ) -> None:
         super().__init__()
         self._on_user_text = on_user_text
         self._on_assistant_text = on_assistant_text
+        self._session_metrics = session_metrics
         self._current_assistant_text: list[str] = []
         self._in_response = False
         self._reflection_manager: Any = None
@@ -103,6 +114,12 @@ class TranscriptLogger(FrameProcessor):
         if isinstance(frame, TranscriptionFrame) and frame.finalized and frame.text.strip():
             if self._on_user_text:
                 self._on_user_text(frame.text)
+
+            # Complete pending user turn in SessionMetrics.
+            # This is the only reliable capture point — TranscriptionFrame
+            # gets consumed by context_aggregator.user() downstream.
+            if self._session_metrics:
+                self._session_metrics.complete_pending_user_turn(frame.text)
 
             # Check for therapeutic reflection pause
             if self._reflection_manager:
@@ -589,6 +606,7 @@ async def create_bot(
     transcript_logger = TranscriptLogger(
         on_user_text=on_user_text,
         on_assistant_text=on_assistant_text,
+        session_metrics=session_metrics,
     )
     crisis_check = CrisisCheckProcessor(
         moc_session_id=moc_session_id,
