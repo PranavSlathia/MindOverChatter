@@ -1,0 +1,273 @@
+{
+  "recovery_metadata": {
+    "recovered_at": "2026-03-24",
+    "sources": [
+      "69f582b2-b410-4e41-b287-3017ea64285f.jsonl (Mar 14-16, memory block backfill + therapy plan with relationship context)",
+      "6021b5bb-bec6-4c1b-a7f0-fe67a53595a5.jsonl (Mar 13, therapy plan v1 with full JSON)",
+      "9aae601b-69e4-44e3-aaf6-2bd8df037f40.jsonl (Mar 24, current session recovery plan)"
+    ],
+    "user_id": "89c09484-832d-4d34-9c62-7fc2dc6b1f45",
+    "notes": "Data recovered from Claude Code JSONL conversation logs. The memory blocks are from a March 14 deliberate SQL backfill. The therapy plan is the latest complete version found (two versions: v1 from Mar 13 assess_map mode, v2 from Mar 14 with updated unexplored_areas including relationship and health). The Mar 14 version has the richest clinical content."
+  },
+
+  "memory_blocks": {
+    "user/overview": "Pranav, 26. Lives in hometown (moved back, lost independence). Struggles with emotional numbness and emptiness since COVID. Irregular sleep and eating habits (waking 2pm+, not eating despite hunger). Works from desk \u2014 two screens, iOS dev, personal projects including MindOverChatter. Vapes cannabis daily. Carries financial pressure from debt, living on ~10,000 rupees/month. Has managed chronic health challenges quietly since teenage years. Future vision includes things but no people.",
+
+    "user/goals": "Rebuilding sense of self and self-worth from within, not through relationships or others. Improving sleep and eating habits. Better daily routine \u2014 waking earlier is meaningful to him. Wants to find people in his vision of the future. Wants to feel the aliveness he felt in Thailand again. Making MindOverChatter \u2014 wellness companion app.",
+
+    "user/triggers": "Waking up late triggers anxiety spiral about the day. Weekend nights (Saturday/Sunday) feel empty and shallow \u2014 same desk, same screens, no people. Overwhelming pressure when alone tips from comfort to weight. Starting the day requires activation energy he often cannot find. Work keeps pain at bay but also traps him. Future feels things-focused, not people-focused \u2014 that gap surfaces as grief.",
+
+    "user/coping_strategies": "Vaping cannabis bridges the gap between wanting to eat and not getting up \u2014 uses it to manage hunger cue. Working and coding as distraction keeps pain at bay. FIFA as mental rest. Expressing thoughts in conversation brings relief. Breaking tasks into small steps when overwhelmed (freshen up, eat, then work). Talking through things even briefly helps him move forward. Disappearing into shows or gaming when depleted \u2014 gets fully hooked (Stranger Things at 6:30am, Lincoln Lawyer all-nighter). In stories, stays present without anticipating outcomes \u2014 contrasts with his tendency to armor up against what might go wrong in real life.",
+
+    "user/relationships": "Seven-year relationship ended definitively on December 25th. Pranav realized he longs not for his ex specifically, but for the security and self-worth he felt when with her \u2014 rebuilding that from within is the real work. Was with a compatible new person last year but was emotionally unavailable (still mid-grief). Friends lost to addiction. Betrayed by trusted friend who took Rs90,000. Father has bipolar disorder \u2014 relationship has changed. Lost grandfather January 2023, the one person who offered unconditional love and made him feel like enough.",
+
+    "user/origin_story": "Pre-COVID: in a seven-year relationship, confident of a happy future, felt secure and self-worth intact. COVID disrupted college years and formative experiences \u2014 hollow grief. Grandfather died January 2023 \u2014 the one source of unconditional love. Father developed bipolar disorder. Moved back to hometown, lost independence. December 25th: final closure from ex. Past 2-3 months of hollowness tracks exactly to that closure. Has survived layered loss: friends to addiction, financial betrayal, relationship grief, COVID college loss.",
+
+    "user/overview_alt_later_version": "Pranav, 26. Lives in hometown (moved back, lost independence). Struggles with emotional numbness and emptiness since COVID. Irregular sleep and eating habits (waking 2pm+, not eating despite hunger). Works from desk \u2014 two screens, iOS dev, personal projects including MindOverChatter. Vapes cannabis daily. Future vision includes things but no people. Recent small wins: cooked breakfast, woke at noon, started work."
+  },
+
+  "calibration": "(not directly recovered from JSONL \u2014 needs regeneration from memories. The calibration hook ran after sessions but the output text was not captured in dev logs. Recommended approach: use the therapy plan engagement_notes as seed content for the calibration block.)",
+
+  "calibration_seed_from_therapy_plan": "Match his light, forward-moving energy; don't introduce heaviness. Follow his lead on depth \u2014 he'll signal when he's ready to go further. He carried real weight last session \u2014 relationship grief, health, finances. Open gently; honor what he shared. Don't rush back into analysis.",
+
+  "therapy_plan": {
+    "_version_note": "Two versions found. V1 (Mar 13, assess_map) is the structurally complete version with all fields. V2 (Mar 14) has updated unexplored_areas incorporating relationship and health context from the March 11 deep session. The V2 unexplored_areas should be merged into V1 structure.",
+
+    "v1_complete_plan_mar13": {
+      "engagement_notes": "Match his light, forward-moving energy; don't introduce heaviness. Follow his lead on depth \u2014 he'll signal when he's ready to go further.",
+      "unexplored_areas": [
+        {
+          "notes": "Formulation context identifies this as a central destabilizing event. Pranav has not directly addressed it yet. Premature probing risks rupture; let him lead.",
+          "topic": "The ended identity-anchoring relationship",
+          "approach": "If he references the past, relationships, or feeling 'not the same,' gently acknowledge the change and invite him to say more.",
+          "priority": "low"
+        },
+        {
+          "notes": "Explicitly flagged in memories. This belief likely underlies self-critical patterns and may intensify when he perceives underperformance. Clinically significant anchor point.",
+          "topic": "Self-concept as 'not a good person'",
+          "approach": "When he expresses guilt or self-criticism in any context, softly surface it: 'It sounds like you were pretty hard on yourself there \u2014 is that familiar?'",
+          "priority": "high"
+        },
+        {
+          "notes": "Pranav was earning at 16, aware from a young age no one would save him. This likely created adaptive hypervigilance that now misfires as time panic and pressure around productivity.",
+          "topic": "Early self-sufficiency and the cost of being capable young",
+          "approach": "Explore through curiosity about his early work years \u2014 'What was that like, building things so young?' \u2014 not as excavation, but as appreciation that opens reflection.",
+          "priority": "medium"
+        },
+        {
+          "notes": "He experiences exhaustion from figuring everything out alone. With father nearby but formulation suggesting relational loss, the nature of his felt support structure is clinically unclear.",
+          "topic": "The loneliness of self-reliance and its current texture",
+          "approach": "If he mentions feeling stuck or unsupported, ask lightly: 'Do you have people you can think out loud with, or does it mostly land on you?'",
+          "priority": "medium"
+        },
+        {
+          "notes": "Formulation flags years of cumulative losses. This is a trauma-adjacent area not yet surfaced directly. Requires significant rapport before exploration.",
+          "topic": "Cumulative grief and the sense of compounded loss",
+          "approach": "Only approach if Pranav introduces reflective or retrospective content organically. Avoid initiating.",
+          "priority": "low"
+        }
+      ],
+      "natural_callbacks": [
+        {
+          "priority": "high",
+          "trigger_topic": "Talking about a bad day, slow start, or not getting things done",
+          "probe_question": "When a day goes sideways like that, what does the voice in your head usually say about you \u2014 not about the day, but about you?"
+        },
+        {
+          "priority": "high",
+          "trigger_topic": "Mentioning peers, friends doing well, or comparing himself to others",
+          "probe_question": "When you see that, what does it stir up for you \u2014 is it more like motivation, or more like a quiet pressure?"
+        },
+        {
+          "priority": "medium",
+          "trigger_topic": "Mentioning his dad or family",
+          "probe_question": "What's it like living with your dad right now \u2014 do you two talk much, or is it more just sharing the space?"
+        },
+        {
+          "priority": "medium",
+          "trigger_topic": "Reflecting on how far he's come or what he's built",
+          "probe_question": "You've clearly built a lot on your own \u2014 do you ever let yourself feel good about that, or does the next thing always move in pretty fast?"
+        },
+        {
+          "priority": "high",
+          "trigger_topic": "Feeling tired, isolated, or like things are heavy",
+          "probe_question": "When it feels like that, is there anyone you can just be honest with \u2014 or does it mostly stay inside until you've sorted it out?"
+        }
+      ],
+      "therapeutic_goals": [
+        {
+          "goal": "Interrupt time-panic and all-at-once catastrophizing through structured behavioral decomposition",
+          "progress": "nascent",
+          "description": "Pranav increasingly catches the spiral early and breaks tasks into sequenced steps rather than freezing or catastrophizing the whole day",
+          "visible_label": "Getting unstuck faster"
+        },
+        {
+          "goal": "Soften the harsh internalized self-evaluator driving the 'not a good person' narrative",
+          "progress": "nascent",
+          "description": "Pranav begins to hold his missteps and slow days with more neutrality, without defaulting to global self-condemnation",
+          "visible_label": "Being fairer to yourself"
+        },
+        {
+          "goal": "Rebuild a stable, self-authored identity not contingent on external achievement or relational validation",
+          "progress": "nascent",
+          "description": "Pranav can articulate who he is beyond what he has accomplished or who has seen him, and this feels grounded rather than hollow",
+          "visible_label": "Knowing who you are on a quiet day"
+        },
+        {
+          "goal": "Reduce functional isolation by building comfort naming struggle without shame",
+          "progress": "nascent",
+          "description": "Pranav regularly uses the companion space (and ideally others) to think out loud, rather than only reporting after he has already solved something",
+          "visible_label": "Not carrying it all alone"
+        }
+      ],
+      "next_session_focus": "Check in on how the day unfolded after this morning. Gently track whether the step-by-step approach held. Lightly probe self-judgment if he reports a mixed day. Reinforce the value of the check-in itself.",
+      "working_hypotheses": [
+        {
+          "evidence": "Recurring trigger: financial safety net pressure, peer comparison triggers, all-at-once thinking in session, early self-sufficiency narrative.",
+          "confidence": 0.72,
+          "hypothesis": "The morning time-panic pattern is not primarily about time management \u2014 it functions as a micro-activation of a deeper fear that any deviation from performance signals permanent falling-behind relative to peers, rooted in early financial precarity.",
+          "internal_only": true
+        },
+        {
+          "evidence": "Memory flagged explicitly twice; user described as self-confident about capabilities yet holds this contradictory negative self-view, suggesting it serves a function.",
+          "confidence": 0.65,
+          "hypothesis": "The 'not a good person' self-belief may be a load-bearing cognitive structure \u2014 a way of maintaining vigilance and drive. Threatening it directly may be experienced as destabilizing rather than relieving.",
+          "internal_only": true
+        },
+        {
+          "evidence": "Session described as brief, light, quickly grounding; formulation notes identity destabilization from relationship end which did not surface; early awareness that 'nobody would save him' may have taught rapid reorientation.",
+          "confidence": 0.6,
+          "hypothesis": "Pranav's characteristic pattern of quickly reframing and moving forward (seen in today's session) may reflect adaptive resilience but also a habituated avoidance of sitting with discomfort \u2014 particularly grief or relational pain.",
+          "internal_only": true
+        },
+        {
+          "evidence": "Father is government school teacher (modest means), user has no inherited wealth, user wants to give back to parents, user got 40% raise and early achievements suggest achievement is relationally motivated.",
+          "confidence": 0.55,
+          "hypothesis": "The goal of giving back to his parents may carry significant emotional weight \u2014 possibly functioning as a redemptive narrative that organizes his ambition and partially explains the intensity of shame when he perceives himself as falling short.",
+          "internal_only": true
+        }
+      ],
+      "directive_authority": "medium",
+      "recommended_session_mode": "assess_map"
+    },
+
+    "v2_updated_unexplored_areas_mar14": [
+      {
+        "notes": "This is newly surfaced and clinically significant. A seven-year relationship ending doesn't just remove a person \u2014 it removes an entire imagined life. Combined with the grandfather's death, Pranav has lost two of the primary containers for his future self. The relational absence in his future-imagining now has a concrete cause.",
+        "topic": "The seven-year relationship and the future it held",
+        "approach": "If he references the relationship or feeling like the future collapsed, stay close: 'When that ended \u2014 did it feel like losing her, or more like losing a whole version of what your life was going to be?'",
+        "priority": "high"
+      },
+      {
+        "notes": "Still clinically central and unexplored. With the relationship grief now surfaced, the pattern of losing relational anchors is sharper. The grandfather may have been the prototype \u2014 the first and deepest source of feeling enough. Both losses compound.",
+        "topic": "The grandfather as the lost source of unconditional acceptance",
+        "approach": "If he references the grandfather or feeling unseen, invite him to stay: 'What was it about him that made you feel that way \u2014 was it something he said, or just how you felt when you were around him?'",
+        "priority": "high"
+      },
+      {
+        "notes": "Named for the first time this session. Managing health without support since teenage years adds a significant load to the self-reliance narrative \u2014 his body has been a source of quiet difficulty he has not had space to name or grieve. This also intersects with the somatic numbing pattern.",
+        "topic": "Chronic health challenges carried quietly since adolescence",
+        "approach": "If he mentions his body, energy, or health in passing, gently slow down: 'You mentioned that's been with you since you were young \u2014 is that something you've ever really had space to talk about, or has it mostly just been something to manage?'",
+        "priority": "medium"
+      },
+      {
+        "notes": "The relationship ending may have activated this belief acutely \u2014 endings often carry implicit self-blame. With the grandfather gone and the relationship gone, there is no relational counterforce left. This belief may now operate more freely and with less friction.",
+        "topic": "Self-concept as 'not a good person'",
+        "approach": "When self-blame surfaces around the relationship or his patterns, softly surface it: 'When you go through that \u2014 the analysis, the loop \u2014 what does it say about you, underneath all of it?'",
+        "priority": "high"
+      },
+      {
+        "notes": "Ongoing and still unaddressed. With financial constraint, relationship grief, and health challenges now in the picture, the home environment carries compounded weight. The silence around this may reflect how much Pranav normalizes impossible loads.",
+        "topic": "Living with a father whose mental health is deteriorating",
+        "approach": "If he mentions home or his dad, ask: 'What's it actually like day to day living with him now \u2014 is it something you carry quietly?'",
+        "priority": "medium"
+      }
+    ],
+
+    "v2_updated_natural_callbacks_mar14": [
+      {
+        "priority": "high",
+        "trigger_topic": "Mentioning the relationship, a past version of the future, or something that used to feel possible",
+        "probe_question": "When that ended \u2014 did it feel more like losing her, or like losing a whole version of what your life was going to be?"
+      },
+      {
+        "priority": "high",
+        "trigger_topic": "Describing a loop of thinking about himself that doesn't go anywhere",
+        "probe_question": "When you notice you're in that loop \u2014 is there ever a part of you that just wants to stop understanding it and feel something instead?"
+      },
+      {
+        "priority": "high",
+        "trigger_topic": "Mentioning his grandfather or someone who really knew him",
+        "probe_question": "What do you miss most about him \u2014 was it something he said, or more just how you felt when you were around him?"
+      },
+      {
+        "priority": "medium",
+        "trigger_topic": "Mentioning a moment of absorption, enjoyment, or losing track of time",
+        "probe_question": "What was that like \u2014 when you were actually in it, not thinking about everything else?"
+      },
+      {
+        "priority": "medium",
+        "trigger_topic": "Mentioning his health or body in passing",
+        "probe_question": "You mentioned that's been with you since you were young \u2014 is that something you've ever really had space to talk about, or has it mostly just been something to manage?"
+      }
+    ],
+
+    "v2_engagement_notes_mar14": "He carried real weight last session \u2014 relationship grief, health, finances. Open gently; honor what he shared. Don't rush back into analysis."
+  },
+
+  "formulation": {
+    "_note": "Exact formulation snapshot JSON not directly captured in JSONL tool results. The formulation content is reflected in the therapy plan working_hypotheses and unexplored_areas. Key formulation elements extracted from context:",
+    "presentingTheme_inferred": "Identity destabilization and emotional numbness following cumulative relational losses (relationship, grandfather, friends) compounded by COVID-era disruption and financial precarity",
+    "activeStates_inferred": [
+      "emotional_numbness",
+      "grief_compounded",
+      "identity_destabilization",
+      "self_worth_erosion",
+      "functional_isolation"
+    ],
+    "questionsWorthExploring_inferred": [
+      "The seven-year relationship and the future it held",
+      "The grandfather as the lost source of unconditional acceptance",
+      "Self-concept as 'not a good person' \u2014 load-bearing belief",
+      "Chronic health challenges carried quietly since adolescence",
+      "Living with a father whose mental health is deteriorating",
+      "Early self-sufficiency and the cost of being capable young",
+      "The loneliness of self-reliance and its current texture",
+      "Cumulative grief and the sense of compounded loss"
+    ]
+  },
+
+  "additional_memories": [
+    "Pranav was earning at 16, aware from a young age no one would save him",
+    "Father is a government school teacher (modest means)",
+    "User has no inherited wealth",
+    "User wants to give back to parents",
+    "Got a 40% raise \u2014 early achievements suggest achievement is relationally motivated",
+    "Describes himself as self-confident about capabilities yet holds contradictory 'not a good person' belief",
+    "Thailand trip produced a feeling of aliveness he wants to recapture",
+    "December 25th was the definitive closure from the seven-year relationship",
+    "Was with a compatible new person last year but was emotionally unavailable (still mid-grief)",
+    "Betrayed by trusted friend who took Rs90,000",
+    "Friends lost to addiction",
+    "Cooked breakfast recently \u2014 noted as a small win",
+    "Woke at noon recently \u2014 noted as improvement",
+    "Gets fully absorbed in shows (Stranger Things at 6:30am, Lincoln Lawyer all-nighter)",
+    "In stories, stays present without anticipating outcomes \u2014 contrasts with real-life armoring",
+    "Financial pressure from debt, living on ~10,000 rupees/month",
+    "Chronic health challenges managed quietly since teenage years",
+    "Moved back to hometown, lost independence",
+    "COVID disrupted college years and formative experiences",
+    "Past 2-3 months of hollowness tracks exactly to the December 25th closure"
+  ],
+
+  "recovery_plan_reference": {
+    "mem0_history_db": "~/.mem0/history.db contains 287 Mem0 memory records (through March 11, 2026). Need to deduplicate (ADD/UPDATE/DELETE chain) to get ~100-150 living memories.",
+    "recovery_script_planned": "scripts/restore-therapeutic-context.ts \u2014 already planned in current session (9aae601b)",
+    "phases": [
+      "Phase 1: Re-import Mem0 memories from history.db",
+      "Phase 2: Use this recovered JSONL data to populate memory blocks",
+      "Phase 3: Regenerate formulation and therapy plan using restored memories",
+      "Phase 4: Update user profile"
+    ]
+  }
+}
