@@ -1,11 +1,11 @@
-CREATE TYPE "public"."assessment_severity" AS ENUM('minimal', 'mild', 'moderate', 'moderately_severe', 'severe');--> statement-breakpoint
-CREATE TYPE "public"."assessment_type" AS ENUM('phq9', 'gad7');--> statement-breakpoint
-CREATE TYPE "public"."emotion_channel" AS ENUM('text', 'voice', 'face');--> statement-breakpoint
-CREATE TYPE "public"."session_status" AS ENUM('active', 'completed', 'crisis_escalated');--> statement-breakpoint
-CREATE TYPE "public"."message_role" AS ENUM('user', 'assistant');--> statement-breakpoint
-CREATE TYPE "public"."mood_source" AS ENUM('user_input', 'ai_inferred', 'assessment');--> statement-breakpoint
-CREATE TYPE "public"."memory_type" AS ENUM('profile_fact', 'relationship', 'goal', 'coping_strategy', 'recurring_trigger', 'life_event', 'symptom_episode', 'unresolved_thread', 'safety_critical', 'win');--> statement-breakpoint
-CREATE TYPE "public"."summary_level" AS ENUM('turn', 'session', 'weekly', 'monthly', 'profile');--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."assessment_severity" AS ENUM('minimal', 'mild', 'moderate', 'moderately_severe', 'severe'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."assessment_type" AS ENUM('phq9', 'gad7'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."emotion_channel" AS ENUM('text', 'voice', 'face'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."session_status" AS ENUM('active', 'completed', 'crisis_escalated'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."message_role" AS ENUM('user', 'assistant'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."mood_source" AS ENUM('user_input', 'ai_inferred', 'assessment'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."memory_type" AS ENUM('profile_fact', 'relationship', 'goal', 'coping_strategy', 'recurring_trigger', 'life_event', 'symptom_episode', 'unresolved_thread', 'safety_critical', 'win'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+DO $$ BEGIN CREATE TYPE "public"."summary_level" AS ENUM('turn', 'session', 'weekly', 'monthly', 'profile'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
 CREATE TABLE "assessments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"session_id" uuid,

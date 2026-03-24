@@ -1,1 +1,1 @@
-ALTER TYPE "public"."assessment_type" ADD VALUE 'cbt_thought_record';
+ALTER TYPE "public"."assessment_type" ADD VALUE IF NOT EXISTS 'cbt_thought_record';
