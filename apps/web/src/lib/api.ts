@@ -1,3 +1,4 @@
+import type { ClinicalHandoffReport as SharedClinicalHandoffReport } from "@moc/shared/validators/clinical-report";
 import type { AppType } from "@moc/server/routes/index.js";
 import type { InferRequestType, InferResponseType } from "hono/client";
 import { hc } from "hono/client";
@@ -172,6 +173,26 @@ export interface VoiceStopResponse {
   status: string;
   voiceSessionId: string;
 }
+
+// ── Reflective Questions Types (from @moc/shared validators) ──
+
+export type {
+  QuestionStatus,
+  ReflectionStatus,
+  ReflectiveQuestionCard,
+} from "@moc/shared";
+
+// Re-export the card type under the name consumers expect
+import type { ReflectiveQuestionCard as _ReflectiveQuestionCard } from "@moc/shared";
+export type ReflectiveQuestion = _ReflectiveQuestionCard;
+
+// Crisis response type inferred from the Hono RPC route
+type SaveReflectionRPCResponse = InferResponseType<
+  (typeof client.api)["reflective-questions"][":id"]["reflect"]["$put"]
+>;
+export type ReflectiveCrisisResponse = Extract<SaveReflectionRPCResponse, { crisis: true }>;
+
+export type ClinicalHandoffReport = SharedClinicalHandoffReport;
 
 // ── Transcribe Response (raw fetch — FormData upload) ──────────────
 
@@ -447,4 +468,52 @@ export const api = {
     await throwIfError(res);
     return (await res.json()) as GetObservabilityAlertsSuccess;
   },
+
+  // ── Reflective Questions (Hono RPC — type-safe) ──────────────────
+
+  /** Fetch all reflective questions (open first, then answered, deferred last). */
+  getReflectiveQuestions: async (): Promise<ReflectiveQuestion[]> => {
+    const res = await client.api["reflective-questions"].$get();
+    await throwIfError(res);
+    const data = await res.json();
+    return data.questions;
+  },
+
+  /** Save or submit a reflection. submit=false saves draft, submit=true triggers crisis check. */
+  saveReflection: async (
+    questionId: string,
+    text: string,
+    submit = false,
+  ): Promise<ReflectiveQuestion | ReflectiveCrisisResponse> => {
+    const res = await client.api["reflective-questions"][":id"].reflect.$put({
+      param: { id: questionId },
+      json: { text, submit },
+    });
+    await throwIfError(res);
+    const data = await res.json() as { question: ReflectiveQuestion } | ReflectiveCrisisResponse;
+    return "question" in data ? data.question : data;
+  },
+
+  /** Defer a question — moves it to bottom / hides it. */
+  deferReflectiveQuestion: async (questionId: string): Promise<void> => {
+    const res = await client.api["reflective-questions"][":id"].defer.$post({
+      param: { id: questionId },
+    });
+    await throwIfError(res);
+  },
+
+  getLatestClinicalHandoffReport: async (): Promise<ClinicalHandoffReport> => {
+    const response = await fetch(`${API_BASE}/api/reports/latest`);
+    const data = await handleResponse<{ report: ClinicalHandoffReport }>(response);
+    return data.report;
+  },
+
+  generateClinicalHandoffReport: async (): Promise<ClinicalHandoffReport> => {
+    const response = await fetch(`${API_BASE}/api/reports/generate`, { method: "POST" });
+    const data = await handleResponse<{ report: ClinicalHandoffReport }>(response);
+    return data.report;
+  },
+
+  getClinicalHandoffPdfUrl: (): string => `${API_BASE}/api/reports/latest.pdf`,
+  getClinicalHandoffFhirUrl: (): string => `${API_BASE}/api/reports/latest.fhir`,
 };

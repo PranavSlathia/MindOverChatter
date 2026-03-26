@@ -11,3 +11,6 @@ export * from "./user-formulations";
 export * from "./therapy-plans";
 export * from "./memory-blocks";
 export * from "./turn-events";
+export * from "./reflective-questions";
+export * from "./patient-understanding";
+export * from "./clinical-handoff-reports";

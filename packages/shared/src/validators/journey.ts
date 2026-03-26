@@ -150,6 +150,15 @@ export const JourneyFormulationSchema = z.object({
     }),
   ),
   themeOfToday: z.string(),
+  copingSteps: z
+    .array(
+      z.object({
+        step: z.string(),
+        rationale: z.string(),
+        domain: DomainKeySchema,
+      }),
+    )
+    .optional(),
   dataConfidence: z.enum(["sparse", "emerging", "established"]),
   moodTrend: z.object({
     direction: z.enum(["improving", "stable", "declining"]),

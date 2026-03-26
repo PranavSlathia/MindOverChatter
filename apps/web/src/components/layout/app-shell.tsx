@@ -10,6 +10,7 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "MindOverChatter", subtitle: "Your Wellness Companion" },
   "/assessments": { title: "Assessments", subtitle: "Self-reflection tools and check-ins" },
   "/journey": { title: "Your Journey", subtitle: "Reflections, patterns, and progress" },
+  "/reports": { title: "Clinical Report", subtitle: "Structured handoff for a human therapist" },
   "/history": { title: "Session History", subtitle: "Review past conversations" },
   "/mood": { title: "Mood Tracker", subtitle: "Track how you feel over time" },
   "/profile": { title: "Profile", subtitle: "Manage your preferences" },

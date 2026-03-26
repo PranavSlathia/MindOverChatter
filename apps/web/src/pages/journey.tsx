@@ -64,7 +64,11 @@ export function JourneyPage() {
         setInsights(insightsData as JourneyFormulation);
         setLoadingInsights(false);
 
-        setTherapyPlanGoals(therapyData.goals, therapyData.hasTherapyPlan, therapyData.lastUpdatedAt ?? null);
+        setTherapyPlanGoals(
+          therapyData.goals,
+          therapyData.hasTherapyPlan,
+          therapyData.lastUpdatedAt ?? null,
+        );
         setLoadingTherapyPlan(false);
       } catch {
         setError("Failed to load journey data. Please try again.");
@@ -88,15 +92,21 @@ export function JourneyPage() {
     (item): item is { type: "mood"; data: TimelineMood } => item.type === "mood",
   );
 
-  const hasTimeline =
-    sessionItems.length > 0 || assessmentItems.length > 0 || moodItems.length > 0;
+  const hasTimeline = sessionItems.length > 0 || assessmentItems.length > 0 || moodItems.length > 0;
 
   const confidence = insights?.dataConfidence ?? "sparse";
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6">
       {/* Mood tracker link */}
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Link
+          to="/reports"
+          className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+          aria-label="Clinical handoff report"
+        >
+          Clinical Report
+        </Link>
         <Link
           to="/mood"
           className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
@@ -134,12 +144,13 @@ export function JourneyPage() {
       )}
 
       {/* Section 3.5: What We're Working Toward */}
-      {!isLoadingInsights && !isLoadingTherapyPlan && hasTherapyPlan && therapyPlanGoals.length > 0 && (
-        <WorkingToward goals={therapyPlanGoals} />
-      )}
+      {!isLoadingInsights &&
+        !isLoadingTherapyPlan &&
+        hasTherapyPlan &&
+        therapyPlanGoals.length > 0 && <WorkingToward goals={therapyPlanGoals} />}
 
-      {/* Section 4: Questions Worth Exploring */}
-      {!isLoadingInsights && insights && <ReflectiveQuestions formulation={insights} />}
+      {/* Section 4: Questions Worth Exploring (self-fetching) */}
+      <ReflectiveQuestions />
 
       {/* Section 5: What Might Help (merged ProtectiveStrengths + CopingSteps + ActionCards) */}
       {!isLoadingInsights && insights && <WhatMightHelp formulation={insights} />}

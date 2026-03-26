@@ -3,7 +3,8 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "./scripts/dev.sh",
+    "dev:turbo": "turbo dev",
     "build": "turbo build",
     "test": "turbo test",
     "lint": "turbo lint",
@@ -27,6 +28,7 @@
     "@biomejs/biome": "latest",
     "@playwright/test": "^1.58.2",
     "hygen": "latest",
+    "tsx": "^4.21.0",
     "turbo": "latest"
   },
   "pnpm": {

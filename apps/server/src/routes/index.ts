@@ -8,9 +8,11 @@ import home from "./home.js";
 import journey from "./journey.js";
 import moodLogs from "./mood-logs.js";
 import observability from "./observability.js";
+import reports from "./reports.js";
 import sessions from "./sessions.js";
 import settings from "./settings.js";
 import userProfile from "./user-profile.js";
+import reflectiveQuestions from "./reflective-questions.js";
 import voice from "./voice.js";
 
 const app = new Hono()
@@ -38,6 +40,8 @@ const app = new Hono()
   .route("/api", voice)
   .route("/api/settings", settings)
   .route("/api/observability", observability)
+  .route("/api/reflective-questions", reflectiveQuestions)
+  .route("/api/reports", reports)
   // Research sandbox — route guard inside research.ts enforces RESEARCH_ENABLED=true
   .route("/api/research", research);
 

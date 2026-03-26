@@ -3,6 +3,7 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
+    "types": ["node"],
     "paths": {
       "@moc/shared": ["../../packages/shared/src"],
       "@moc/shared/*": ["../../packages/shared/src/*"]

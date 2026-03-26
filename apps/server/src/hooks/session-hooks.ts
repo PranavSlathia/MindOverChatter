@@ -10,6 +10,7 @@ import {
   formatTherapyPlanBlock,
 } from "../services/therapy-plan-service.js";
 import { generateAndPersistFormulation } from "../services/formulation-service.js";
+import { generateAndPersistClinicalHandoffReport } from "../services/clinical-handoff-report-service.js";
 import {
   setSessionMode,
   setSessionAuthority,
@@ -18,8 +19,8 @@ import {
 } from "../sdk/session-manager.js";
 import { env } from "../env.js";
 import { db } from "../db/index.js";
-import { sessions as sessionsTable, sessionSummaries } from "../db/schema/index";
-import { eq } from "drizzle-orm";
+import { sessions as sessionsTable, sessionSummaries, reflectiveQuestions, userFormulations } from "../db/schema/index";
+import { eq, and, sql, ne, desc } from "drizzle-orm";
 import { summarizeSessionAsync } from "../services/memory-client.js";
 import { TherapyPlanSchema } from "@moc/shared";
 import {
@@ -249,7 +250,120 @@ export function registerSessionHooks(): void {
   registerOnEnd(
     "formulation",
     async (ctx: OnEndContext) => {
-      await generateAndPersistFormulation(ctx.userId, "session_end");
+      const result = await generateAndPersistFormulation(ctx.userId, "session_end");
+
+      // ── Extract questionsWorthExploring and insert as reflective questions ──
+      try {
+        const questions: Array<{ question: string; rationale?: string; linkedTo?: string }> =
+          Array.isArray(result?.snapshot?.questionsWorthExploring)
+            ? result.snapshot.questionsWorthExploring
+            : [];
+
+        if (questions.length === 0) return;
+
+        // Count current unanswered (open) questions — cap at 5
+        const [countRow] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(reflectiveQuestions)
+          .where(
+            and(
+              eq(reflectiveQuestions.userId, ctx.userId),
+              eq(reflectiveQuestions.status, "open"),
+            ),
+          );
+        let openCount = countRow?.count ?? 0;
+
+        // Get the latest formulation ID for sourceFormulationId
+        const [latestFormulationRow] = await db
+          .select({ id: userFormulations.id })
+          .from(userFormulations)
+          .where(eq(userFormulations.userId, ctx.userId))
+          .orderBy(desc(userFormulations.createdAt))
+          .limit(1);
+        const sourceFormulationId = latestFormulationRow?.id ?? null;
+
+        // Get existing non-retired question rows for dedup/reopen (all statuses except retired)
+        const existingRows = await db
+          .select({
+            id: reflectiveQuestions.id,
+            question: reflectiveQuestions.question,
+            status: reflectiveQuestions.status,
+            updatedAt: reflectiveQuestions.updatedAt,
+          })
+          .from(reflectiveQuestions)
+          .where(
+            and(
+              eq(reflectiveQuestions.userId, ctx.userId),
+              ne(reflectiveQuestions.status, "retired"),
+            ),
+          );
+        const existingByText = new Map(
+          existingRows.map((row) => [row.question.toLowerCase().trim(), row]),
+        );
+
+        for (const q of questions) {
+          if (openCount >= 5) break;
+
+          const normalizedText = q.question.toLowerCase().trim();
+          const existing = existingByText.get(normalizedText);
+
+          if (existing?.status === "open") continue;
+
+          if (existing && (existing.status === "answered" || existing.status === "deferred")) {
+            const hoursSinceLastUpdate =
+              (Date.now() - existing.updatedAt.getTime()) / (1000 * 60 * 60);
+            const shouldReopen = hoursSinceLastUpdate >= 24;
+            if (!shouldReopen) continue;
+
+            await db
+              .update(reflectiveQuestions)
+              .set({
+                status: "open",
+                rationale: q.rationale ?? null,
+                linkedTo: q.linkedTo ?? null,
+                sourceFormulationId,
+                sourceSessionId: ctx.sessionId,
+                updatedAt: new Date(),
+              })
+              .where(eq(reflectiveQuestions.id, existing.id));
+
+            openCount++;
+            existingByText.set(normalizedText, {
+              ...existing,
+              status: "open",
+              updatedAt: new Date(),
+            });
+            continue;
+          }
+
+          await db.insert(reflectiveQuestions).values({
+            userId: ctx.userId,
+            question: q.question,
+            rationale: q.rationale ?? null,
+            linkedTo: q.linkedTo ?? null,
+            sourceFormulationId,
+            sourceSessionId: ctx.sessionId,
+          });
+
+          existingByText.set(normalizedText, {
+            id: crypto.randomUUID(),
+            question: q.question,
+            status: "open",
+            updatedAt: new Date(),
+          });
+          openCount++;
+        }
+
+        console.log(
+          `[formulation-hook] Inserted reflective questions for user ${ctx.userId} (session ${ctx.sessionId})`,
+        );
+      } catch (err) {
+        // Fire-and-forget — don't let question insertion failure break the hook
+        console.error(
+          `[formulation-hook] Failed to insert reflective questions:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     },
     "background",
   );
@@ -260,6 +374,16 @@ export function registerSessionHooks(): void {
     "therapy-plan",
     async (ctx: OnEndContext) => {
       await generateAndPersistTherapyPlan(ctx.userId, "session_end");
+    },
+    "background",
+  );
+
+  // ── Hook: clinical-handoff-sync (onEnd, background) ───────────
+
+  registerOnEnd(
+    "clinical-handoff-sync",
+    async (ctx: OnEndContext) => {
+      await generateAndPersistClinicalHandoffReport(ctx.userId, "session_end");
     },
     "background",
   );

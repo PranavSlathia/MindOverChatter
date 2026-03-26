@@ -22,7 +22,11 @@ import type { TherapyPlan } from "@moc/shared";
 
 // ── Types ───────────────────────────────────────────────────────
 
-export type TherapyPlanTrigger = "session_end" | "assessment_submit" | "manual";
+export type TherapyPlanTrigger =
+  | "session_end"
+  | "assessment_submit"
+  | "reflection_submit"
+  | "manual";
 
 // ── Token budget caps ────────────────────────────────────────────
 

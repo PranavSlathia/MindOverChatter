@@ -31,6 +31,7 @@ export type FormulationTrigger =
   | "session_end"
   | "session_end_fallback"   // Claude failed; row contains algorithmic data only
   | "assessment_submit"
+  | "reflection_submit"
   | "manual";
 
 export interface FormulationResult {

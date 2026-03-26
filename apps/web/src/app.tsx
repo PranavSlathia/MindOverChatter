@@ -8,6 +8,7 @@ import { HomePage } from "./pages/home.js";
 import { JourneyPage } from "./pages/journey.js";
 import { MoodPage } from "./pages/mood.js";
 import { ObservabilityPage } from "./pages/observability.js";
+import { ReportsPage } from "./pages/reports.js";
 import { SettingsPage } from "./pages/settings.js";
 
 export function App() {
@@ -23,6 +24,7 @@ export function App() {
           <Route path="/journey" element={<JourneyPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/mood" element={<MoodPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/observability" element={<ObservabilityPage />} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />

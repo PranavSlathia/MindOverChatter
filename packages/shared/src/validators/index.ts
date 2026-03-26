@@ -10,3 +10,5 @@ export * from "./user-profile.js";
 export * from "./voice.js";
 export * from "./therapy-plan.js";
 export * from "./research.js";
+export * from "./reflective-question.js";
+export * from "./clinical-report.js";

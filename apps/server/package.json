@@ -9,19 +9,20 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "hono": "latest",
     "@hono/node-server": "latest",
     "@hono/zod-validator": "latest",
+    "@moc/shared": "workspace:*",
     "drizzle-orm": "latest",
+    "hono": "latest",
     "postgres": "latest",
-    "zod": "latest",
-    "@moc/shared": "workspace:*"
+    "zod": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
-    "typescript": "latest",
-    "tsx": "latest",
     "drizzle-kit": "latest",
+
+    "tsx": "latest",
+    "typescript": "latest",
     "vitest": "latest"
   }
 }
