@@ -16,6 +16,7 @@ import {
   setSessionAuthority,
   injectSessionContext,
   spawnClaudeStreaming,
+  spawnClaudeWithFallback,
 } from "../sdk/session-manager.js";
 import { env } from "../env.js";
 import { db } from "../db/index.js";
@@ -487,7 +488,7 @@ Rules:
       let parsed: Record<string, string | null> | null = null;
 
       try {
-        const rawResponse = await spawnClaudeStreaming(prompt, () => {});
+        const rawResponse = await spawnClaudeWithFallback(prompt, "user-memory-blocks");
         if (rawResponse.trim()) {
           let jsonStr = rawResponse.trim();
           const fence = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -610,7 +611,7 @@ Rules:
 - Cover ONLY: tone, pacing, language preference, question style
 - No clinical labels, diagnoses, or treatment references`;
 
-      const result = await spawnClaudeStreaming(calibrationPrompt, () => {});
+      const result = await spawnClaudeWithFallback(calibrationPrompt, "calibration-update");
 
       if (!result.trim()) {
         console.warn(

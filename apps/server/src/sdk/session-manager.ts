@@ -568,6 +568,36 @@ export async function createSdkSession(
 }
 
 /**
+ * Spawn Claude for a background task with Codex SDK fallback.
+ * Used by post-session hooks (therapy-plan, memory-blocks, calibration)
+ * where Claude CLI may fail with exit code 1 (rate limit/auth).
+ * If Claude fails, retries with Codex SDK which uses a separate binary.
+ *
+ * NOT for interactive streaming — only for background JSON generation.
+ */
+export async function spawnClaudeWithFallback(
+  prompt: string,
+  label: string,
+  modelOverride?: string,
+): Promise<string> {
+  try {
+    const result = await spawnClaudeStreaming(prompt, () => {}, modelOverride);
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[${label}] Claude failed: ${msg} — trying Codex fallback`);
+
+    const { runCodexFallback } = await import("../services/cli-spawner.js");
+    const codexResult = await runCodexFallback(prompt, label);
+    if (codexResult) {
+      console.log(`[${label}] Codex fallback succeeded (${codexResult.length} chars)`);
+      return codexResult;
+    }
+    throw new Error(`Both Claude and Codex failed for ${label}: ${msg}`);
+  }
+}
+
+/**
  * Send a message to Claude and get a response.
  *
  * The full conversation history is assembled into the prompt so Claude

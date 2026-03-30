@@ -288,3 +288,18 @@ export async function spawnWithGeminiFallback(options: {
 }): Promise<string | null> {
   return spawnWithCodexSdk(options);
 }
+
+/**
+ * Run a prompt through Codex SDK for background hook fallback.
+ * Used when Claude CLI fails (exit code 1) for therapy-plan, memory-blocks, etc.
+ * Codex uses a separate binary and auth — independent from Claude rate limits.
+ *
+ * @returns The text response, or null on failure.
+ */
+export async function runCodexFallback(prompt: string, label: string): Promise<string | null> {
+  return spawnWithCodexSdk({
+    prompt,
+    timeoutMs: 120_000, // Background hooks can afford longer timeout
+    label,
+  });
+}
