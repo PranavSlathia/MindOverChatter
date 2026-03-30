@@ -139,26 +139,26 @@ function startLoginProcess(tool: "claude" | "gemini" | "codex"): { success: bool
   switch (tool) {
     case "claude":
       command = "claude";
-      args = [];
+      args = ["auth", "login"];
       break;
     case "gemini":
       command = "gemini";
-      args = [];
+      args = ["auth", "login"];
       break;
     case "codex":
       command = "codex";
-      args = [];
+      args = ["login"];
       break;
   }
 
   try {
-    // Spawn the login process in the background
-    // These CLIs open a browser for OAuth — the user completes login there
+    // Spawn the login process — these CLIs open a browser for OAuth.
+    // stdio: "inherit" lets the CLI interact with the terminal and open the browser.
     const child = spawn(command, args, {
       env: cleanProcessEnv(),
       cwd: "/tmp",
       detached: true,
-      stdio: "ignore",
+      stdio: "inherit",
     });
 
     child.unref();
@@ -166,10 +166,15 @@ function startLoginProcess(tool: "claude" | "gemini" | "codex"): { success: bool
     if (child.pid) {
       activeLogins.set(tool, { pid: child.pid, startedAt: Date.now() });
 
-      // Clean up after 5 minutes (login should be done by then)
+      // Clean up tracking after 5 minutes (login should be done by then)
       setTimeout(() => {
         activeLogins.delete(tool);
       }, 5 * 60 * 1000);
+
+      // Also clean up when the process exits
+      child.on("exit", () => {
+        activeLogins.delete(tool);
+      });
     }
 
     return {

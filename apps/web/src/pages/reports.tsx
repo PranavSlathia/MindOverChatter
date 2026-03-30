@@ -103,7 +103,9 @@ export function ReportsPage() {
       setError(null);
       try {
         const nextReport = await api.getLatestClinicalHandoffReport();
-        if (!cancelled) setReport(nextReport);
+        if (!cancelled) {
+          setReport(nextReport);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load report");
@@ -152,7 +154,32 @@ export function ReportsPage() {
     );
   }
 
-  if (!report) return null;
+  if (!report) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-6">
+        <div className="rounded-2xl border border-foreground/10 bg-white p-6 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground/40">
+            Clinician Handoff
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-foreground">No report generated yet</h2>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-foreground/65">
+            Generate the first clinician-facing handoff from the current evidence in sessions,
+            assessments, formulations, and reflections.
+          </p>
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => void refreshReport()}
+              disabled={isRefreshing}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {isRefreshing ? "Generating..." : "Generate Report"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6">
@@ -177,6 +204,14 @@ export function ReportsPage() {
             >
               {isRefreshing ? "Refreshing..." : "Refresh"}
             </button>
+            <a
+              href={api.getClinicalHandoffPdfUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-foreground/15 px-3 py-2 text-xs font-medium text-foreground/60 transition-colors hover:bg-foreground/5"
+            >
+              PDF
+            </a>
             <a
               href={api.getClinicalHandoffFhirUrl()}
               target="_blank"
@@ -228,8 +263,8 @@ export function ReportsPage() {
                       <div>
                         <p className="text-sm font-medium text-foreground">{entry.label}</p>
                         <p className="mt-0.5 text-[11px] uppercase tracking-wide text-foreground/35">
-                          {entry.system}
-                          {entry.code ? ` • ${entry.code}` : " • provisional"}
+                          {entry.system.replaceAll("_", " ")}
+                          {entry.code ? ` • ${entry.code}` : ""}
                         </p>
                       </div>
                       <span className="text-[11px] text-foreground/35">

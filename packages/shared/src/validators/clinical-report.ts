@@ -120,7 +120,7 @@ export const ClinicalTriageSchema = z.object({
 });
 
 export const ClinicalClassificationSchema = z.object({
-  system: z.literal("ICD-11"),
+  system: z.literal("provisional_symptom_cluster"),
   code: z.string().nullable(),
   label: z.string(),
   confidence: z.number().min(0).max(1),

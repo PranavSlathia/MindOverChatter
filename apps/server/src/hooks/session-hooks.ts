@@ -237,6 +237,12 @@ export function registerSessionHooks(): void {
         periodEnd: sess?.endedAt ?? new Date(),
       });
 
+      // Also update the denormalized summary on the sessions row
+      await db
+        .update(sessionsTable)
+        .set({ summary: content, themes: themes.length > 0 ? themes : null })
+        .where(eq(sessionsTable.id, ctx.sessionId));
+
       console.log(`[session-hooks] Persisted session summary for session ${ctx.sessionId}`);
 
       // Send the real summary to Mem0

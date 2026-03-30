@@ -292,35 +292,42 @@ async function persistProvenance(
         continue;
       }
 
-      // Insert new memory row
+      // Insert new memory row — store Mem0's internal ID for cross-system linkage
       const [inserted] = await db
         .insert(memories)
         .values({
           userId,
           content: item.content,
           memoryType: item.memoryType as ValidMemoryType,
-          importance: item.confidence, // Use confidence as importance for now
+          importance: item.confidence,
           confidence: item.confidence,
           sourceSessionId: sessionId,
           sourceMessageId: userMessageId,
+          mem0Id: item.id,
         })
         .returning();
 
       // If this was an UPDATE with a superseded memory, link the old one
+      // Look up by mem0_id (Mem0's internal ID), not Drizzle's UUID
       if (
         item.event === "UPDATE" &&
         item.supersededId &&
         inserted
       ) {
-        await db
+        const result = await db
           .update(memories)
           .set({ supersededBy: inserted.id })
-          .where(eq(memories.id, item.supersededId));
+          .where(eq(memories.mem0Id, item.supersededId));
+        if (result.rowCount && result.rowCount > 0) {
+          console.log(
+            `[memory-provenance] superseded mem0_id=${item.supersededId} → ${inserted.id}`,
+          );
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(
-        `Memory provenance persistence error for item ${item.id}: ${message}`,
+      console.warn(
+        `[memory-provenance] error for item ${item.id}: ${message}`,
       );
       // Continue to next item — never crash
     }

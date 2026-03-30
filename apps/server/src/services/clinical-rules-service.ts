@@ -316,7 +316,7 @@ export function buildClinicalClassifications(input: {
       0.9,
     );
     classifications.push({
-      system: "ICD-11",
+      system: "provisional_symptom_cluster",
       code: null,
       label: rule.label,
       confidence,

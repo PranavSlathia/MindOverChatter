@@ -14,7 +14,7 @@ const envSchema = z.object({
   GEMINI_ENABLED: z.coerce.boolean().default(false),
   CODEX_ENABLED: z.coerce.boolean().default(false),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash-lite"),
-  CODEX_MODEL: z.string().default("o3-mini"),
+  CODEX_MODEL: z.string().default("gpt-5.1-codex-mini"),
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });

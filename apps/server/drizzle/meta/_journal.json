@@ -162,6 +162,13 @@
       "when": 1774525342949,
       "tag": "0021_workable_kabuki",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1774855267840,
+      "tag": "0022_overjoyed_wild_child",
+      "breakpoints": true
     }
   ]
 }

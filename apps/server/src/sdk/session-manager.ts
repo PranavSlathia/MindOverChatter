@@ -32,6 +32,7 @@ interface Session {
   createdAt: number;
   initialMemories?: MemoryContextItem[];
   skillContent: string[];
+  startupSkillNames: string[]; // Names of skills loaded at session creation
   contextInjections: string[];
   injectedSkillNames: Set<string>;
   currentMode: SessionMode | null;
@@ -247,6 +248,30 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
     let stderr = "";
     let settled = false;
 
+    // Buffer early chunks to strip hook contamination before streaming to UI.
+    // The LLM may echo "[Category N] — ..." from global hooks in the first
+    // chunk(s). We hold text until the contamination prefix is fully received
+    // (or we're confident there is none), then flush the cleaned remainder.
+    let earlyBuffer = "";
+    let contaminationStripped = false;
+    const CONTAMINATION_RE = /^\[Category \d+\]\s*[-—]+\s*[^\n]*(?:\n+(?:---\n+)?)?/;
+    const DIRECT_TASK_RE = /^Direct task\s*[-—]+\s*no agent needed\.?\s*\n*/i;
+    const wrappedOnChunk = (text: string) => {
+      if (contaminationStripped) {
+        onChunk(text);
+        return;
+      }
+      earlyBuffer += text;
+      // Wait until we have a newline (end of potential prefix) or 200+ chars
+      if (!earlyBuffer.includes("\n") && earlyBuffer.length < 200) return;
+      // Strip contamination from the buffered start
+      let cleaned = earlyBuffer.replace(CONTAMINATION_RE, "");
+      cleaned = cleaned.replace(DIRECT_TASK_RE, "");
+      contaminationStripped = true;
+      const trimmed = cleaned.trimStart();
+      if (trimmed) onChunk(trimmed);
+    };
+
     const settle = (result: { ok: true; text: string } | { ok: false; error: Error }) => {
       if (settled) return;
       settled = true;
@@ -322,7 +347,7 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           const event = JSON.parse(trimmed) as Record<string, unknown>;
           extractTextFromEvent(
             event,
-            onChunk,
+            wrappedOnChunk,
             () => fullResponse,
             (text) => {
               fullResponse += text;
@@ -334,7 +359,7 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           // Treat it as a text chunk directly.
           if (trimmed) {
             fullResponse += trimmed;
-            onChunk(trimmed);
+            wrappedOnChunk(trimmed);
           }
         }
       }
@@ -372,7 +397,7 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           const event = JSON.parse(lineBuffer.trim()) as Record<string, unknown>;
           extractTextFromEvent(
             event,
-            onChunk,
+            wrappedOnChunk,
             () => fullResponse,
             (text) => {
               fullResponse += text;
@@ -383,9 +408,18 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           // Raw text in the buffer — only use if we have no response yet
           if (!fullResponse && lineBuffer.trim()) {
             fullResponse = lineBuffer.trim();
-            onChunk(fullResponse);
+            wrappedOnChunk(fullResponse);
           }
         }
+      }
+
+      // Flush any remaining early buffer that wasn't streamed yet
+      if (!contaminationStripped && earlyBuffer) {
+        let cleaned = earlyBuffer.replace(CONTAMINATION_RE, "");
+        cleaned = cleaned.replace(DIRECT_TASK_RE, "");
+        contaminationStripped = true;
+        const trimmedClean = cleaned.trimStart();
+        if (trimmedClean) onChunk(trimmedClean);
       }
 
       if (code !== 0) {
@@ -396,9 +430,7 @@ export function spawnClaudeStreaming(prompt: string, onChunk: (chunk: string) =>
           ),
         });
       } else {
-        // Strip hook contamination: global UserPromptSubmit hooks inject
-        // routing instructions (e.g., "[Category 6] — Direct task...") into
-        // the LLM's context. The LLM echoes them at the start of its response.
+        // Also strip from the stored response (for session history)
         const cleaned = stripHookContamination(fullResponse.trim());
         settle({ ok: true, text: cleaned });
       }
@@ -514,6 +546,7 @@ function extractTextFromEvent(
 export async function createSdkSession(
   initialMemories?: MemoryContextItem[],
   skillContent?: string[],
+  startupSkillNames?: string[],
 ): Promise<string> {
   const id = randomUUID();
   sessions.set(id, {
@@ -522,11 +555,15 @@ export async function createSdkSession(
     createdAt: Date.now(),
     initialMemories,
     skillContent: skillContent ?? [],
+    startupSkillNames: startupSkillNames ?? [],
     contextInjections: [],
     injectedSkillNames: new Set(),
     currentMode: null,
     directiveAuthority: null,
   });
+  if (startupSkillNames && startupSkillNames.length > 0) {
+    console.log(`[sdk-session] Created with skills: ${startupSkillNames.join(", ")}`);
+  }
   return id;
 }
 
@@ -637,9 +674,9 @@ export function isSessionActive(sdkSessionId: string): boolean {
 export function getActiveSkillNames(sdkSessionId: string): string[] {
   const session = sessions.get(sdkSessionId);
   if (!session) return [];
-  // Startup skills are in skillContent (unnamed), but injectedSkillNames tracks dynamic ones.
-  // Return the dynamic set — these are the named skills the supervisor activated.
-  return [...session.injectedSkillNames];
+  // Combine startup skills (loaded at session creation) + dynamically injected skills
+  const all = new Set([...session.startupSkillNames, ...session.injectedSkillNames]);
+  return [...all];
 }
 
 /**
@@ -803,7 +840,7 @@ export function selectRelevantSkills(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   formulation: Record<string, any> | null,
   isReturningUser = false,
-): string[] {
+): { content: string[]; names: string[] } {
   const selected = new Set<string>();
 
   // Always include assessment-flow if available
@@ -824,10 +861,12 @@ export function selectRelevantSkills(
     // New user — no clinical picture yet; general probing provides breadth
     const generalContent = allSkills.get("probing-general.md");
     const base: string[] = [];
-    if (generalContent) base.push(generalContent);
-    if (depthContentEarly) base.push(depthContentEarly);
-    if (assessmentContent) base.push(assessmentContent);
-    return directionContent ? [...base, directionContent] : base;
+    const baseNames: string[] = [];
+    if (generalContent) { base.push(generalContent); baseNames.push("probing-general.md"); }
+    if (depthContentEarly) { base.push(depthContentEarly); baseNames.push("probing-depth.md"); }
+    if (assessmentContent) { base.push(assessmentContent); baseNames.push("assessment-flow.md"); }
+    if (directionContent) { base.push(directionContent); baseNames.push("therapeutic-direction.md"); }
+    return { content: base, names: baseNames };
   }
 
   // ── Domain signal matching from activeStates ──────────────────
@@ -915,18 +954,19 @@ export function selectRelevantSkills(
 
   // Build final content array: clinical probing → general (if fallback) → longitudinal → developmental → depth → assessment-flow → therapeutic-direction
   const result: string[] = [];
+  const resultNames: string[] = [];
   for (const filename of clinicalProbingFiles) {
     const content = allSkills.get(filename);
-    if (content) result.push(content);
+    if (content) { result.push(content); resultNames.push(filename); }
   }
-  if (includeGeneral && generalContent) result.push(generalContent);
-  if (longitudinalContent) result.push(longitudinalContent);
-  if (developmentalContent) result.push(developmentalContent);
-  if (depthContent) result.push(depthContent);
-  if (assessmentContent) result.push(assessmentContent);
-  if (directionContent) result.push(directionContent);
+  if (includeGeneral && generalContent) { result.push(generalContent); resultNames.push("probing-general.md"); }
+  if (longitudinalContent) { result.push(longitudinalContent); resultNames.push("probing-longitudinal.md"); }
+  if (developmentalContent) { result.push(developmentalContent); resultNames.push("probing-development.md"); }
+  if (depthContent) { result.push(depthContent); resultNames.push("probing-depth.md"); }
+  if (assessmentContent) { result.push(assessmentContent); resultNames.push("assessment-flow.md"); }
+  if (directionContent) { result.push(directionContent); resultNames.push("therapeutic-direction.md"); }
 
-  return result;
+  return { content: result, names: resultNames };
 }
 
 /**

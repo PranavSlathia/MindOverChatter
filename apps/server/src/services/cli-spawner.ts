@@ -7,6 +7,7 @@
 // All spawns: stdin pipe, /tmp cwd, CLAUDECODE stripped, timeout+SIGTERM.
 
 import { spawn } from "node:child_process";
+import { Codex } from "@openai/codex-sdk";
 import { env } from "../env.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ function getGeminiArgs(model?: string): string[] {
 
 function getCodexArgs(model?: string): string[] {
   // Codex CLI uses `codex exec` for non-interactive execution.
-  // The prompt is passed via -p/--prompt flag, NOT stdin.
+  // The prompt is passed as a positional arg (NOT -p, which means --profile).
   const args: string[] = ["exec"];
   if (model) {
     args.push("--model", model);
@@ -151,9 +152,12 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
     }
 
     // For Claude: prompt via stdin (avoids ARG_MAX on large prompts)
-    // For Gemini/Codex: prompt via -p flag (required for headless mode)
-    if (cli !== "claude") {
+    // For Gemini: prompt via -p flag (required for headless mode)
+    // For Codex: prompt as positional arg (-p means --profile in Codex, NOT --prompt)
+    if (cli === "gemini") {
       args.push("-p", prompt);
+    } else if (cli === "codex") {
+      args.push(prompt);
     }
 
     const child = spawn(binary, args, { env: cleanEnv, cwd: "/tmp" });
@@ -204,38 +208,83 @@ export function spawnCliForJson(options: CliSpawnOptions): Promise<string | null
   });
 }
 
+// ── Codex SDK singleton ───────────────────────────────────────────
+// Uses local CLI login (no API key needed). The SDK wraps the `codex`
+// CLI binary and communicates via stdin/stdout JSONL.
+let codexInstance: Codex | null = null;
+function getCodexSdk(): Codex {
+  if (!codexInstance) {
+    codexInstance = new Codex();
+  }
+  return codexInstance;
+}
+
 /**
- * Try Gemini first, fall back to Claude Haiku if Gemini fails.
+ * Run a prompt through the Codex SDK (uses local CLI login, no API key).
  *
- * Use this for supervisor and validator tasks where we want the fastest
- * available model but need reliability. Gemini is preferred (free tier)
- * but may hit rate limits (429) or capacity issues. Claude Haiku is the
- * reliable fallback.
+ * Replaces the old CLI spawn approach. The SDK handles all the JSONL
+ * communication with the codex binary under the hood.
  *
- * @returns The raw output string, or null if both fail.
+ * @returns The agent's text response, or null on failure/timeout.
  */
-export async function spawnWithGeminiFallback(options: {
+export async function spawnWithCodexSdk(options: {
   prompt: string;
   timeoutMs: number;
   label: string;
 }): Promise<string | null> {
   const { prompt, timeoutMs, label } = options;
 
-  // Use Gemini as the primary (and only) lightweight model.
-  // No Haiku fallback — CLI spawning is too slow for sequential fallback chains.
-  const result = await spawnCliForJson({
-    cli: "gemini",
-    model: env.GEMINI_MODEL,
-    prompt,
-    timeoutMs,
-    label: `${label}/gemini`,
-  });
+  try {
+    const codex = getCodexSdk();
+    const thread = codex.startThread({
+      model: env.CODEX_MODEL,
+      workingDirectory: "/tmp",
+      skipGitRepoCheck: true,
+      approvalPolicy: "never",
+      sandboxMode: "read-only",
+      modelReasoningEffort: "medium",
+    });
 
-  if (result) {
-    console.log(`[${label}] Gemini succeeded`);
-  } else {
-    console.warn(`[${label}] Gemini failed — no fallback`);
+    // Race the SDK call against a timeout
+    const result = await Promise.race([
+      thread.run(prompt),
+      new Promise<null>((resolve) => {
+        setTimeout(() => {
+          console.warn(`[${label}/codex-sdk] timeout after ${timeoutMs}ms`);
+          resolve(null);
+        }, timeoutMs);
+      }),
+    ]);
+
+    if (!result) return null;
+
+    const text = result.finalResponse ?? "";
+    if (text) {
+      console.log(`[${label}/codex-sdk] succeeded (${text.length} chars)`);
+    } else {
+      console.warn(`[${label}/codex-sdk] empty response`);
+      return null;
+    }
+
+    return text;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[${label}/codex-sdk] error: ${message}`);
+    return null;
   }
+}
 
-  return result;
+/**
+ * Primary lightweight model for supervisor/validator tasks.
+ * Uses Codex SDK (local CLI login, no API key).
+ * Falls back gracefully — returns null if Codex is unavailable.
+ *
+ * @returns The raw output string, or null on failure.
+ */
+export async function spawnWithGeminiFallback(options: {
+  prompt: string;
+  timeoutMs: number;
+  label: string;
+}): Promise<string | null> {
+  return spawnWithCodexSdk(options);
 }

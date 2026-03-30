@@ -149,7 +149,7 @@ export async function initializeSdkSessionForUser(
 
   const isReturningUser = options.isReturningUser ?? await computeIsReturningUser(user.id);
   const allSkills = loadSkillFiles();
-  const selectedSkills = selectRelevantSkills(
+  const { content: selectedSkills, names: selectedSkillNames } = selectRelevantSkills(
     allSkills,
     formulation?.snapshot ?? null,
     isReturningUser,
@@ -158,6 +158,7 @@ export async function initializeSdkSessionForUser(
   const sdkSessionId = await createSdkSession(
     mappedMemories.length > 0 ? mappedMemories : undefined,
     selectedSkills,
+    selectedSkillNames,
   );
 
   const profileContext = formatProfileContext(user);

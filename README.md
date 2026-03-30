@@ -59,6 +59,7 @@ Turborepo monorepo because we're organized like that.
 | Frontend | React 19 + Vite 6 + Tailwind v4 + Zustand | fast, pretty, no drama |
 | Backend | Hono 4.x + Drizzle ORM + PostgreSQL 16 | type-safe from DB to UI via Hono RPC |
 | AI Brain | Claude CLI (local) + Claude Sonnet 4 | conversations that actually think |
+| Session Supervisor | Codex SDK + gpt-4.1-codex-mini | real-time skill selection + depth tracking |
 | Memory | Mem0 + pgvector | cross-session memory with provenance tracking |
 | Voice | faster-whisper (base) | speech-to-text that doesn't butcher Hindi |
 | Emotion | Human.js (face) + librosa (voice) | reading the room (literally) |
@@ -226,7 +227,7 @@ Distinct from the formulation (which models the user's state), the **therapy pla
   "next_session_focus": "string",  // max 300 chars
   "recommended_session_mode":  "follow_support|assess_map|deepen_history|challenge_pattern|consolidate_close",
   "directive_authority":       "low|medium|high",
-  "engagement_notes":          "string"  // max 200 chars, how to open the next session
+  "engagement_notes":          "string"  // max 500 chars, how to open the next session
 }
 ```
 
@@ -244,9 +245,11 @@ onStart hooks (sequential, all awaited):
   therapy-plan-injection      → injects internal therapy plan + initialises session mode
 
 onEnd hooks (critical first, then background fire-and-forget):
-  session-summary    [critical]     → Claude call → structured JSON → session_summaries table
+  session-summary    [critical]     → Claude call → structured JSON → session_summaries table + sessions.summary
   formulation        [background]   → regenerates formulation from all evidence
   therapy-plan       [background]   → evolves therapy plan for next session
+  clinical-handoff   [background]   → generates clinician-facing handoff report
+  user-memory-blocks [background]   → rewrites 7 named memory blocks
   therapeutic-calibration [background] → updates communication style notes (see below)
 ```
 
@@ -277,7 +280,8 @@ Three independent memory layers, each with different granularity and lifetime:
 **1. Mem0 episodic memories** — extracted after every session by a Claude call, stored in PostgreSQL with pgvector embeddings (BAAI/bge-m3, 1024-dim). Each memory carries:
 - `memoryType`: one of 12 typed categories (`profile_fact`, `relationship`, `goal`, `coping_strategy`, `recurring_trigger`, `life_event`, `symptom_episode`, `unresolved_thread`, `safety_critical`, `win`, `session_summary`, `formative_experience`)
 - Full provenance: `source_session_id`, `source_message_id`, `confidence`, `last_confirmed_at`
-- Contradiction handling: memories are **superseded** (not deleted) when contradicted — the historical record is preserved
+- Cross-system linkage: `mem0_id` links each Drizzle row back to Mem0's internal ID for reliable supersession
+- Contradiction handling: memories are **superseded** (not deleted) when contradicted — the historical record is preserved. Supersession uses `mem0_id` lookup to correctly link old → new memories.
 
 Retrieval at session start uses dual-strategy search: semantic similarity (pgvector cosine) + temporal recency, merged and capped for context budget.
 

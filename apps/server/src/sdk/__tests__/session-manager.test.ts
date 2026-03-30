@@ -381,7 +381,7 @@ describe("SDK Session Manager", () => {
     };
 
     it("returns only assessment-flow when no formulation", () => {
-      const result = selectRelevantSkills(makeSkillMap(), null);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), null);
       expect(result).toEqual(["# Assessment flow"]);
     });
 
@@ -390,7 +390,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toEqual(["# Assessment flow"]);
     });
 
@@ -399,7 +399,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [{ label: "Low energy", domain: "vitality", confidence: 0.7 }],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Depression probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -409,7 +409,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [{ label: "Restlessness", domain: "groundedness", confidence: 0.3 }],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Anxiety probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -419,7 +419,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [{ label: "Isolation", domain: "connection", confidence: 0.6 }],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Relationship probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -429,7 +429,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [{ label: "Grief after loss", domain: "meaning", confidence: 0.8 }],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Grief probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -439,7 +439,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "" },
         activeStates: [{ label: "Panic attacks", domain: "meaning", confidence: 0.4 }],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Panic probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -449,7 +449,7 @@ describe("SDK Session Manager", () => {
         formulation: { presentingTheme: "Persistent worry and nervousness about work" },
         activeStates: [],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       expect(result).toContain("# Anxiety probing");
       expect(result).toContain("# Assessment flow");
     });
@@ -465,7 +465,7 @@ describe("SDK Session Manager", () => {
           { label: "Relationship conflict", domain: "connection", confidence: 0.5 },
         ],
       };
-      const result = selectRelevantSkills(makeSkillMap(), formulation);
+      const { content: result } = selectRelevantSkills(makeSkillMap(), formulation);
       // Should be at most 2 probing + 1 assessment = 3 total
       expect(result.length).toBeLessThanOrEqual(3);
       expect(result).toContain("# Assessment flow");
@@ -473,7 +473,7 @@ describe("SDK Session Manager", () => {
 
     it("returns empty array when no assessment-flow and no formulation", () => {
       const emptyMap = new Map<string, string>();
-      const result = selectRelevantSkills(emptyMap, null);
+      const { content: result } = selectRelevantSkills(emptyMap, null);
       expect(result).toEqual([]);
     });
   });

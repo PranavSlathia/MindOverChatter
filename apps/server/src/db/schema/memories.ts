@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   real,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { userProfiles } from "./user-profiles";
 
@@ -35,10 +36,13 @@ export const memories = pgTable("memories", {
   sourceSessionId: uuid("source_session_id"), // Which session this was extracted from
   sourceMessageId: uuid("source_message_id"), // Specific message that produced this memory
   lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }), // When user last reaffirmed
+  mem0Id: text("mem0_id"), // Mem0's internal ID — links Drizzle provenance to Mem0 vector store
   supersededBy: uuid("superseded_by"), // Self-referential FK — points to newer contradicting memory
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("memories_mem0_id_idx").on(table.mem0Id),
+]);
 
 export type Memory = typeof memories.$inferSelect;
 export type NewMemory = typeof memories.$inferInsert;

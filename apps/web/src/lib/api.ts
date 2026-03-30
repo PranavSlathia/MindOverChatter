@@ -118,6 +118,14 @@ type EndSessionSuccess = InferResponseType<
 type SubmitAssessmentSuccess = InferResponseType<typeof client.api.assessments.$post, 201>;
 type SubmitCBTSuccess = InferResponseType<typeof client.api.assessments.cbt.$post, 201>;
 type SubmitEmotionSuccess = InferResponseType<typeof client.api.emotions.$post, 201>;
+type GetLatestClinicalHandoffReportSuccess = InferResponseType<
+  typeof client.api.reports.latest.$get,
+  200
+>;
+type GenerateClinicalHandoffReportSuccess = InferResponseType<
+  typeof client.api.reports.generate.$post,
+  200
+>;
 type CreateMoodLogSuccess = InferResponseType<(typeof client.api)["mood-logs"]["$post"], 201>;
 type DeleteSessionSuccess = InferResponseType<(typeof client.api.sessions)[":id"]["$delete"], 200>;
 type ResumeSessionSuccess = InferResponseType<
@@ -502,15 +510,18 @@ export const api = {
     await throwIfError(res);
   },
 
-  getLatestClinicalHandoffReport: async (): Promise<ClinicalHandoffReport> => {
-    const response = await fetch(`${API_BASE}/api/reports/latest`);
-    const data = await handleResponse<{ report: ClinicalHandoffReport }>(response);
+  getLatestClinicalHandoffReport: async (): Promise<ClinicalHandoffReport | null> => {
+    const res = await client.api.reports.latest.$get();
+    if (res.status === 404) return null;
+    await throwIfError(res);
+    const data = await res.json() as GetLatestClinicalHandoffReportSuccess;
     return data.report;
   },
 
   generateClinicalHandoffReport: async (): Promise<ClinicalHandoffReport> => {
-    const response = await fetch(`${API_BASE}/api/reports/generate`, { method: "POST" });
-    const data = await handleResponse<{ report: ClinicalHandoffReport }>(response);
+    const res = await client.api.reports.generate.$post();
+    await throwIfError(res);
+    const data = await res.json() as GenerateClinicalHandoffReportSuccess;
     return data.report;
   },
 

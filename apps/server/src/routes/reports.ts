@@ -8,12 +8,17 @@ import {
   renderClinicalHandoffPdf,
 } from "../services/clinical-handoff-report-service.js";
 
+async function getExistingReport(userId: string) {
+  return getLatestClinicalHandoffReport(userId);
+}
+
 const app = new Hono()
   .get("/latest", async (c) => {
     const user = await getOrCreateUser();
-    const report =
-      (await getLatestClinicalHandoffReport(user.id)) ??
-      (await generateAndPersistClinicalHandoffReport(user.id, "manual"));
+    const report = await getExistingReport(user.id);
+    if (!report) {
+      return c.json({ error: "No clinical handoff report exists yet" }, 404);
+    }
 
     return c.json(ClinicalHandoffReportResponseSchema.parse({ report }));
   })
@@ -24,9 +29,10 @@ const app = new Hono()
   })
   .get("/latest.pdf", async (c) => {
     const user = await getOrCreateUser();
-    const report =
-      (await getLatestClinicalHandoffReport(user.id)) ??
-      (await generateAndPersistClinicalHandoffReport(user.id, "manual"));
+    const report = await getExistingReport(user.id);
+    if (!report) {
+      return c.json({ error: "No clinical handoff report exists yet" }, 404);
+    }
     const pdf = renderClinicalHandoffPdf(report);
     return new Response(Buffer.from(pdf), {
       status: 200,
@@ -38,9 +44,10 @@ const app = new Hono()
   })
   .get("/latest.fhir", async (c) => {
     const user = await getOrCreateUser();
-    const report =
-      (await getLatestClinicalHandoffReport(user.id)) ??
-      (await generateAndPersistClinicalHandoffReport(user.id, "manual"));
+    const report = await getExistingReport(user.id);
+    if (!report) {
+      return c.json({ error: "No clinical handoff report exists yet" }, 404);
+    }
     return c.json(renderClinicalHandoffFhirBundle(report));
   });
 

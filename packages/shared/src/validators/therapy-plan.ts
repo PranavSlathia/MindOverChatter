@@ -44,7 +44,7 @@ export const TherapyPlanSchema = z.object({
   natural_callbacks: z.array(NaturalCallbackSchema).max(5),
   recommended_session_mode: SessionModeEnum.optional(),
   directive_authority: z.enum(["low", "medium", "high"]).optional(),
-  engagement_notes: z.string().max(200).optional(),
+  engagement_notes: z.string().max(500).optional(),
 });
 
 // Only goals are returned to the frontend — everything else is internal

@@ -36,24 +36,20 @@
 - Validators: `packages/shared/src/validators/research.ts`
 - Invariant rules documented in `apps/server/src/research/README.md`
 
-## Migration Protocol (drizzle-kit CLI TTY issue)
+## Migration Protocol
 
-drizzle-kit 0.31.9 CLI `npx drizzle-kit generate` works in some environments (worked for 0017 migration in Claude Code). If it fails with TTY issues, use the programmatic API instead:
+**Preferred: CLI approach.** `pnpm db:generate` runs `NODE_OPTIONS='--import tsx' pnpm --filter @moc/server drizzle-kit generate`.
 
-```js
-// ESM only — drizzle-kit/api.mjs works, CJS api.js hangs
-import { generateDrizzleJson, generateMigration } from 'drizzle-kit/api.mjs';
-// Load schemas via tsx ESM hook: node --import apps/server/node_modules/tsx/dist/esm/index.mjs
-// Apply SQL via postgres.js (not pg — this project uses postgres.js, no pg package)
-import postgres from 'apps/server/node_modules/postgres/src/index.js';
-```
+Prerequisites:
+- `tsx` must be installed as a root workspace devDependency (added 2026-03-26)
+- `esbuild` must be installed as server devDependency (added 2026-03-26 to fix platform mismatch from Docker)
+- The `pnpm --filter @moc/server drizzle-kit generate` syntax depends on pnpm version; if it fails with "None of the selected packages has a drizzle-kit script", run directly from server dir: `cd apps/server && NODE_OPTIONS='--import tsx' ./node_modules/.bin/drizzle-kit generate`
 
-Key pitfalls:
-- `drizzle-kit/api.js` (CJS) hangs when imported — use `api.mjs` (ESM) only
-- tsx ESM hook: `--import apps/server/node_modules/tsx/dist/esm/index.mjs`
-- tsx CJS hook: `apps/server/node_modules/tsx/dist/cjs/index.cjs` (but api.js hangs regardless)
-- `generateMigration` resolvers return immediately when `missingItems.length === 0` (add-only migrations)
+**Programmatic API (drizzle-kit/api) hangs as of 0.31.9.** Both CJS (`api.js`) and ESM (`api.mjs`, resolved via `drizzle-kit/api` export) hang during import. Do not attempt programmatic migration generation.
+
+Key notes:
 - No `pg` package in this project; use `postgres` (postgres.js) for raw SQL execution
+- esbuild platform mismatch (`@esbuild/aix-ppc64` present but `darwin-arm64` needed) was caused by Docker node_modules contamination. Adding `esbuild` as explicit devDependency resolves this.
 
 ## API Patterns
 
