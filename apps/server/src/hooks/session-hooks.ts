@@ -360,9 +360,16 @@ export function registerSessionHooks(): void {
           openCount++;
         }
 
-        console.log(
-          `[formulation-hook] Inserted reflective questions for user ${ctx.userId} (session ${ctx.sessionId})`,
-        );
+        const insertedCount = openCount - existingRows.filter((r) => r.status === "open").length;
+        if (insertedCount > 0) {
+          console.log(
+            `[formulation-hook] Inserted ${insertedCount} reflective questions for user ${ctx.userId} (session ${ctx.sessionId})`,
+          );
+        } else {
+          console.log(
+            `[formulation-hook] Reflective questions: cap full (${openCount}/5 open), no new questions added (session ${ctx.sessionId})`,
+          );
+        }
       } catch (err) {
         // Fire-and-forget — don't let question insertion failure break the hook
         console.error(

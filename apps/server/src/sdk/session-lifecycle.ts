@@ -214,19 +214,42 @@ export async function runOnEnd(ctx: OnEndContext): Promise<void> {
     await entry.hook(ctx);
   }
 
-  // Chain background hooks sequentially, fire-and-forget
+  // Chain background hooks sequentially, fire-and-forget.
+  // Each hook gets one retry after 5s delay (Claude CLI transient failures).
   if (background.length > 0) {
     (async () => {
+      const failed: Array<{ name: string; error: string }> = [];
       for (const entry of background) {
         try {
           console.log(`[session-lifecycle] onEnd "${entry.name}" (background)`);
           await entry.hook(ctx);
         } catch (err) {
-          console.error(
-            `[session-lifecycle] onEnd "${entry.name}" (background) failed:`,
-            err,
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[session-lifecycle] onEnd "${entry.name}" failed (will retry): ${msg}`,
           );
-          // Continue with subsequent background hooks
+          failed.push({ name: entry.name, error: msg });
+        }
+      }
+      // Retry failed hooks once after a delay (transient Claude CLI failures)
+      if (failed.length > 0) {
+        console.log(
+          `[session-lifecycle] retrying ${failed.length} failed hooks in 5s: ${failed.map((f) => f.name).join(", ")}`,
+        );
+        await new Promise((r) => setTimeout(r, 5000));
+        for (const entry of background.filter((e) =>
+          failed.some((f) => f.name === e.name),
+        )) {
+          try {
+            console.log(`[session-lifecycle] onEnd "${entry.name}" (retry)`);
+            await entry.hook(ctx);
+            console.log(`[session-lifecycle] onEnd "${entry.name}" (retry) succeeded`);
+          } catch (err) {
+            console.error(
+              `[session-lifecycle] onEnd "${entry.name}" (retry) FAILED permanently:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
         }
       }
     })().catch((err) => {
